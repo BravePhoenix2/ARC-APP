@@ -1,0 +1,299 @@
+import Image from "next/image";
+import Link from "next/link";
+import ArticLogo from "@/components/ArticLogo";
+import Eyebrow from "@/components/Eyebrow";
+import ThemeToggle from "@/components/ThemeToggle";
+import { OrbitCircle, OrbitOval, OrbitSquare, OrbitTriangle } from "@/components/orbit-shapes";
+
+const FEATURES = [
+  {
+    title: "USDC gas fees",
+    description: "Every transaction is priced and paid in USDC — no need to hold a separate gas token.",
+    Icon: OrbitCircle,
+    color: "#7C74C4",
+  },
+  {
+    title: "No volatile gas costs",
+    description: "Fees stay predictable and stable, so you always know what a mint or trade will cost.",
+    Icon: OrbitSquare,
+    color: "#EF476F",
+  },
+  {
+    title: "Mint NFTs instantly",
+    description: "Sub-second finality on Arc means your mint confirms almost the moment you click.",
+    Icon: OrbitTriangle,
+    color: "#362A67",
+  },
+  {
+    title: "Sell physical art too",
+    description: "Pair a digital collectible with a real-world piece and ship it straight to the buyer.",
+    Icon: OrbitOval,
+    color: "#F49BC5",
+  },
+] as const;
+
+const HOW_IT_WORKS = [
+  {
+    step: "01",
+    title: "Connect your wallet",
+    description: "Link a wallet on Arc — no separate gas token to buy first, USDC covers everything.",
+  },
+  {
+    step: "02",
+    title: "Browse or mint",
+    description: "Explore live drops and the secondary market, or launch your own collection in minutes.",
+  },
+  {
+    step: "03",
+    title: "Pay in USDC",
+    description: "Every mint, bid, and purchase is priced in dollars — what you see is what you pay.",
+  },
+  {
+    step: "04",
+    title: "Own it or ship it",
+    description: "Hold and resell your NFT, or claim the physical piece behind it and have it shipped to you.",
+  },
+] as const;
+
+const FLOW_STEPS = [
+  { step: "01", status: "DRAFT", statusBg: "#C9C7CD", statusText: "#362A67", title: "Collection created" },
+  { step: "02", status: "UPCOMING", statusBg: "#F49BC5", statusText: "#362A67", title: "Countdown live" },
+  { step: "03", status: "LIVE", statusBg: "#2FE6A6", statusText: "#0B3B2E", title: "Minting open" },
+  { step: "04", status: "MINTED OUT", statusBg: "#362A67", statusText: "#FFFFFF", title: "Supply gone" },
+  { step: "05", status: "LISTED", statusBg: "#7C74C4", statusText: "#FFFFFF", title: "Secondary market" },
+  { step: "06", status: "SETTLED", statusBg: "#EF476F", statusText: "#FFFFFF", title: "USDC, on-chain" },
+] as const;
+
+const FLOW_STATS = [
+  { label: "COLLECTIONS LIVE", value: "—" },
+  { label: "ITEMS MINTED", value: "—" },
+  { label: "VOLUME SETTLED", value: "—" },
+] as const;
+
+const TRENDING_DROPS = [
+  { image: "/trend-1.png", title: "Telescope Study No. 3", status: "UPCOMING" },
+  { image: "/trend-2.png", title: "Ascent", status: "LIVE" },
+  { image: "/trend-3.png", title: "Reaching Hand", status: "LIVE" },
+  { image: "/trend-4.png", title: "Pencil & Aperture", status: "UPCOMING" },
+] as const;
+
+const sectionHeading = "text-2xl font-extrabold uppercase tracking-[-0.01em] text-[var(--page-text)] sm:text-3xl lg:text-4xl";
+
+export default function Home() {
+  return (
+    <main className="min-h-screen w-full bg-[var(--page-bg)] text-[var(--page-text)]">
+      <div className="grid lg:min-h-screen lg:grid-cols-2">
+        <div className="relative flex min-h-[420px] flex-col px-6 py-6 sm:px-10 lg:px-16 xl:px-20">
+          <header className="flex items-center justify-between">
+            <ArticLogo className="text-xl sm:text-2xl" />
+
+            <div className="flex items-center gap-6 lg:gap-8">
+              <nav className="hidden items-center gap-6 text-sm font-medium text-[var(--muted-text-strong)] md:flex lg:gap-8">
+                <a href="#works" className="transition hover:text-[var(--page-text)]">
+                  Works
+                </a>
+                <a href="#contact" className="transition hover:text-[var(--page-text)]">
+                  Contact
+                </a>
+                <a href="#about" className="transition hover:text-[var(--page-text)]">
+                  About
+                </a>
+              </nav>
+              <ThemeToggle />
+            </div>
+          </header>
+
+          <div className="flex flex-1 flex-col justify-center py-10 lg:py-0">
+            <Eyebrow className="text-[var(--faint-text)]">Live on Arc Testnet</Eyebrow>
+
+            <h1 className="max-w-[600px] text-[2.6rem] font-bold leading-[1.05] tracking-[-0.02em] text-[var(--page-text)] sm:text-[3.4rem] md:text-[4rem] lg:text-[3.4rem] xl:text-[4.2rem]">
+              Every piece of
+              <br />
+              Art is worth its price
+            </h1>
+
+            <p className="mt-5 max-w-[430px] text-sm font-medium leading-7 text-[#F49BC5] sm:text-base lg:text-lg">
+              A USDC-native art marketplace driven by creators, craft, clarity, and community.
+            </p>
+
+            <div className="mt-7 lg:mt-8">
+              <Link
+                href="/marketplace"
+                className="inline-flex items-center justify-center border border-[#EF476F] bg-[#EF476F] px-6 py-3.5 text-sm font-semibold text-white transition hover:bg-[#d73c63] sm:px-8 sm:py-4 sm:text-base"
+              >
+                Launch App
+              </Link>
+            </div>
+          </div>
+
+          <a
+            href="#works"
+            className="absolute bottom-6 left-1/2 hidden -translate-x-1/2 flex-col items-center gap-2 text-xs font-medium uppercase tracking-[0.2em] text-[var(--faint-text)] transition hover:text-[var(--page-text)] lg:flex"
+          >
+            <span>Scroll to explore</span>
+            <span className="flex h-9 w-6 items-start justify-center rounded-full border-2 border-[var(--border-soft)] p-1">
+              <span className="h-1.5 w-1.5 animate-scroll-wheel rounded-full bg-[#EF476F]" />
+            </span>
+          </a>
+        </div>
+
+        <div className="relative flex min-h-[480px] items-center justify-center overflow-hidden">
+          <Image
+            src="/fff.png"
+            alt="Illustration of a hand pinching a pencil, framed by a staircase, a cylinder, and concentric circles"
+            fill
+            sizes="(min-width: 1024px) 50vw, 100vw"
+            className="animate-fade-slide-in object-cover"
+            priority
+          />
+        </div>
+      </div>
+
+      <section id="works" className="border-t border-[var(--border-soft)] px-6 py-16 sm:px-10 sm:py-20 lg:px-16 lg:py-24 xl:px-20">
+        <div>
+          <Eyebrow className="text-[var(--faint-text)]">Why Artic</Eyebrow>
+          <h2 className={sectionHeading}>Built different.</h2>
+          <p className="mt-3 max-w-[520px] text-sm leading-7 text-[var(--muted-text)] sm:text-base">
+            Built on Arc from the ground up, so every part of buying and selling art feels instant and predictable.
+          </p>
+
+          <div className="mt-10 grid gap-x-8 gap-y-10 border-t border-[var(--border-soft)] pt-10 sm:grid-cols-2 lg:mt-14 lg:grid-cols-4 lg:pt-14">
+            {FEATURES.map((feature) => (
+              <div key={feature.title}>
+                <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-[var(--chip-bg)]">
+                  <feature.Icon width={22} height={22} color={feature.color} />
+                </span>
+                <h3 className="mt-4 text-base font-bold text-[var(--page-text)] sm:text-lg">{feature.title}</h3>
+                <p className="mt-2 text-sm leading-6 text-[var(--muted-text)]">{feature.description}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="border-t border-[var(--border-soft)] bg-[var(--section-alt-bg)] px-6 py-16 sm:px-10 sm:py-20 lg:px-16 lg:py-24 xl:px-20">
+        <div>
+          <Eyebrow className="text-[var(--faint-text)]">How it works</Eyebrow>
+          <h2 className={sectionHeading}>Four steps. Start to finish.</h2>
+          <p className="mt-3 max-w-[520px] text-sm leading-7 text-[var(--muted-text)] sm:text-base">
+            From connecting a wallet to owning the piece — nothing hidden in between.
+          </p>
+
+          <div className="mt-10 grid gap-x-8 gap-y-10 border-t border-[var(--border-soft)] pt-10 sm:grid-cols-2 lg:mt-14 lg:grid-cols-4 lg:pt-14">
+            {HOW_IT_WORKS.map((item) => (
+              <div key={item.step}>
+                <span className="font-mono text-sm font-bold tracking-[0.1em] text-[#EF476F]">[{item.step}]</span>
+                <h3 className="mt-3 text-base font-bold text-[var(--page-text)] sm:text-lg">{item.title}</h3>
+                <p className="mt-2 text-sm leading-6 text-[var(--muted-text)]">{item.description}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="border-t border-[var(--border-soft)] bg-[var(--flow-bg)] px-6 py-16 text-[#362A67] sm:px-10 sm:py-20 lg:px-16 lg:py-24 xl:px-20">
+        <div>
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <Eyebrow className="text-[#362A67]/70" dotColor="#362A67">
+                Flow
+              </Eyebrow>
+              <h2 className="text-2xl font-extrabold uppercase tracking-[-0.01em] text-[#362A67] sm:text-3xl lg:text-4xl">
+                A drop, start to finish.
+              </h2>
+            </div>
+            <span className="flex items-center gap-2 font-mono text-xs uppercase tracking-[0.15em] text-[#362A67]/70">
+              <span className="h-1.5 w-1.5 rounded-full bg-[#362A67]" />
+              Live on Arc Testnet
+            </span>
+          </div>
+
+          <div className="mt-10 overflow-x-auto lg:mt-14">
+            <div className="flex min-w-[900px] gap-8 border-t border-[#362A67]/20 pt-10 lg:pt-14">
+              {FLOW_STEPS.map((item, i) => (
+                <div key={item.step} className="relative flex-1">
+                  {i > 0 && <span className="absolute -left-4 top-3 h-1.5 w-1.5 rounded-full bg-[#362A67]/25" />}
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-xs text-[#362A67]/60">[{item.step}]</span>
+                    <span
+                      className="rounded px-2 py-0.5 font-mono text-[11px] font-semibold tracking-[0.05em]"
+                      style={{ backgroundColor: item.statusBg, color: item.statusText }}
+                    >
+                      {item.status}
+                    </span>
+                  </div>
+                  <p className="mt-3 text-sm font-semibold text-[#362A67]">{item.title}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-10 grid grid-cols-1 gap-8 border-t border-[#362A67]/20 pt-8 sm:grid-cols-3 lg:mt-12">
+            {FLOW_STATS.map((stat) => (
+              <div key={stat.label}>
+                <p className="font-mono text-xs uppercase tracking-[0.15em] text-[#362A67]/60">[:{stat.label}]</p>
+                <p className="mt-2 font-mono text-2xl font-bold tabular-nums text-[#362A67]">{stat.value}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="border-t border-[var(--border-soft)] px-6 py-16 sm:px-10 sm:py-20 lg:px-16 lg:py-24 xl:px-20">
+        <div>
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <Eyebrow className="text-[var(--faint-text)]">Trending</Eyebrow>
+              <h2 className={sectionHeading}>Trending drops</h2>
+            </div>
+            <a href="#" className="text-sm font-semibold text-[#EF476F] hover:text-[#d73c63] sm:text-base">
+              View all
+            </a>
+          </div>
+
+          <div className="mt-10 grid grid-cols-2 gap-4 border-t border-[var(--border-soft)] pt-10 sm:gap-6 lg:mt-14 lg:grid-cols-4 lg:pt-14">
+            {TRENDING_DROPS.map((item) => (
+              <div key={item.title} className="overflow-hidden bg-[var(--card-bg)]">
+                <div className="relative aspect-square">
+                  <Image src={item.image} alt={item.title} fill sizes="(min-width: 1024px) 25vw, 50vw" className="object-cover" />
+                  <span className="absolute left-3 top-3 rounded bg-white/90 px-2 py-0.5 font-mono text-[10px] font-semibold tracking-[0.05em] text-[#362A67]">
+                    {item.status}
+                  </span>
+                </div>
+                <div className="p-4">
+                  <p className="text-sm font-semibold text-[var(--page-text)]">{item.title}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <footer id="contact" className="px-6 py-8 sm:px-10 sm:py-10 lg:px-16 xl:px-20">
+        <div className="rounded-2xl bg-[var(--section-alt-bg)] px-6 py-8 shadow-[var(--card-shadow)] sm:px-10 sm:py-10">
+          <div className="flex flex-col gap-8 sm:flex-row sm:items-center sm:justify-between">
+            <ArticLogo className="text-lg" />
+
+            <nav id="about" className="flex flex-wrap items-center gap-6 text-sm font-medium text-[var(--muted-text-strong)]">
+              <a href="#works" className="transition hover:text-[var(--page-text)]">
+                Works
+              </a>
+              <a href="#contact" className="transition hover:text-[var(--page-text)]">
+                Contact
+              </a>
+              <a href="#about" className="transition hover:text-[var(--page-text)]">
+                About
+              </a>
+            </nav>
+
+            <p className="text-sm text-[var(--faint-text)]">© {new Date().getFullYear()} Artic. Built on Arc.</p>
+          </div>
+        </div>
+      </footer>
+
+      <div className="flex justify-center px-6 py-16 sm:py-20">
+        <ArticLogo className="text-4xl sm:text-6xl lg:text-8xl" />
+      </div>
+    </main>
+  );
+}

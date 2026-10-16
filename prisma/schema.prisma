@@ -1,0 +1,123 @@
+// Prisma schema for Artic. SQLite for zero-setup local dev — swap the
+// datasource provider/url to Postgres later without touching the models.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+enum ItemType {
+  NFT
+  WEB2_ART
+}
+
+// NFT lifecycle, per the mint/list flow described in the product proposal.
+enum ItemStatus {
+  UPCOMING
+  LIVE
+  MINTED_OUT
+  LISTED
+}
+
+enum ArtCategory {
+  PAINTING
+  RUG
+  COSMETIC
+  OTHER
+}
+
+enum ActivityType {
+  MINT
+  SALE
+  LISTING
+  DELIST
+  PRICE_UPDATE
+}
+
+model User {
+  id            String   @id @default(cuid())
+  walletAddress String   @unique
+  username      String?
+  avatarUrl     String?
+  bio           String?
+  isCreator     Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  items      Item[]
+  listings   Listing[]
+  activities Activity[]
+}
+
+// One table for everything uploaded — itemType tells you which half of the
+// (mostly-nullable) NFT/WEB2_ART fields is populated.
+model Item {
+  id          String   @id @default(cuid())
+  itemType    ItemType
+  title       String
+  description String?
+  imageUrl    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  creatorId String
+  creator   User   @relation(fields: [creatorId], references: [id])
+
+  // --- NFT fields ---
+  contractAddress String?
+  mintPriceUsdc   Float?
+  mintStartTime   DateTime?
+  maxSupply       Int?
+  mintedCount     Int?        @default(0)
+  rarities        Json?
+  status          ItemStatus?
+
+  // --- WEB2_ART fields ---
+  category           ArtCategory?
+  priceUsdc          Float?
+  quantityAvailable  Int?
+  sold               Boolean       @default(false)
+
+  listings   Listing[]
+  activities Activity[]
+
+  @@index([itemType])
+  @@index([status])
+}
+
+model Listing {
+  id        String   @id @default(cuid())
+  priceUsdc Float
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  itemId String
+  item   Item   @relation(fields: [itemId], references: [id])
+
+  sellerId String
+  seller   User   @relation(fields: [sellerId], references: [id])
+
+  @@index([itemId])
+  @@index([active])
+}
+
+model Activity {
+  id        String       @id @default(cuid())
+  type      ActivityType
+  priceUsdc Float?
+  createdAt DateTime     @default(now())
+
+  itemId String
+  item   Item   @relation(fields: [itemId], references: [id])
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@index([itemId])
+  @@index([createdAt])
+}
