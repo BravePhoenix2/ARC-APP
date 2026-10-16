@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import { useAccount, useBalance, useChainId, useConnect, useDisconnect, useSwitchChain } from "wagmi";
+import { useAccount, useBalance, useConnect, useDisconnect, useSwitchChain } from "wagmi";
 import { formatUnits } from "viem";
 import { arcChain } from "@/lib/arcConfig";
 
@@ -12,8 +12,15 @@ export type WalletError =
   | { type: "unknown"; message: string };
 
 function isUserRejection(err: unknown): boolean {
-  const e = err as { code?: number; name?: string } | undefined;
-  return e?.code === 4001 || e?.name === "UserRejectedRequestError";
+  const seen = new Set<unknown>();
+  let current = err;
+  while (current && typeof current === "object" && !seen.has(current)) {
+    seen.add(current);
+    const e = current as { code?: number; name?: string; cause?: unknown };
+    if (e.code === 4001 || e.name === "UserRejectedRequestError") return true;
+    current = e.cause;
+  }
+  return false;
 }
 
 /**
@@ -22,19 +29,19 @@ function isUserRejection(err: unknown): boolean {
  * balance on Arc), and helpers to connect / switch network / disconnect.
  */
 export function useWallet() {
-  const { address, isConnected, isConnecting, isReconnecting } = useAccount();
-  const chainId = useChainId();
+  const { address, chainId, status, isConnected, isConnecting, isReconnecting } = useAccount();
   const { connectAsync, connectors } = useConnect();
-  const { disconnect } = useDisconnect();
+  const { disconnect: disconnectWallet } = useDisconnect();
   const { switchChainAsync, isPending: isSwitching } = useSwitchChain();
+  const [isRequesting, setIsRequesting] = useState(false);
   const [error, setError] = useState<WalletError | null>(null);
 
   const isWrongNetwork = isConnected && chainId !== arcChain.id;
 
-  const { data: balance, isLoading: isBalanceLoading } = useBalance({
+  const { data: balance, isLoading: isBalanceLoading, isError: isBalanceError, refetch: refetchBalance } = useBalance({
     address,
     chainId: arcChain.id,
-    query: { enabled: Boolean(address) },
+    query: { enabled: isConnected && Boolean(address), refetchInterval: 15_000 },
   });
 
   const truncatedAddress = useMemo(() => {
@@ -42,30 +49,37 @@ export function useWallet() {
     return `${address.slice(0, 6)}…${address.slice(-4)}`;
   }, [address]);
 
-  const usdcBalance = balance
+  const usdcBalance = isConnected && balance
     ? Number(formatUnits(balance.value, balance.decimals)).toLocaleString(undefined, { maximumFractionDigits: 2 })
     : null;
 
   const connect = useCallback(async () => {
     setError(null);
 
-    const hasInjectedProvider = typeof window !== "undefined" && Boolean((window as { ethereum?: unknown }).ethereum);
-    const preferred = connectors.find((c) => c.id === "injected") ?? connectors[0];
-
-    if (!preferred) {
-      setError({ type: "no-wallet" });
-      return;
-    }
-    if (!hasInjectedProvider && preferred.type !== "walletConnect") {
-      setError({ type: "no-wallet" });
-      return;
-    }
-
+    setIsRequesting(true);
     try {
-      // Requesting the Arc chainId here makes the connector prompt
-      // wallet_addEthereumChain / wallet_switchEthereumChain automatically
-      // when the wallet doesn't already have Arc added or selected.
-      await connectAsync({ connector: preferred, chainId: arcChain.id });
+      const candidates = [...connectors].sort((a, b) => {
+        const priority = (id: string) => id === "metaMask" || id === "io.metamask" ? 0 : 1;
+        return priority(a.id) - priority(b.id);
+      });
+      let preferred;
+      for (const connector of candidates) {
+        if (connector.type === "injected" && await connector.getProvider()) {
+          preferred = connector;
+          break;
+        }
+      }
+      if (!preferred) {
+        setError({ type: "no-wallet" });
+        return;
+      }
+
+      // Switch separately so a rejected switch leaves a usable connected
+      // session with a visible network error and a retry/disconnect action.
+      const connection = await connectAsync({ connector: preferred });
+      if (connection.chainId !== arcChain.id) {
+        await switchChainAsync({ chainId: arcChain.id });
+      }
     } catch (err) {
       if (isUserRejection(err)) {
         setError({ type: "rejected" });
@@ -73,8 +87,10 @@ export function useWallet() {
         const message = err instanceof Error ? err.message : "Failed to connect wallet.";
         setError({ type: "unknown", message });
       }
+    } finally {
+      setIsRequesting(false);
     }
-  }, [connectAsync, connectors]);
+  }, [connectAsync, connectors, switchChainAsync]);
 
   const switchToArc = useCallback(async () => {
     setError(null);
@@ -92,16 +108,21 @@ export function useWallet() {
 
   return {
     address,
+    chainId,
+    status,
     truncatedAddress,
     isConnected,
-    isConnecting: isConnecting || isReconnecting,
+    isConnecting: isRequesting || isConnecting || isReconnecting,
     isWrongNetwork,
     isSwitching,
     usdcBalance,
+    usdcBalanceRaw: isConnected ? balance?.value : undefined,
     isBalanceLoading,
+    isBalanceError,
+    refetchBalance,
     connect,
     switchToArc,
-    disconnect,
+    disconnect: () => { setError(null); disconnectWallet(); },
     error,
     clearError: () => setError(null),
   };

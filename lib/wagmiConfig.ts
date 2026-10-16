@@ -20,7 +20,7 @@ export const wagmiConfig = createConfig({
   transports: {
     [arcChain.id]: http(arcConfig.rpcUrl),
   },
-  connectors: [injected()],
+  connectors: [injected({ target: "metaMask" }), injected()],
   // Renders the disconnected state on both the server and the first client
   // paint, then syncs real wallet state after hydration — otherwise
   // useAccount()'s isConnecting flips true on mount before the server ever

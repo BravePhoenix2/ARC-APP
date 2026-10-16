@@ -1,6 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
+import { Settings2 } from "lucide-react";
+import { arcChain } from "@/lib/arcConfig";
+import Atmosphere from "@/components/Atmosphere";
 import { Suspense } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
@@ -57,23 +61,32 @@ function ItemCard({ item }: { item: MarketplaceItem }) {
   const badge = isNft && item.status ? NFT_STATUS_STYLE[item.status] : null;
 
   return (
-    <div className="overflow-hidden rounded-xl border border-[var(--border-soft)] bg-[var(--card-bg)]">
-      <div className="relative aspect-square bg-[var(--chip-bg)]">
+    <div className="gallery-card overflow-hidden">
+      <div className="gallery-card-media relative aspect-square bg-[var(--chip-bg)]">
+        {item.imageUrl ? (
+          <Image src={item.imageUrl} alt={item.title} fill unoptimized sizes="(min-width: 1280px) 22vw, (min-width: 640px) 30vw, 45vw" className="object-cover" />
+        ) : (
+          <div className="art-placeholder absolute inset-0">
+            <span className="art-placeholder-shape" aria-hidden="true" />
+            <span className="text-[9px] uppercase tracking-[.16em]">Artwork coming soon</span>
+          </div>
+        )}
         {badge && (
           <span
-            className="absolute left-3 top-3 rounded px-2 py-0.5 font-mono text-[10px] font-semibold tracking-[0.05em]"
+            className="absolute left-3 top-3 z-10 rounded px-2 py-0.5 font-mono text-[10px] font-semibold tracking-[0.05em]"
             style={{ backgroundColor: badge.bg, color: badge.text }}
           >
             {item.status}
           </span>
         )}
         {!isNft && (
-          <span className="absolute left-3 top-3 rounded bg-white/90 px-2 py-0.5 font-mono text-[10px] font-semibold tracking-[0.05em] text-[#362A67]">
+          <span className="absolute left-3 top-3 z-10 rounded bg-white/90 px-2 py-0.5 font-mono text-[10px] font-semibold tracking-[0.05em] text-[#362A67]">
             {item.sold ? "SOLD" : item.category ? CATEGORY_LABEL[item.category] : "ART"}
           </span>
         )}
       </div>
-      <div className="space-y-1 p-4">
+      <div className="space-y-2 p-4">
+        <p className="truncate text-[10px] font-medium tracking-wide text-[var(--faint-text)]">{item.creator.username ?? `${item.creator.walletAddress.slice(0, 6)}…${item.creator.walletAddress.slice(-4)}`}</p>
         <p className="text-sm font-semibold text-[var(--page-text)]">{item.title}</p>
         <p className="text-xs text-[var(--faint-text)]">
           {isNft
@@ -116,14 +129,15 @@ function MarketplaceShell() {
   const items = data ?? [];
 
   return (
-    <main className="min-h-screen w-full bg-[var(--page-bg)] text-[var(--page-text)]">
-      <header className="sticky top-0 z-30 border-b border-[var(--border-soft)] bg-[var(--page-bg)]/90 backdrop-blur">
-        <div className="grid grid-cols-2 items-center gap-4 px-6 py-4 sm:px-10 lg:grid-cols-[1fr_auto_1fr] lg:px-16 xl:px-20">
+    <main className="gallery-page min-h-screen w-full text-[var(--page-text)]">
+      <Atmosphere />
+      <header className="gallery-nav sticky top-0 z-30 border-b border-[var(--border-soft)]">
+        <div className="flex flex-wrap items-center justify-between lg:grid lg:grid-cols-2 gap-4 px-6 py-4 sm:px-10 lg:grid-cols-[1fr_auto_1fr] lg:px-16 xl:px-20">
           <Link href="/" className="justify-self-start">
             <ArticLogo className="text-xl sm:text-2xl" />
           </Link>
 
-          <div className="col-span-2 order-3 flex justify-center lg:order-none lg:col-span-1">
+          <div className="order-3 flex w-full justify-center lg:order-none lg:w-auto">
             <div
               role="tablist"
               aria-label="Marketplace mode"
@@ -137,7 +151,7 @@ function MarketplaceShell() {
                   aria-selected={mode === option}
                   onClick={() => setMode(option)}
                   className={`rounded-full px-5 py-2 text-sm font-semibold uppercase tracking-[0.08em] transition ${
-                    mode === option ? "bg-[#EF476F] text-white" : "text-[var(--muted-text)] hover:text-[var(--page-text)]"
+                    mode === option ? "gallery-button text-white" : "text-[var(--muted-text)] hover:text-[var(--page-text)]"
                   }`}
                 >
                   {option === "nft" ? "NFTs" : "Art"}
@@ -146,8 +160,8 @@ function MarketplaceShell() {
             </div>
           </div>
 
-          <div className="flex items-center justify-end gap-3">
-            <label className="relative hidden items-center md:flex">
+          <div className="flex min-w-0 items-center justify-end gap-2 sm:gap-3">
+            <label className="relative hidden items-center xl:flex">
               <span className="pointer-events-none absolute left-3 text-[var(--faint-text)]">
                 <SearchIcon />
               </span>
@@ -158,6 +172,9 @@ function MarketplaceShell() {
               />
             </label>
 
+            <Link href="/settings" aria-label="Settings" title="Settings" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[var(--border-soft)] transition hover:bg-[var(--chip-bg)]">
+              <Settings2 size={16} aria-hidden="true" />
+            </Link>
             <ThemeToggle />
 
             <ConnectWalletButton />
@@ -165,8 +182,15 @@ function MarketplaceShell() {
         </div>
       </header>
 
+      {arcChain.testnet && <div className="border-b border-[var(--border-soft)] bg-[#b55fbe]/10 px-6 py-2 text-center text-xs leading-5 text-[var(--muted-text)]">Arc Testnet pilot · Test USDC only, no real money. <a href="https://faucet.circle.com" target="_blank" rel="noreferrer" className="font-semibold underline underline-offset-2">Get test USDC ↗</a></div>}
+      <section className="market-intro relative px-6 py-10 sm:px-10 lg:px-16 xl:px-20">
+        <p className="mb-3 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.2em] text-[var(--muted-text)]"><span className="h-1.5 w-1.5 rounded-full bg-[#EF476F]" /> The Artiq collection</p>
+        <h1 className="max-w-2xl text-3xl font-semibold tracking-tight sm:text-5xl">{mode === "nft" ? <>Art without <span className="hero-word">limits.</span></> : <>Made by hand. <span className="hero-word">Collected by you.</span></>}</h1>
+        <p className="mt-4 max-w-xl text-sm leading-6 text-[var(--muted-text)]">{mode === "nft" ? "Discover digital expressions, fresh perspectives, and your next collectible." : "Explore original pieces, tactile textures, and art that lives beyond the screen."}</p>
+      </section>
+
       <div className="grid gap-8 px-6 py-8 sm:px-10 lg:grid-cols-[240px_1fr] lg:gap-10 lg:px-16 lg:py-12 xl:px-20">
-        <aside className="space-y-8 lg:sticky lg:top-24 lg:self-start">
+        <aside className="gallery-filter space-y-8 lg:sticky lg:top-24 lg:self-start">
           <div>
             <h2 className="font-mono text-xs uppercase tracking-[0.15em] text-[var(--faint-text)]">Status</h2>
             <div className="mt-3 space-y-2">
@@ -243,8 +267,7 @@ function MarketplaceShell() {
 
           {!isLoading && !isError && items.length === 0 && (
             <p className="mt-10 text-sm text-[var(--faint-text)]">
-              No {mode === "nft" ? "NFT collections" : "art pieces"} yet — run <code>npm run db:seed</code> for sample
-              data.
+              New {mode === "nft" ? "collections" : "art pieces"} are on their way. Check back soon.
             </p>
           )}
         </div>

@@ -1,19 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useTheme } from "@/hooks/useTheme";
 
 export default function ThemeToggle({ className = "" }: { className?: string }) {
-  const [isDark, setIsDark] = useState(false);
-
-  useEffect(() => {
-    setIsDark(document.documentElement.classList.contains("dark"));
-  }, []);
+  const { isDark, setPreference } = useTheme();
 
   function toggle() {
-    const next = !isDark;
-    setIsDark(next);
-    document.documentElement.classList.toggle("dark", next);
-    window.localStorage.setItem("artic-theme", next ? "dark" : "light");
+    setPreference(isDark ? "light" : "dark");
   }
 
   return (

@@ -3,13 +3,17 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "postinstall": "prisma generate",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "compile": "npx hardhat compile",
-    "db:push": "prisma db push",
+    "test": "hardhat test",
+    "db:generate": "prisma generate",
+    "db:setup": "prisma generate && npm run db:push && prisma db seed",
+    "db:push": "node scripts/init-db.js && prisma db push",
     "db:seed": "prisma db seed",
     "db:studio": "prisma studio"
   },
@@ -43,11 +47,11 @@
     "dotenv": "^17.4.2",
     "eslint": "^8.57.1",
     "eslint-config-next": "14.2.15",
-    "hardhat": "^2.22.11",
+    "hardhat": "^2.28.0",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.16",
     "tsx": "^4.23.11",
-    "typescript": "^5.6.3"
+    "typescript": "~5.9.3"
   },
   "allowScripts": {
     "@prisma/client@7.9.1": true,

@@ -1,4 +1,6 @@
 import Image from "next/image";
+import { arcChain } from "@/lib/arcConfig";
+import Atmosphere from "@/components/Atmosphere";
 import Link from "next/link";
 import ArticLogo from "@/components/ArticLogo";
 import Eyebrow from "@/components/Eyebrow";
@@ -81,9 +83,10 @@ const sectionHeading = "text-2xl font-extrabold uppercase tracking-[-0.01em] tex
 
 export default function Home() {
   return (
-    <main className="min-h-screen w-full bg-[var(--page-bg)] text-[var(--page-text)]">
+    <main className="gallery-page min-h-screen w-full text-[var(--page-text)]">
+      <Atmosphere />
       <div className="grid lg:min-h-screen lg:grid-cols-2">
-        <div className="relative flex min-h-[420px] flex-col px-6 py-6 sm:px-10 lg:px-16 xl:px-20">
+        <div className="hero-copy relative flex min-h-[420px] flex-col px-6 py-6 sm:px-10 lg:px-16 xl:px-20">
           <header className="flex items-center justify-between">
             <ArticLogo className="text-xl sm:text-2xl" />
 
@@ -99,30 +102,35 @@ export default function Home() {
                   About
                 </a>
               </nav>
+              <Link href="/settings" className="text-sm font-medium text-[var(--muted-text)] hover:text-[var(--page-text)]">Settings</Link>
               <ThemeToggle />
             </div>
           </header>
 
-          <div className="flex flex-1 flex-col justify-center py-10 lg:py-0">
-            <Eyebrow className="text-[var(--faint-text)]">Live on Arc Testnet</Eyebrow>
+          <div className="flex flex-1 flex-col justify-center py-10 lg:py-14">
+            <Eyebrow className="text-[var(--faint-text)]">{`Built on ${arcChain.name}`}</Eyebrow>
 
             <h1 className="max-w-[600px] text-[2.6rem] font-bold leading-[1.05] tracking-[-0.02em] text-[var(--page-text)] sm:text-[3.4rem] md:text-[4rem] lg:text-[3.4rem] xl:text-[4.2rem]">
               Every piece of
               <br />
-              Art is worth its price
+              <span className="hero-word">Art</span> is worth its price
             </h1>
 
-            <p className="mt-5 max-w-[430px] text-sm font-medium leading-7 text-[#F49BC5] sm:text-base lg:text-lg">
+            <p className="mt-5 max-w-[430px] text-sm font-medium leading-7 text-[var(--muted-text)] sm:text-base lg:text-lg">
               A USDC-native art marketplace driven by creators, craft, clarity, and community.
             </p>
 
             <div className="mt-7 lg:mt-8">
               <Link
                 href="/marketplace"
-                className="inline-flex items-center justify-center border border-[#EF476F] bg-[#EF476F] px-6 py-3.5 text-sm font-semibold text-white transition hover:bg-[#d73c63] sm:px-8 sm:py-4 sm:text-base"
+                className="gallery-button inline-flex items-center justify-center border border-[#EF476F] bg-[#EF476F] px-6 py-3.5 text-sm font-semibold text-white transition hover:bg-[#d73c63] sm:px-8 sm:py-4 sm:text-base"
               >
-                Launch App
+                Launch App <span aria-hidden="true">↗</span>
               </Link>
+            </div>
+            <div className="mt-7 flex flex-wrap gap-5 text-[10px] font-semibold uppercase tracking-[.15em] text-[var(--faint-text)]">
+              <span className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-[#20b88a]" /> Built on Arc</span>
+              <span>Digital & physical art</span>
             </div>
           </div>
 
@@ -137,7 +145,8 @@ export default function Home() {
           </a>
         </div>
 
-        <div className="relative flex min-h-[480px] items-center justify-center overflow-hidden">
+        <div className="hero-stage relative flex min-h-[480px] items-stretch justify-center overflow-hidden">
+          <div className="hero-frame">
           <Image
             src="/fff.png"
             alt="Illustration of a hand pinching a pencil, framed by a staircase, a cylinder, and concentric circles"
@@ -146,6 +155,14 @@ export default function Home() {
             className="animate-fade-slide-in object-cover"
             priority
           />
+          </div>
+          <div className="art-caption">
+            <span className="art-caption-icon" aria-hidden="true">✳</span>
+            <div>
+              <p className="text-[9px] font-semibold uppercase tracking-[.2em] text-[var(--faint-text)]">The Artiq perspective</p>
+              <p className="mt-1 text-sm font-semibold text-[var(--page-text)]">A space for the extraordinary.</p>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -159,7 +176,7 @@ export default function Home() {
 
           <div className="mt-10 grid gap-x-8 gap-y-10 border-t border-[var(--border-soft)] pt-10 sm:grid-cols-2 lg:mt-14 lg:grid-cols-4 lg:pt-14">
             {FEATURES.map((feature) => (
-              <div key={feature.title}>
+              <div key={feature.title} className="gallery-feature">
                 <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-[var(--chip-bg)]">
                   <feature.Icon width={22} height={22} color={feature.color} />
                 </span>
@@ -171,7 +188,7 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="border-t border-[var(--border-soft)] bg-[var(--section-alt-bg)] px-6 py-16 sm:px-10 sm:py-20 lg:px-16 lg:py-24 xl:px-20">
+      <section className="gallery-section border-t border-[var(--border-soft)] bg-[var(--section-alt-bg)] px-6 py-16 sm:px-10 sm:py-20 lg:px-16 lg:py-24 xl:px-20">
         <div>
           <Eyebrow className="text-[var(--faint-text)]">How it works</Eyebrow>
           <h2 className={sectionHeading}>Four steps. Start to finish.</h2>
@@ -191,7 +208,7 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="border-t border-[var(--border-soft)] bg-[var(--flow-bg)] px-6 py-16 text-[#362A67] sm:px-10 sm:py-20 lg:px-16 lg:py-24 xl:px-20">
+      <section className="gallery-flow border-t border-[var(--border-soft)] bg-[var(--flow-bg)] px-6 py-16 text-[#362A67] sm:px-10 sm:py-20 lg:px-16 lg:py-24 xl:px-20">
         <div>
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
@@ -204,7 +221,7 @@ export default function Home() {
             </div>
             <span className="flex items-center gap-2 font-mono text-xs uppercase tracking-[0.15em] text-[#362A67]/70">
               <span className="h-1.5 w-1.5 rounded-full bg-[#362A67]" />
-              Live on Arc Testnet
+              Built on {arcChain.name}
             </span>
           </div>
 
@@ -246,15 +263,15 @@ export default function Home() {
               <Eyebrow className="text-[var(--faint-text)]">Trending</Eyebrow>
               <h2 className={sectionHeading}>Trending drops</h2>
             </div>
-            <a href="#" className="text-sm font-semibold text-[#EF476F] hover:text-[#d73c63] sm:text-base">
-              View all
-            </a>
+            <Link href="/marketplace" className="text-sm font-semibold text-[#EF476F] hover:text-[#d73c63] sm:text-base">
+              View all ↗
+            </Link>
           </div>
 
           <div className="mt-10 grid grid-cols-2 gap-4 border-t border-[var(--border-soft)] pt-10 sm:gap-6 lg:mt-14 lg:grid-cols-4 lg:pt-14">
             {TRENDING_DROPS.map((item) => (
-              <div key={item.title} className="overflow-hidden bg-[var(--card-bg)]">
-                <div className="relative aspect-square">
+              <div key={item.title} className="gallery-card overflow-hidden bg-[var(--card-bg)]">
+                <div className="gallery-card-media relative aspect-square">
                   <Image src={item.image} alt={item.title} fill sizes="(min-width: 1024px) 25vw, 50vw" className="object-cover" />
                   <span className="absolute left-3 top-3 rounded bg-white/90 px-2 py-0.5 font-mono text-[10px] font-semibold tracking-[0.05em] text-[#362A67]">
                     {item.status}
@@ -270,7 +287,7 @@ export default function Home() {
       </section>
 
       <footer id="contact" className="px-6 py-8 sm:px-10 sm:py-10 lg:px-16 xl:px-20">
-        <div className="rounded-2xl bg-[var(--section-alt-bg)] px-6 py-8 shadow-[var(--card-shadow)] sm:px-10 sm:py-10">
+        <div className="gallery-footer rounded-2xl bg-[var(--section-alt-bg)] px-6 py-8 shadow-[var(--card-shadow)] sm:px-10 sm:py-10">
           <div className="flex flex-col gap-8 sm:flex-row sm:items-center sm:justify-between">
             <ArticLogo className="text-lg" />
 

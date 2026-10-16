@@ -1,13 +1,18 @@
 import type { Chain } from "viem";
 
-const ARC_CHAIN_ID = Number(process.env.NEXT_PUBLIC_ARC_CHAIN_ID ?? 12345);
-const ARC_RPC_URL = process.env.NEXT_PUBLIC_ARC_RPC_URL ?? "https://rpc.arc-testnet.com";
+const ARC_CHAIN_ID = Number(process.env.NEXT_PUBLIC_ARC_CHAIN_ID ?? 5042002);
+const isTestnet = ARC_CHAIN_ID === 5042002;
+if (ARC_CHAIN_ID !== 5042 && !isTestnet) {
+  throw new Error("NEXT_PUBLIC_ARC_CHAIN_ID must be 5042 (Mainnet) or 5042002 (Testnet).");
+}
+const ARC_RPC_URL = process.env.NEXT_PUBLIC_ARC_RPC_URL ??
+  (isTestnet ? "https://rpc.testnet.arc.io" : "https://rpc.mainnet.arc.io");
 
 export const arcChain: Chain = {
   id: ARC_CHAIN_ID,
-  name: "Arc",
+  name: isTestnet ? "Arc Testnet" : "Arc",
   nativeCurrency: {
-    decimals: 6,
+    decimals: 18,
     name: "USDC",
     symbol: process.env.NEXT_PUBLIC_ARC_USDC_SYMBOL ?? "USDC",
   },
@@ -18,10 +23,11 @@ export const arcChain: Chain = {
   blockExplorers: {
     default: {
       name: "Arc Explorer",
-      url: process.env.NEXT_PUBLIC_ARC_BLOCK_EXPLORER_URL ?? "https://explorer.arc-testnet.com",
+      url: process.env.NEXT_PUBLIC_ARC_BLOCK_EXPLORER_URL ??
+        (isTestnet ? "https://explorer.testnet.arc.io" : "https://explorer.arc.io"),
     },
   },
-  testnet: true,
+  testnet: isTestnet,
 };
 
 export const arcConfig = {
