@@ -2,10 +2,10 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { Settings2 } from "lucide-react";
+import { Settings2, X } from "lucide-react";
 import { arcChain } from "@/lib/arcConfig";
 import Atmosphere from "@/components/Atmosphere";
-import { Suspense } from "react";
+import { Suspense, useEffect, useState, type FormEvent } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import ArticLogo from "@/components/ArticLogo";
@@ -17,6 +17,7 @@ type Mode = "nft" | "art";
 type MarketplaceItem = {
   id: string;
   itemType: "NFT" | "WEB2_ART";
+  creationMethod?: "UNKNOWN" | "HUMAN" | "AI_GENERATED" | "AI_ASSISTED";
   title: string;
   description: string | null;
   imageUrl: string | null;
@@ -25,7 +26,7 @@ type MarketplaceItem = {
   category: "PAINTING" | "RUG" | "COSMETIC" | "OTHER" | null;
   priceUsdc: number | null;
   sold: boolean;
-  creator: { walletAddress: string; username: string | null };
+  creator: { walletAddress: string | null; username: string | null };
 };
 
 const STATUS_FILTERS = ["Upcoming", "Live", "Listed", "Sold"] as const;
@@ -86,7 +87,8 @@ function ItemCard({ item }: { item: MarketplaceItem }) {
         )}
       </div>
       <div className="space-y-2 p-4">
-        <p className="truncate text-[10px] font-medium tracking-wide text-[var(--faint-text)]">{item.creator.username ?? `${item.creator.walletAddress.slice(0, 6)}…${item.creator.walletAddress.slice(-4)}`}</p>
+        {isNft && (item.creationMethod === "AI_GENERATED" || item.creationMethod === "AI_ASSISTED") && <span className="inline-block rounded-full bg-[#b55fbe]/10 px-2 py-1 text-[9px] font-semibold text-[var(--muted-text)]">{item.creationMethod === "AI_GENERATED" ? "AI-generated NFT" : "AI-assisted NFT"}</span>}
+        <p className="truncate text-[10px] font-medium tracking-wide text-[var(--faint-text)]">{item.creator.username || (item.creator.walletAddress ? `${item.creator.walletAddress.slice(0, 6)}…${item.creator.walletAddress.slice(-4)}` : "Artiq creator")}</p>
         <p className="text-sm font-semibold text-[var(--page-text)]">{item.title}</p>
         <p className="text-xs text-[var(--faint-text)]">
           {isNft
@@ -108,11 +110,34 @@ function MarketplaceShell() {
   const searchParams = useSearchParams();
 
   const mode: Mode = searchParams.get("mode") === "art" ? "art" : "nft";
+  const savedSearch = searchParams.get("q") ?? "";
+  const [search, setSearch] = useState(savedSearch);
+
+  useEffect(() => {
+    setSearch(savedSearch);
+  }, [savedSearch]);
+
+  function updateSearchUrl(value: string, nextMode?: Mode) {
+    const params = new URLSearchParams(searchParams.toString());
+    if (value.trim()) params.set("q", value.trim());
+    else params.delete("q");
+    if (nextMode) params.set("mode", nextMode);
+    const queryString = params.toString();
+    router.replace(queryString ? `${pathname}?${queryString}` : pathname, { scroll: false });
+  }
+
+  function submitSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    updateSearchUrl(search);
+  }
+
+  function clearSearch() {
+    setSearch("");
+    updateSearchUrl("");
+  }
 
   function setMode(next: Mode) {
-    const params = new URLSearchParams(searchParams.toString());
-    params.set("mode", next);
-    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+    updateSearchUrl(search, next);
   }
 
   const itemType = mode === "nft" ? "NFT" : "WEB2_ART";
@@ -126,18 +151,24 @@ function MarketplaceShell() {
     },
   });
 
-  const items = data ?? [];
+  const allItems = data ?? [];
+  const searchTerms = search.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const items = allItems.filter((item) => {
+    const searchableText = [item.title, item.description, item.creator.username, item.creator.walletAddress]
+      .filter(Boolean).join(" ").toLowerCase();
+    return searchTerms.every((term) => searchableText.includes(term));
+  });
 
   return (
     <main className="gallery-page min-h-screen w-full text-[var(--page-text)]">
       <Atmosphere />
       <header className="gallery-nav sticky top-0 z-30 border-b border-[var(--border-soft)]">
-        <div className="flex flex-wrap items-center justify-between lg:grid lg:grid-cols-2 gap-4 px-6 py-4 sm:px-10 lg:grid-cols-[1fr_auto_1fr] lg:px-16 xl:px-20">
+        <div className="grid grid-cols-[auto_1fr] items-center gap-4 px-6 py-4 sm:px-10 lg:grid-cols-[auto_auto_minmax(180px,1fr)_auto] lg:px-16 xl:px-20">
           <Link href="/" className="justify-self-start">
             <ArticLogo className="text-xl sm:text-2xl" />
           </Link>
 
-          <div className="order-3 flex w-full justify-center lg:order-none lg:w-auto">
+          <div className="order-3 col-span-2 flex justify-center lg:order-none lg:col-span-1">
             <div
               role="tablist"
               aria-label="Marketplace mode"
@@ -160,17 +191,29 @@ function MarketplaceShell() {
             </div>
           </div>
 
-          <div className="flex min-w-0 items-center justify-end gap-2 sm:gap-3">
-            <label className="relative hidden items-center xl:flex">
-              <span className="pointer-events-none absolute left-3 text-[var(--faint-text)]">
-                <SearchIcon />
-              </span>
-              <input
-                type="search"
-                placeholder="Search collections, art, or creators"
-                className="w-56 rounded-full border border-[var(--border-soft)] bg-[var(--chip-bg)] py-2 pl-9 pr-4 text-sm text-[var(--page-text)] placeholder:text-[var(--faint-text)] focus:outline-none focus:ring-2 focus:ring-[#EF476F]/40 lg:w-72"
-              />
-            </label>
+          <form role="search" onSubmit={submitSearch} className="relative order-4 col-span-2 flex min-w-0 items-center lg:order-none lg:col-span-1">
+            <input
+              type="search"
+              aria-label="Search marketplace"
+              aria-controls="marketplace-results"
+              placeholder="Search art or creators"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              onKeyDown={(event) => { if (event.key === "Escape") clearSearch(); }}
+              maxLength={200}
+              className="w-full rounded-full border border-[var(--border-soft)] bg-[var(--chip-bg)] py-2 pl-4 pr-20 text-sm text-[var(--page-text)] placeholder:text-[var(--faint-text)] focus:outline-none focus:ring-2 focus:ring-[#EF476F]/40 [&::-webkit-search-cancel-button]:appearance-none"
+            />
+            {search && (
+              <button type="button" aria-label="Clear search" onClick={clearSearch} className="absolute right-10 flex h-8 w-8 items-center justify-center rounded-full text-[var(--muted-text)] hover:bg-[var(--border-soft)]">
+                <X size={14} aria-hidden="true" />
+              </button>
+            )}
+            <button type="submit" aria-label="Search" className="absolute right-1 flex h-8 w-8 items-center justify-center rounded-full text-[var(--page-text)] hover:bg-[var(--border-soft)]">
+              <SearchIcon />
+            </button>
+          </form>
+
+          <div className="order-2 flex min-w-0 items-center justify-end gap-2 sm:gap-3 lg:order-none">
 
             <Link href="/settings" aria-label="Settings" title="Settings" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[var(--border-soft)] transition hover:bg-[var(--chip-bg)]">
               <Settings2 size={16} aria-hidden="true" />
@@ -187,6 +230,7 @@ function MarketplaceShell() {
         <p className="mb-3 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.2em] text-[var(--muted-text)]"><span className="h-1.5 w-1.5 rounded-full bg-[#EF476F]" /> The Artiq collection</p>
         <h1 className="max-w-2xl text-3xl font-semibold tracking-tight sm:text-5xl">{mode === "nft" ? <>Art without <span className="hero-word">limits.</span></> : <>Made by hand. <span className="hero-word">Collected by you.</span></>}</h1>
         <p className="mt-4 max-w-xl text-sm leading-6 text-[var(--muted-text)]">{mode === "nft" ? "Discover digital expressions, fresh perspectives, and your next collectible." : "Explore original pieces, tactile textures, and art that lives beyond the screen."}</p>
+        <Link href={`/apply?type=${mode === "nft" ? "NFT" : "WEB2_ART"}`} className="gallery-button mt-5 inline-flex items-center px-5 py-3 text-sm font-semibold text-white">Submit your {mode === "nft" ? "NFT collection" : "art"} <span aria-hidden="true">↗</span></Link>
       </section>
 
       <div className="grid gap-8 px-6 py-8 sm:px-10 lg:grid-cols-[240px_1fr] lg:gap-10 lg:px-16 lg:py-12 xl:px-20">
@@ -244,10 +288,12 @@ function MarketplaceShell() {
           </div>
         </aside>
 
-        <div>
+        <div id="marketplace-results">
           <div className="flex items-center justify-between">
-            <p className="text-sm text-[var(--muted-text)]">
-              {isLoading ? "Loading…" : isError ? "Couldn't load items." : `${items.length} items`}
+            <p role="status" aria-live="polite" className="text-sm text-[var(--muted-text)]">
+              {isLoading ? "Loading…" : isError ? "Couldn't load items." : searchTerms.length
+                ? `${items.length} ${items.length === 1 ? "result" : "results"} for “${search.trim()}”`
+                : `${items.length} ${items.length === 1 ? "item" : "items"}`}
             </p>
           </div>
 
@@ -265,7 +311,15 @@ function MarketplaceShell() {
               : items.map((item) => <ItemCard key={item.id} item={item} />)}
           </div>
 
-          {!isLoading && !isError && items.length === 0 && (
+          {!isLoading && !isError && items.length === 0 && searchTerms.length > 0 && (
+            <div className="mt-10 rounded-xl border border-[var(--border-soft)] p-6">
+              <h2 className="text-lg font-semibold">No matching {mode === "nft" ? "collections" : "art pieces"}</h2>
+              <p className="mt-2 text-sm text-[var(--muted-text)]">Try another title, description, or creator.</p>
+              <button type="button" onClick={clearSearch} className="mt-4 text-sm font-semibold text-[#EF476F]">Clear search</button>
+            </div>
+          )}
+
+          {!isLoading && !isError && items.length === 0 && searchTerms.length === 0 && (
             <p className="mt-10 text-sm text-[var(--faint-text)]">
               New {mode === "nft" ? "collections" : "art pieces"} are on their way. Check back soon.
             </p>

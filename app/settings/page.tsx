@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { ArrowLeft, Check, Copy, ExternalLink, Monitor, Moon, Sun, Wallet, Palette, Network } from "lucide-react";
+import ConnectWalletButton from "@/components/ConnectWalletButton";
 import Atmosphere from "@/components/Atmosphere";
 import ArticLogo from "@/components/ArticLogo";
 import { useTheme, type ThemePreference } from "@/hooks/useTheme";
@@ -39,7 +40,7 @@ export default function SettingsPage() {
     }
   }
 
-  const errorText = wallet.error?.type === "no-wallet" ? "No wallet found. Install MetaMask to connect."
+  const errorText = wallet.error?.type === "no-wallet" ? "No wallet found. Choose an installed wallet to connect."
     : wallet.error?.type === "rejected" ? "Wallet request declined. You can try again."
     : wallet.error?.type === "unknown" ? wallet.error.message
     : wallet.error ? "Switch to Arc to continue." : null;
@@ -60,6 +61,14 @@ export default function SettingsPage() {
         <p role="status" aria-live="polite" className="mt-4 min-h-6 text-sm text-[var(--muted-text)]">{notice}</p>
 
         <div className="mt-6 grid gap-6">
+          <section className={panel} aria-labelledby="creator-heading">
+            <h2 id="creator-heading" className="text-lg">Creator studio</h2>
+            <p className="mt-2 text-sm text-[var(--muted-text)]">Apply to publish your NFT collection or original artwork. Applications are reviewed before appearing in the marketplace.</p>
+            <div className="mt-5 flex flex-wrap gap-3">
+              <Link href="/apply" className={secondaryButton}>My applications</Link>
+              <Link href="/admin/submissions" className={secondaryButton}>Reviewer dashboard</Link>
+            </div>
+          </section>
           <section className={panel} aria-labelledby="appearance-heading">
             <div className="flex items-center gap-3"><Palette size={20} className="text-[#b55fbe]" /><h2 id="appearance-heading" className="text-lg">Appearance</h2></div>
             <p className="mt-2 text-sm text-[var(--muted-text)]">Choose your canvas. System follows your device’s theme.</p>
@@ -89,11 +98,11 @@ export default function SettingsPage() {
             ) : (
               <>
                 <p className="mt-3 text-sm text-[var(--muted-text)]">Connect your wallet to see your address and USDC balance.</p>
-                <button type="button" onClick={() => void wallet.connect()} disabled={wallet.isConnecting} className="gallery-button mt-5 inline-flex px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">{wallet.isConnecting ? "Connecting…" : "Connect wallet"}</button>
+                <div className="mt-5"><ConnectWalletButton /></div>
               </>
             )}
             {errorText && <p role="alert" className="mt-4 text-sm text-[#EF476F]">{errorText}</p>}
-            {wallet.error?.type === "no-wallet" && <a className="mt-3 inline-block text-sm underline" href="https://metamask.io/download" target="_blank" rel="noreferrer">Get MetaMask</a>}
+
           </section>
 
           <section className={panel} aria-labelledby="network-heading">

@@ -38,9 +38,24 @@ enum ActivityType {
   PRICE_UPDATE
 }
 
+enum SubmissionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum CreationMethod {
+  UNKNOWN
+  HUMAN
+  AI_GENERATED
+  AI_ASSISTED
+}
+
 model User {
   id            String   @id @default(cuid())
-  walletAddress String   @unique
+  walletAddress String?  @unique
+  email         String?  @unique
+  emailVerifiedAt DateTime?
   username      String?
   avatarUrl     String?
   bio           String?
@@ -51,6 +66,9 @@ model User {
   items      Item[]
   listings   Listing[]
   activities Activity[]
+  submissions Submission[]
+  emailSessions EmailSession[]
+  uploadedImages UploadedImage[]
 }
 
 // One table for everything uploaded — itemType tells you which half of the
@@ -63,6 +81,7 @@ model Item {
   imageUrl    String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  creationMethod CreationMethod @default(UNKNOWN)
 
   creatorId String
   creator   User   @relation(fields: [creatorId], references: [id])
@@ -84,6 +103,7 @@ model Item {
 
   listings   Listing[]
   activities Activity[]
+  submission Submission?
 
   @@index([itemType])
   @@index([status])
@@ -120,4 +140,97 @@ model Activity {
 
   @@index([itemId])
   @@index([createdAt])
+}
+
+model Submission {
+  id              String           @id @default(cuid())
+  creatorId       String
+  creator         User             @relation(fields: [creatorId], references: [id])
+  creatorName     String
+  contactEmail    String?
+  itemType        ItemType
+  title           String
+  description     String
+  imageUrl        String
+  priceUsdc       Float
+  category        ArtCategory?
+  contractAddress String?
+  maxSupply       Int?
+  mintStartTime   DateTime?
+  status          SubmissionStatus @default(PENDING)
+  reviewNote      String?
+  reviewedBy      String?
+  reviewedAt      DateTime?
+  itemId          String?          @unique
+  item            Item?            @relation(fields: [itemId], references: [id])
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  creationMethod  CreationMethod   @default(UNKNOWN)
+  humanMadeDeclaration Boolean    @default(false)
+  creationProcess String?
+  screening       Json?
+  artReviewConfirmed Boolean      @default(false)
+
+  @@index([creatorId, createdAt])
+  @@index([status, createdAt])
+}
+
+model WalletChallenge {
+  id            String   @id @default(cuid())
+  walletAddress String
+  nonce         String   @unique
+  message       String
+  expiresAt     DateTime
+  createdAt     DateTime @default(now())
+
+  @@index([walletAddress, expiresAt])
+}
+
+model WalletSession {
+  id            String   @id @default(cuid())
+  tokenHash     String   @unique
+  walletAddress String
+  expiresAt     DateTime
+  createdAt     DateTime @default(now())
+
+  @@index([expiresAt])
+}
+
+model UploadedImage {
+  id          String   @id @default(cuid())
+  ownerWallet String?
+  ownerUserId String?
+  owner       User?   @relation(fields: [ownerUserId], references: [id])
+  mimeType    String
+  data        Bytes
+  createdAt   DateTime @default(now())
+  screening   Json?
+
+  @@index([ownerUserId, createdAt])
+}
+
+model EmailChallenge {
+  id         String   @id @default(cuid())
+  email      String
+  origin     String
+  codeHash   String
+  attempts   Int      @default(0)
+  delivered  Boolean  @default(false)
+  consumedAt DateTime?
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+
+  @@index([email, createdAt])
+  @@index([createdAt])
+}
+
+model EmailSession {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
 }

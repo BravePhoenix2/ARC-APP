@@ -30,61 +30,11 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({ items });
 }
 
-// POST /api/items — create an NFT or WEB2_ART item.
-// Body: { creatorWalletAddress, itemType, title, description?, imageUrl?, ...type-specific fields }
-export async function POST(request: NextRequest) {
-  const body = await request.json().catch(() => null);
-  if (!body) {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
-
-  const { creatorWalletAddress, itemType, title } = body;
-
-  if (!creatorWalletAddress || typeof creatorWalletAddress !== "string") {
-    return NextResponse.json({ error: "creatorWalletAddress is required" }, { status: 400 });
-  }
-  if (itemType !== "NFT" && itemType !== "WEB2_ART") {
-    return NextResponse.json({ error: "itemType must be NFT or WEB2_ART" }, { status: 400 });
-  }
-  if (!title || typeof title !== "string") {
-    return NextResponse.json({ error: "title is required" }, { status: 400 });
-  }
-
-  const creator = await prisma.user.upsert({
-    where: { walletAddress: creatorWalletAddress },
-    update: {},
-    create: { walletAddress: creatorWalletAddress, isCreator: true },
-  });
-
-  const common = {
-    itemType,
-    title,
-    description: body.description ?? null,
-    imageUrl: body.imageUrl ?? null,
-    creatorId: creator.id,
-  };
-
-  const typeSpecific: Partial<Prisma.ItemCreateInput> =
-    itemType === "NFT"
-      ? {
-          contractAddress: body.contractAddress ?? null,
-          mintPriceUsdc: body.mintPriceUsdc ?? null,
-          mintStartTime: body.mintStartTime ? new Date(body.mintStartTime) : null,
-          maxSupply: body.maxSupply ?? null,
-          mintedCount: 0,
-          rarities: body.rarities ?? undefined,
-          status: body.status ?? "UPCOMING",
-        }
-      : {
-          category: body.category ?? null,
-          priceUsdc: body.priceUsdc ?? null,
-          quantityAvailable: body.quantityAvailable ?? null,
-          sold: false,
-        };
-
-  const item = await prisma.item.create({
-    data: { ...common, ...typeSpecific } as Prisma.ItemCreateInput,
-  });
-
-  return NextResponse.json({ item }, { status: 201 });
+// Public creation would bypass creator review. Publishing happens only when
+// an authorized reviewer approves an application in /api/admin/submissions.
+export async function POST() {
+  return NextResponse.json(
+    { error: "Apply through /api/submissions. Items are published after review." },
+    { status: 405, headers: { Allow: "GET" } },
+  );
 }

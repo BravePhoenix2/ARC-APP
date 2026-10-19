@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { sameOrigin } from "@/lib/walletAuth";
+import { getCreatorSession } from "@/lib/creatorSession";
 
 const NFT_STATUSES = ["UPCOMING", "LIVE", "MINTED_OUT", "LISTED"] as const;
 
@@ -7,14 +9,21 @@ const NFT_STATUSES = ["UPCOMING", "LIVE", "MINTED_OUT", "LISTED"] as const;
 // NFT items:      { status: "UPCOMING" | "LIVE" | "MINTED_OUT" | "LISTED" }
 // WEB2_ART items:  { sold: boolean }
 export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
+  if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
+  const session = await getCreatorSession(request);
+  if (!session) return NextResponse.json({ error: "Sign in with email or your wallet." }, { status: 401 });
   const body = await request.json().catch(() => null);
   if (!body) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const item = await prisma.item.findUnique({ where: { id: params.id } });
+  const item = await prisma.item.findUnique({ where: { id: params.id }, include: { creator: true } });
   if (!item) {
     return NextResponse.json({ error: "Item not found" }, { status: 404 });
+  }
+
+  if (!session.isAdmin && session.userId !== item.creatorId) {
+    return NextResponse.json({ error: "Only the creator can update this item." }, { status: 403 });
   }
 
   if (item.itemType === "NFT") {

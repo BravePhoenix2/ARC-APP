@@ -2,25 +2,33 @@ import { createConfig, http } from "wagmi";
 import { injected } from "wagmi/connectors/injected";
 import { arcChain, arcConfig } from "./arcConfig";
 
-// MetaMask (and any other browser-extension wallet) connects fine through the
-// standard `injected()` connector via window.ethereum — no extra SDK needed.
-//
-// wagmi's dedicated `metaMask()` and `walletConnect()` connectors pull in
-// optional SDK peer dependencies ("@metamask/connect-evm",
-// "@walletconnect/ethereum-provider") that aren't installed here. Next's
-// webpack needs those resolvable on disk at build time even for connectors
-// that are never instantiated, so importing either one breaks the build.
-// To bring WalletConnect back: `npm install @walletconnect/ethereum-provider`,
-// set NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID, then add
-// `import { walletConnect } from "wagmi/connectors/walletConnect"` and
-// `walletConnect({ projectId: ... })` to the connectors list below.
+// EIP-6963 discovers each installed wallet independently. Explicit targets
+// support older extensions without routing every choice to window.ethereum.
+const browserConnectors = [
+  injected({ target: "metaMask" }),
+  injected({ target: { id: "rabby", name: "Rabby", provider: "isRabby" } }),
+  injected({ target: "coinbaseWallet" }),
+  injected({
+    target: {
+      id: "trustWallet",
+      name: "Trust Wallet",
+      provider(window) {
+        const providers = window?.ethereum?.providers ?? [window?.ethereum];
+        return providers.find((provider) => provider?.isTrust || provider?.isTrustWallet);
+      },
+    },
+  }),
+  injected({ target: "phantom" }),
+  injected(),
+];
 
 export const wagmiConfig = createConfig({
   chains: [arcChain],
   transports: {
     [arcChain.id]: http(arcConfig.rpcUrl),
   },
-  connectors: [injected({ target: "metaMask" }), injected()],
+  connectors: browserConnectors,
+  multiInjectedProviderDiscovery: true,
   // Renders the disconnected state on both the server and the first client
   // paint, then syncs real wallet state after hydration — otherwise
   // useAccount()'s isConnecting flips true on mount before the server ever

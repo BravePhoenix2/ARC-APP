@@ -127,6 +127,7 @@ export default function Home() {
               >
                 Launch App <span aria-hidden="true">↗</span>
               </Link>
+              <Link href="/apply" className="ml-5 inline-flex py-3 text-sm font-semibold text-[var(--muted-text)] underline decoration-[#b55fbe]/50 underline-offset-4">Are you a creator? Apply ↗</Link>
             </div>
             <div className="mt-7 flex flex-wrap gap-5 text-[10px] font-semibold uppercase tracking-[.15em] text-[var(--faint-text)]">
               <span className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-[#20b88a]" /> Built on Arc</span>
