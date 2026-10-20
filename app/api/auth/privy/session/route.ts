@@ -9,9 +9,10 @@ import {
 import { prisma } from "@/lib/prisma";
 import { limitedJson } from "@/lib/requestBody";
 import { ensureTesterProfile } from "@/lib/testerLeaderboard";
+import { isReviewerEmail } from "@/lib/reviewerAuth";
 import {
   WALLET_SESSION_COOKIE, clearWalletSessionCookie, getWalletSession, hashSessionToken,
-  isAdminWallet, newAuthToken, sameOrigin,
+  newAuthToken, sameOrigin,
 } from "@/lib/walletAuth";
 import type { Prisma } from "@/lib/generated/prisma/client";
 
@@ -31,7 +32,7 @@ function sessionBody(request: NextRequest, session: PrivySession) {
     user: {
       id: session.userId, email: session.email, walletAddress: wallet,
       walletAddresses: session.walletAddresses, authMethod: "PRIVY" as const,
-      isAdmin: Boolean(wallet && isAdminWallet(wallet)),
+      isAdmin: isReviewerEmail(session.email),
     },
     expiresAt: session.expiresAt.toISOString(),
   };
@@ -154,8 +155,8 @@ export async function POST(request: NextRequest) {
   if (requestedWallet !== null && !identity.walletAddresses.includes(requestedWallet.toLowerCase())) {
     return NextResponse.json({ error: "Choose a wallet linked to your sign-in account." }, { status: 401, headers });
   }
-  // Image requests cannot carry the active-wallet header. Retain the validated
-  // selection first so those cookie-only reads use the same reviewer identity.
+  // Retain the validated active wallet first for cookie-only ownership reads.
+  // Reviewer access is determined independently by the verified email.
   const activeWallet = requestedWallet?.toLowerCase();
   const sessionWallets = activeWallet
     ? [activeWallet, ...identity.walletAddresses.filter((wallet) => wallet !== activeWallet)]

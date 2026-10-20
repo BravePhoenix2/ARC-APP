@@ -178,13 +178,22 @@ A matching verified legacy email or wallet preserves the existing account and
 its submissions. If both identify different previous accounts, the user chooses
 which account to use; histories are not silently merged or deleted. Once linked,
 the Privy DID remains the account key. Private requests are bound to the verified
-Artiq account ID, and reviewer access still requires an allowlisted, linked wallet.
-An email login never grants reviewer privileges by itself. Once Privy is
+Artiq account ID. Reviewer access requires a verified email listed in the private
+`ARTIQ_ADMIN_EMAILS` configuration. A wallet alone never grants reviewer access. Once Privy is
 configured, new legacy OTP and wallet-signature logins are disabled; only existing
 legacy sessions remain readable for migration until they expire.
 
 See [Privy React setup](https://docs.privy.io/basics/react/setup) and
 [identity token setup](https://docs.privy.io/user-management/users/identity-tokens).
+
+## Brand assets
+
+The supplied geometric ARTIC wordmark is shared by navigation, footer, and hero
+through `components/ArticLogo.tsx`. Its 21 SVG blocks assemble from a pink center
+dot once on mount; reduced-motion preferences show the finished mark immediately.
+The full wordmark and dark variant are available in `public/brand`, and
+`app/icon.svg` supplies the matching A monogram for browser tabs. Privy uses the
+new dark wordmark in its sign-in dialog.
 
 ## Checks
 
@@ -212,11 +221,18 @@ application status. Uploaded images are stored in the database. Pending uploads
 can only be viewed by their owner and reviewers; approved listing images are public.
 External image URLs retain the visibility of their original host.
 
-Set `ARTIQ_ADMIN_WALLETS` in `.env.local` to a comma-separated list of reviewer
-wallet addresses, then restart the app. Leave it empty to disable reviewer access.
+Set server-only `ARTIQ_ADMIN_EMAILS` in `.env.local` to a comma-separated list of
+approved reviewer emails, then restart the app. Leave it empty to disable access.
+Sign in through Privy with an approved email and verify its one-time code. Email
+matching ignores letter case and surrounding spaces, but does not treat aliases,
+subdomains, or similar addresses as equivalent. Contact fields and client-supplied
+email values never grant access. Removing an email revokes access on the next
+server request, including private image reads. `ARTIQ_ADMIN_WALLETS` no longer
+grants reviewer permissions. Review records identify the reviewer’s stable Artiq
+account as `user:<account-id>`; historical wallet audit records stay intact.
 Before hosting, set `NEXT_PUBLIC_APP_URL` to the public app origin. A reverse-proxy
 deployment can use the server-only `ARTIQ_APP_ORIGIN` override for wallet sign-in.
-Visit `/admin/submissions` and sign in with a listed wallet to approve or reject
+Visit `/admin/submissions` and sign in with a listed email to approve or reject
 applications. Approval posts the listing; it does not deploy a contract or mint an
 NFT. Rejections include feedback visible to the creator.
 

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 765 204" role="img" aria-labelledby="title">
+  <title id="title">ARTIC</title>
+  <g fill="#3c2d78">
+    <path d="M0 0h128v33H0zM0 40h33v43H0zM94 40h34v43H94zM0 91h128v34H0zM0 135h33v69H0zM94 135h34v69H94zM355 0h169v33H355z"/>
+  </g>
+  <g fill="#f13f70">
+    <path d="M163 0h62v204h-62zM237 0h83v33h-83zM237 91h83v34h-83zM286 171h34v33h-34zM558 0h62v204h-62z"/>
+  </g>
+  <g fill="#ee83b7">
+    <path d="M286 46h34v33h-34zM250 135h34v34h-34zM655 0h49v33h-49zM716 0h49v33h-49zM655 40h34v49h-34zM655 115h34v49h-34zM655 171h49v33h-49zM716 171h49v33h-49z"/>
+  </g>
+  <path fill="#7069b0" d="M424 46h34v158h-34z"/>
+</svg>

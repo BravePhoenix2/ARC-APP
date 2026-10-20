@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { matchesRequestWallet } from "@/lib/requestWallet";
-import { getWalletSession, sameOrigin } from "@/lib/walletAuth";
+import { getCreatorSession } from "@/lib/creatorSession";
+import { sameOrigin } from "@/lib/walletAuth";
 import { limitedJson } from "@/lib/requestBody";
 import type { Prisma } from "@/lib/generated/prisma/client";
 import { awardTesterMilestone } from "@/lib/testerLeaderboard";
 
 export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
   if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
-  const session = await getWalletSession(request);
-  if (!session || !matchesRequestWallet(request, session)) return NextResponse.json({ error: "Sign in to review applications." }, { status: 401 });
+  const session = await getCreatorSession(request);
+  if (!session) return NextResponse.json({ error: "Sign in to review applications." }, { status: 401 });
   if (!session.isAdmin) return NextResponse.json({ error: "Reviewer access is required." }, { status: 403 });
   let body;
   try { body = await limitedJson(request); } catch { return NextResponse.json({ error: "Invalid review request." }, { status: 400 }); }
@@ -30,7 +30,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
       }
       // A conditional update prevents two reviewers publishing the same application.
       const claimed = await tx.submission.updateMany({ where: { id: params.id, status: "PENDING" }, data: {
-        status: decision, reviewNote: note, artReviewConfirmed: decision === "APPROVED" && application.itemType === "WEB2_ART" && artReviewConfirmed === true, reviewedBy: session.walletAddress, reviewedAt: new Date(),
+        status: decision, reviewNote: note, artReviewConfirmed: decision === "APPROVED" && application.itemType === "WEB2_ART" && artReviewConfirmed === true, reviewedBy: `user:${session.userId}`, reviewedAt: new Date(),
       } });
       if (claimed.count !== 1) throw new Error("ALREADY_REVIEWED");
       if (decision === "APPROVED") {

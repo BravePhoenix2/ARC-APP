@@ -8,6 +8,8 @@ import { NextRequest } from "next/server";
 import { privateKeyToAccount } from "viem/accounts";
 
 const origin = "http://127.0.0.1:3000";
+delete process.env.NEXT_PUBLIC_PRIVY_APP_ID;
+delete process.env.PRIVY_APP_ID;
 const account = privateKeyToAccount("0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
 const otherAccount = privateKeyToAccount("0xabcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789");
 let directory: string;
@@ -128,7 +130,7 @@ test("a concurrent nonce replay cannot create two sessions", async () => {
   assert.equal(await db.walletSession.count({ where: { expiresAt: { gt: new Date() } } }), beforeCount + 1);
 });
 
-test("admin authorization fails closed and uses only the configured wallet allowlist", () => {
+test("legacy wallet sessions never grant reviewer privileges, including previously allowlisted wallets", async () => {
   const original = process.env.ARTIQ_ADMIN_WALLETS;
   try {
     delete process.env.ARTIQ_ADMIN_WALLETS;
@@ -136,8 +138,14 @@ test("admin authorization fails closed and uses only the configured wallet allow
     process.env.ARTIQ_ADMIN_WALLETS = `invalid, ${otherAccount.address}`;
     assert.equal(auth.isAdminWallet(account.address), false);
     process.env.ARTIQ_ADMIN_WALLETS = ` ${account.address},${otherAccount.address} `;
-    assert.equal(auth.isAdminWallet(account.address.toLowerCase()), true);
+    assert.equal(auth.isAdminWallet(account.address.toLowerCase()), false);
     assert.equal(auth.isAdminWallet("invalid"), false);
+    const signed = await challenge();
+    const response = await verifyRoute.POST(request("verify", signed));
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).isAdmin, false);
+    const cookie = response.headers.get("set-cookie")!.split(";")[0];
+    assert.equal((await (await sessionRoute.GET(request("session", undefined, cookie))).json()).isAdmin, false);
   } finally {
     if (original === undefined) delete process.env.ARTIQ_ADMIN_WALLETS;
     else process.env.ARTIQ_ADMIN_WALLETS = original;

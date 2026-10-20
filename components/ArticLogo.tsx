@@ -1,27 +1,51 @@
-// "A" and "I" track the page's text color so the logo stays legible in dark
-// mode; R/T/C keep fixed brand accents since both are readable on either bg.
-const LETTERS = [
-  { char: "A", color: "var(--page-text)" },
-  { char: "R", color: "#EF476F" },
-  { char: "T", color: "#AFA8D3" },
-  { char: "I", color: "var(--page-text)" },
-  { char: "C", color: "#EF476F" },
-] as const;
+import type { CSSProperties } from "react";
+import { BRAND_LOGO_HEIGHT, BRAND_LOGO_PIECES, BRAND_LOGO_WIDTH } from "@/lib/brandLogo";
+import styles from "./ArticLogo.module.css";
 
-export default function ArticLogo({ className = "" }: { className?: string }) {
+type ArticLogoProps = {
+  className?: string;
+  variant?: "full" | "mark";
+};
+
+export default function ArticLogo({ className = "", variant = "full" }: ArticLogoProps) {
+  const mark = variant === "mark";
+  const pieces = mark ? BRAND_LOGO_PIECES.slice(0, 6) : BRAND_LOGO_PIECES;
+  const origin = { x: mark ? 64 : BRAND_LOGO_WIDTH / 2, y: BRAND_LOGO_HEIGHT / 2 };
+
   return (
-    <span className={`inline-flex select-none font-mono font-black tracking-tight ${className}`} aria-label="Artic">
-      {LETTERS.map((letter, i) => (
-        <span
-          key={i}
-          style={{
-            color: letter.color,
-            textShadow: i === 1 ? "2px 0 0 rgba(175,168,211,0.55)" : undefined,
-          }}
-        >
-          {letter.char}
-        </span>
-      ))}
+    <span className={`${styles.logo} ${mark ? styles.mark : ""} ${className}`}>
+      <svg
+        className={styles.artwork}
+        viewBox={mark ? "-38 0 204 204" : `0 0 ${BRAND_LOGO_WIDTH} ${BRAND_LOGO_HEIGHT}`}
+        role="img"
+        aria-label="ARTIC"
+        focusable="false"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <title>ARTIC</title>
+        <g aria-hidden="true">
+          <circle className={styles.ripple} cx={origin.x} cy={origin.y} r="20" />
+          <circle className={styles.dot} cx={origin.x} cy={origin.y} r="10" />
+          {pieces.map((piece, index) => (
+            <rect
+              key={`${piece.x}-${piece.y}`}
+              className={styles.piece}
+              x={piece.x}
+              y={piece.y}
+              width={piece.width}
+              height={piece.height}
+              fill={piece.fill}
+              data-ink={piece.ink}
+              style={{
+                "--from-x": `${origin.x - piece.x - piece.width / 2}px`,
+                "--from-y": `${origin.y - piece.y - piece.height / 2}px`,
+                "--turn": `${index % 2 === 0 ? -12 : 12}deg`,
+                "--delay": `${155 + index * 18}ms`,
+              } as CSSProperties}
+            />
+          ))}
+        </g>
+      </svg>
     </span>
   );
 }

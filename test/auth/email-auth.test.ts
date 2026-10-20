@@ -13,10 +13,14 @@ import { NextRequest } from "next/server";
 const directory = mkdtempSync(join(tmpdir(), "artiq-email-auth-"));
 const origin = "http://localhost:3000";
 const reviewerWallet = "0x2222222222222222222222222222222222222222";
+const reviewerEmail = "reviewer@example.com";
 process.env.DATABASE_URL = `file:${join(directory, "auth.db")}`;
 process.env.ARTIQ_APP_ORIGIN = origin;
 process.env.ARTIQ_AI_PIXEL_SCREENING = "false";
 process.env.ARTIQ_ADMIN_WALLETS = reviewerWallet;
+process.env.ARTIQ_ADMIN_EMAILS = reviewerEmail;
+delete process.env.NEXT_PUBLIC_PRIVY_APP_ID;
+delete process.env.PRIVY_APP_ID;
 process.env.GMAIL_SMTP_USER = "test.sender@gmail.com";
 process.env.GMAIL_SMTP_APP_PASSWORD = "abcdefghijklmnop";
 process.env.ARTIQ_EMAIL_CODE_SECRET = "01".repeat(32);
@@ -336,18 +340,22 @@ test("email creators own private uploads and applications without acquiring revi
   assert.equal((await (await submissions.GET(request("/api/submissions", "GET", undefined, owner))).json()).submissions[0].id, submission.id);
   const impersonation = request("/api/admin/submissions", "GET", undefined, owner);
   impersonation.headers.set("x-wallet-address", reviewerWallet);
-  assert.equal((await adminQueue.GET(impersonation)).status, 401);
-  assert.equal((await reviewRoute.PATCH(request("/api/admin/submissions/x", "PATCH", { decision: "APPROVED", reviewedBy: reviewerWallet }, owner), { params: { id: submission.id } })).status, 401);
+  assert.equal((await adminQueue.GET(impersonation)).status, 403);
+  assert.equal((await reviewRoute.PATCH(request("/api/admin/submissions/x", "PATCH", { decision: "APPROVED", reviewedBy: reviewerWallet }, owner), { params: { id: submission.id } })).status, 403);
   assert.equal((await walletSessionRoute.GET(request("/api/auth/session", "GET", undefined, owner))).status, 401, "email login never grants a wallet session");
 
   const token = randomBytes(32).toString("hex");
   await db.walletSession.create({ data: { walletAddress: reviewerWallet, tokenHash: createHash("sha256").update(token).digest("hex"), expiresAt: new Date(Date.now() + 60_000) } });
-  const reviewer = new NextRequest(`${origin}/api/admin/submissions/x`, {
+  const walletReviewer = new NextRequest(`${origin}/api/admin/submissions/x`, {
     method: "PATCH",
     headers: { Origin: origin, "Content-Type": "application/json", Cookie: `artiq_wallet_session=${token}`, "X-Wallet-Address": reviewerWallet },
     body: JSON.stringify({ decision: "APPROVED" }),
   });
-  assert.equal((await reviewRoute.PATCH(reviewer, { params: { id: submission.id } })).status, 200);
+  assert.equal((await reviewRoute.PATCH(walletReviewer, { params: { id: submission.id } })).status, 403, "the old wallet allowlist no longer grants reviewer access");
+  const reviewer = await login(reviewerEmail);
+  assert.equal((await adminQueue.GET(request("/api/admin/submissions", "GET", undefined, reviewer))).status, 200);
+  assert.equal((await reviewRoute.PATCH(request("/api/admin/submissions/x", "PATCH", { decision: "APPROVED", reviewedBy: reviewerWallet }, reviewer), { params: { id: submission.id } })).status, 200);
+  assert.equal((await db.submission.findUniqueOrThrow({ where: { id: submission.id } })).reviewedBy, `user:${reviewer.user.id}`, "review history stores the authenticated account, ignoring the request body");
   const publicItems = (await (await catalog.GET(request("/api/items?itemType=NFT"))).json()).items;
   assert.equal(publicItems.length, 1);
   assert.equal(publicItems[0].creatorId, owner.user.id);
@@ -355,6 +363,28 @@ test("email creators own private uploads and applications without acquiring revi
   assert.equal(publicItems[0].creator.email, undefined, "verified creator email is never published");
   assert.equal(publicItems[0].contactEmail, undefined);
   assert.equal((await imageRoute.GET(request(imageUrl), { params: { id } })).status, 200, "approved artwork images become public");
+});
+
+test("legacy verified email reviewer access requires a bound account and is revoked by allowlist changes", async () => {
+  const reviewer = await login("second-reviewer@example.com");
+  const original = process.env.ARTIQ_ADMIN_EMAILS;
+  try {
+    process.env.ARTIQ_ADMIN_EMAILS = "invalid, SECOND-Reviewer@Example.COM ";
+    assert.equal((await adminQueue.GET(request("/api/admin/submissions", "GET", undefined, reviewer))).status, 200);
+    const missing = request("/api/admin/submissions", "GET", undefined, reviewer);
+    missing.headers.delete("x-artiq-account-id");
+    assert.equal((await adminQueue.GET(missing)).status, 401);
+    const spoofed = request("/api/admin/submissions", "GET", undefined, reviewer);
+    spoofed.headers.set("x-artiq-account-id", "another-account");
+    assert.equal((await adminQueue.GET(spoofed)).status, 401);
+    process.env.ARTIQ_ADMIN_EMAILS = `${reviewer.user.email}.attacker.invalid`;
+    assert.equal((await adminQueue.GET(request("/api/admin/submissions", "GET", undefined, reviewer))).status, 403);
+    delete process.env.ARTIQ_ADMIN_EMAILS;
+    assert.equal((await adminQueue.GET(request("/api/admin/submissions", "GET", undefined, reviewer))).status, 403);
+    process.env.ARTIQ_ADMIN_EMAILS = reviewer.user.email;
+    await db.user.update({ where: { id: reviewer.user.id }, data: { emailVerifiedAt: null } });
+    assert.equal((await adminQueue.GET(request("/api/admin/submissions", "GET", undefined, reviewer))).status, 401, "an unverified database contact email cannot authorize a legacy email session");
+  } finally { process.env.ARTIQ_ADMIN_EMAILS = original; }
 });
 
 test("fails closed when mail is unavailable or delivery fails, and never accepts an undelivered code", async () => {

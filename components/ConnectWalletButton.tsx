@@ -11,6 +11,7 @@ import { walletErrorMessage } from "@/components/WalletPicker";
 export default function ConnectWalletButton() {
   const session = usePrivySession();
   const wallet = useWallet();
+  const { address, chainId, isConnected, isWrongNetwork, isConnecting, isSwitching, error: walletError, ensureArc } = wallet;
   const [open, setOpen] = useState(false);
   const [menuLeft, setMenuLeft] = useState<number>();
   const [signingOut, setSigningOut] = useState(false);
@@ -18,13 +19,13 @@ export default function ConnectWalletButton() {
   const attemptedNetwork = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!session.authenticated || !wallet.isConnected || !wallet.isWrongNetwork) { attemptedNetwork.current = null; return; }
-    if (wallet.isConnecting || wallet.isSwitching) return;
-    const key = `${wallet.address}:${wallet.chainId}`;
+    if (!session.authenticated || !isConnected || !isWrongNetwork) { attemptedNetwork.current = null; return; }
+    if (isConnecting || isSwitching) return;
+    const key = `${address}:${chainId}`;
     if (attemptedNetwork.current === key) return;
     attemptedNetwork.current = key;
-    if (!wallet.error) void wallet.ensureArc();
-  }, [session.authenticated, wallet.address, wallet.chainId, wallet.isConnected, wallet.isWrongNetwork, wallet.isConnecting, wallet.isSwitching, wallet.error, wallet.ensureArc]);
+    if (!walletError) void ensureArc();
+  }, [session.authenticated, address, chainId, isConnected, isWrongNetwork, isConnecting, isSwitching, walletError, ensureArc]);
 
   useEffect(() => {
     const outside = (event: MouseEvent) => { if (root.current && !root.current.contains(event.target as Node)) setOpen(false); };
@@ -71,6 +72,7 @@ export default function ConnectWalletButton() {
         {wallet.isWrongNetwork && <button type="button" disabled={wallet.isSwitching} onClick={() => void wallet.switchToArc()} className="mt-3 text-xs font-semibold text-[#EF476F]">{wallet.isSwitching ? "Switching…" : "Switch to Arc Testnet"}</button>}
         {wallet.isBalanceError && <button type="button" onClick={() => void wallet.refetchBalance()} className="mt-3 block text-xs font-semibold text-[#b55fbe]">Retry balance</button>}
         <Link href="/apply#my-applications" onClick={() => setOpen(false)} className="mt-4 block border-t border-[var(--border-soft)] pt-3 text-sm hover:text-[#b55fbe]">My applications</Link>
+        {user.isAdmin && user.email && <Link href="/admin/submissions" onClick={() => setOpen(false)} className="mt-3 block text-sm hover:text-[#b55fbe]">Review applications</Link>}
         {session.connectedWallets.length > 1 && <label className="mt-3 block text-xs text-[var(--muted-text)]">Active wallet<select aria-label="Active wallet" value={wallet.address?.toLowerCase() ?? ""} onChange={(event) => void session.selectWallet(event.target.value)} className="mt-2 block w-full rounded-lg border border-[var(--border-soft)] bg-[var(--card-bg)] p-2">{session.connectedWallets.map((item) => <option key={item.address} value={item.address.toLowerCase()}>{item.label} · {item.address.slice(0, 6)}…{item.address.slice(-4)}</option>)}</select></label>}
         <button type="button" onClick={() => { setOpen(false); session.connectWallet(); }} className="mt-3 block text-sm hover:text-[#b55fbe]">Add a wallet</button>
         <button type="button" disabled={signingOut} onClick={() => { setSigningOut(true); void session.logout().then((success) => { if (success) setOpen(false); }).finally(() => setSigningOut(false)); }} className="mt-3 flex items-center gap-2 text-sm text-[#EF476F] disabled:opacity-60"><LogOut size={14} aria-hidden="true" />{signingOut ? "Signing out…" : "Sign out"}</button>

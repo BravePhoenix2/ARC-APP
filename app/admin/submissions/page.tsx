@@ -2,15 +2,14 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ArrowUpRight, Check, ClipboardCheck, LoaderCircle, RefreshCw, ShieldCheck, X } from "lucide-react";
 import ArticLogo from "@/components/ArticLogo";
 import Atmosphere from "@/components/Atmosphere";
 import ConnectWalletButton from "@/components/ConnectWalletButton";
 import ThemeToggle from "@/components/ThemeToggle";
-import { useWallet } from "@/hooks/useWallet";
-import { useArtiqAccount } from "@/hooks/useArtiqAccount";
+import { usePrivySession } from "@/hooks/usePrivySession";
 import { arcChain } from "@/lib/arcConfig";
 import { NFT_KIND_INFO, type NftKind, type NftAttribute } from "@/lib/nftTypes";
 
@@ -246,13 +245,14 @@ function ReviewCard({ submission, onReview }: {
 }
 
 export default function SubmissionReviewPage() {
-  const wallet = useWallet();
-  const session = useArtiqAccount();
+  const session = usePrivySession();
   const queryClient = useQueryClient();
   const [status, setStatus] = useState<SubmissionStatus>("PENDING");
   const [notice, setNotice] = useState("");
-  const authorized = session.authenticated && session.user?.isAdmin && !!wallet.address && session.walletAddress?.toLowerCase() === wallet.address.toLowerCase();
-  const queryKey = ["admin-submissions", session.accountId, session.walletAddress, status];
+  const accountId = session.user?.id;
+  const authorized = Boolean(session.authenticated && session.user?.isAdmin && session.user.email);
+  const reviewerHeaders = useMemo((): Record<string, string> => accountId ? { "X-Artiq-Account-ID": accountId } : {}, [accountId]);
+  const queryKey = ["admin-submissions", accountId, status];
 
   useEffect(() => {
     if (!session.isLoading && !authorized) queryClient.removeQueries({ queryKey: ["admin-submissions"] });
@@ -263,12 +263,12 @@ export default function SubmissionReviewPage() {
     enabled: authorized,
     retry: false,
     queryFn: async (): Promise<Submission[]> => {
-      if (!session.walletAddress) throw new Error("Sign in with an authorized reviewer wallet to continue.");
+      if (!authorized || !accountId) throw new Error("Sign in with an approved reviewer email to continue.");
       const response = await fetch(`/api/admin/submissions?status=${status}`, {
         cache: "no-store",
-        headers: session.headers,
+        headers: reviewerHeaders,
       });
-      if (response.status === 401) await session.refresh();
+      if (response.status === 401 || response.status === 403) await session.refresh();
       if (!response.ok) throw new Error(await responseError(response, "We couldn't load the review queue. Refresh and try again."));
       const body = await response.json();
       return body.submissions;
@@ -276,16 +276,16 @@ export default function SubmissionReviewPage() {
   });
 
   async function review(submission: Submission, decision: ReviewDecision, reviewNote: string, artReviewConfirmed: boolean) {
-    if (!authorized || !session.walletAddress) throw new Error("Sign in with an authorized reviewer wallet to continue.");
+    if (!authorized || !accountId) throw new Error("Sign in with an approved reviewer email to continue.");
     setNotice("");
     const response = await fetch(`/api/admin/submissions/${encodeURIComponent(submission.id)}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json", ...session.headers },
+      headers: { "Content-Type": "application/json", ...reviewerHeaders },
       body: JSON.stringify({ decision, reviewNote, artReviewConfirmed }),
     });
-    if (response.status === 401) await session.refresh();
+    if (response.status === 401 || response.status === 403) await session.refresh();
     if (!response.ok) throw new Error(await responseError(response, "The review could not be saved. Refresh the queue and try again."));
-    queryClient.setQueryData<Submission[]>(["admin-submissions", session.accountId, session.walletAddress, "PENDING"], (previous) => previous?.filter((item) => item.id !== submission.id));
+    queryClient.setQueryData<Submission[]>(["admin-submissions", accountId, "PENDING"], (previous) => previous?.filter((item) => item.id !== submission.id));
     setNotice(decision === "APPROVED" ? `“${submission.title}” was approved and published in the marketplace.` : `“${submission.title}” was rejected. The creator can see your feedback.`);
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["admin-submissions"] }),
@@ -314,24 +314,25 @@ export default function SubmissionReviewPage() {
 
         {session.isLoading ? (
           <div role="status" className="gallery-card mt-10 flex items-center gap-3 p-7 text-sm text-[var(--muted-text)]"><LoaderCircle size={18} className="animate-spin" aria-hidden="true" /> Checking reviewer access…</div>
-        ) : !wallet.isConnected || !session.authenticated || session.walletAddress?.toLowerCase() !== wallet.address?.toLowerCase() ? (
+        ) : !session.authenticated ? (
           <section className="gallery-card mx-auto mt-10 max-w-xl p-7 sm:p-9">
             <span className="inline-flex rounded-2xl bg-[#b55fbe]/10 p-3 text-[#b55fbe]"><ShieldCheck size={25} aria-hidden="true" /></span>
             <h2 className="mt-5 text-2xl">Sign in to review</h2>
-            <p className="mt-3 text-sm leading-6 text-[var(--muted-text)]">Sign in and select a linked reviewer wallet to open the review queue. Only wallets approved by the project owner can review applications.</p>
-            <div className="mt-6 flex"><ConnectWalletButton /></div>
+            <p className="mt-3 text-sm leading-6 text-[var(--muted-text)]">Use your approved reviewer email and enter the one-time code sent by Privy to open the review queue.</p>
+            <div className="mt-6 flex"><button type="button" onClick={() => session.login({ loginMethods: ["email"] })} disabled={!session.ready || session.isSyncing} className="gallery-button rounded-full px-5 py-3 text-sm font-semibold text-white disabled:opacity-60">Continue with email</button></div>
             {session.error && <p role="alert" className="mt-4 text-sm leading-6 text-[#EF476F]">{messageFrom(session.error, "Sign-in failed. Please try again.")}</p>}
           </section>
-        ) : !session.user?.isAdmin ? (
+        ) : !authorized ? (
           <section className="gallery-card mx-auto mt-10 max-w-xl p-7 sm:p-9">
             <ShieldCheck size={28} className="text-[#b55fbe]" aria-hidden="true" />
             <h2 className="mt-5 text-2xl">Reviewer access required</h2>
-            <p className="mt-3 text-sm leading-6 text-[var(--muted-text)]">This wallet doesn’t have reviewer access. Connect an authorized reviewer wallet to open the queue.</p>
-            <div className="mt-6 flex flex-wrap gap-3"><Link href="/marketplace" className={secondaryButton}>Explore marketplace</Link><button type="button" onClick={() => void session.logout()} className={secondaryButton}>Sign out</button></div>
+            <p className="mt-3 text-sm leading-6 text-[var(--muted-text)]">{session.user?.email ? `You’re signed in as ${session.user.email}. This email does not have reviewer access.` : "Sign in with an approved reviewer email to open the queue."}</p>
+            <div className="mt-6 flex flex-wrap gap-3"><Link href="/marketplace" className={secondaryButton}>Explore marketplace</Link><button type="button" onClick={() => void session.logout()} className={secondaryButton}>Sign out to change email</button></div>
             {session.error && <p role="alert" className="mt-4 text-sm leading-6 text-[#EF476F]">{messageFrom(session.error, "Could not sign out. Please try again.")}</p>}
           </section>
         ) : (
           <section className="mt-10" aria-label="Submission review queue">
+            <p className="mb-5 break-all text-xs text-[var(--muted-text)]">Reviewing as <strong className="text-[var(--page-text)]">{session.user?.email}</strong></p>
             <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[var(--border-soft)] pb-5">
               <div role="group" aria-label="Filter submissions by status" className="flex max-w-full gap-1 rounded-full border border-[var(--border-soft)] bg-[var(--chip-bg)] p-1">
                 {filters.map((filter) => <button key={filter.value} type="button" aria-pressed={status === filter.value} onClick={() => { setStatus(filter.value); setNotice(""); }} className={`rounded-full px-4 py-2 text-sm font-semibold transition sm:px-5 ${status === filter.value ? "gallery-button text-white" : "text-[var(--muted-text)] hover:text-[var(--page-text)]"}`}>{filter.label}</button>)}

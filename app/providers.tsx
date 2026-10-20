@@ -23,7 +23,12 @@ export default function Providers({ children }: { children: ReactNode }) {
           supportedChains: [arcChain],
           defaultChain: arcChain,
           embeddedWallets: { ethereum: { createOnLogin: "users-without-wallets" } },
-          appearance: { theme: "dark", accentColor: "#F14B94", walletChainType: "ethereum-only" },
+          appearance: {
+            theme: "dark",
+            accentColor: "#F14B94",
+            walletChainType: "ethereum-only",
+            logo: "/brand/artic-wordmark-dark.svg",
+          },
         }}
       >
         <QueryClientProvider client={queryClient}>

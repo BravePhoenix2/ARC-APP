@@ -12,6 +12,7 @@ export type PrivyAccount = {
 };
 
 export type PrivyAccountChoice = { id: string; label: string };
+export type PrivyLoginOptions = { loginMethods?: Array<"email" | "wallet"> };
 
 export type PrivySession = {
   configured: boolean;
@@ -20,7 +21,7 @@ export type PrivySession = {
   authenticated: boolean;
   user: PrivyAccount | null;
   error: string | null;
-  login: () => void;
+  login: (options?: PrivyLoginOptions) => void;
   connectWallet: () => void;
   connectedWallets: { address: string; label: string }[];
   selectWallet: (address: string) => Promise<boolean>;

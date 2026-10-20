@@ -5,7 +5,7 @@ import { useSetActiveWallet } from "@privy-io/wagmi";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useAccount, useDisconnect } from "wagmi";
-import { PrivySessionContext, type PrivyAccount, type PrivyAccountChoice } from "@/hooks/usePrivySession";
+import { PrivySessionContext, type PrivyAccount, type PrivyAccountChoice, type PrivyLoginOptions } from "@/hooks/usePrivySession";
 import { PRIVY_SESSION_CHANGED, PRIVY_SETUP_MESSAGE } from "@/lib/privyClient";
 
 const PRIVATE_QUERY_ROOTS = new Set(["submissions", "admin-submissions", "item-detail", "tester-me"]);
@@ -82,6 +82,11 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
   const lastAccount = useRef<string | null>(null);
   const tokenGetter = useRef(getAccessToken);
   tokenGetter.current = getAccessToken;
+  const invalidatePendingSync = useCallback(() => {
+    ++generation.current;
+    pending.current?.controller.abort();
+    pending.current = null;
+  }, []);
 
   // Bind every response to the SDK identity and linked accounts that requested
   // it. A changed wallet or SDK identity cannot reuse a prior account's result.
@@ -194,10 +199,9 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
     mounted.current = true;
     return () => {
       mounted.current = false;
-      ++generation.current;
-      pending.current?.controller.abort();
+      invalidatePendingSync();
     };
-  }, []);
+  }, [invalidatePendingSync]);
 
   useEffect(() => {
     ++generation.current;
@@ -236,14 +240,14 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
     return () => window.clearTimeout(timer);
   }, [clearSession, sync, verified]);
 
-  const login = useCallback(() => {
+  const login = useCallback((options?: PrivyLoginOptions) => {
     suspended.current = false;
     setError(null);
     if (sdkAuthenticated) {
       void sync();
       return;
     }
-    openLogin();
+    openLogin(options);
   }, [openLogin, sdkAuthenticated, sync]);
 
   const connectWallet = useCallback(() => {

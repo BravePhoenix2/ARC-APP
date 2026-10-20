@@ -12,8 +12,12 @@ process.env.DATABASE_URL = `file:${join(directory, "test.db")}`;
 process.env.ARTIQ_AI_PIXEL_SCREENING = "false";
 const owner = "0x1111111111111111111111111111111111111111";
 const reviewer = "0x2222222222222222222222222222222222222222";
+const reviewerEmail = "reviewer@example.com";
 const other = "0x3333333333333333333333333333333333333333";
 process.env.ARTIQ_ADMIN_WALLETS = reviewer;
+process.env.ARTIQ_ADMIN_EMAILS = reviewerEmail;
+delete process.env.NEXT_PUBLIC_PRIVY_APP_ID;
+delete process.env.PRIVY_APP_ID;
 const origin = "http://localhost:3000";
 let db: (typeof import("../../lib/prisma"))["prisma"];
 let submissions: typeof import("../../app/api/submissions/route");
@@ -25,6 +29,7 @@ let adminQueue: typeof import("../../app/api/admin/submissions/route");
 let itemStatus: typeof import("../../app/api/items/[id]/status/route");
 let ownerCookie: string;
 let reviewerCookie: string;
+let reviewerId: string;
 let otherCookie: string;
 
 async function cookie(walletAddress: string) {
@@ -32,10 +37,17 @@ async function cookie(walletAddress: string) {
   await db.walletSession.create({ data: { walletAddress, tokenHash: createHash("sha256").update(token).digest("hex"), expiresAt: new Date(Date.now() + 10 * 60_000) } });
   return `artiq_wallet_session=${token}`;
 }
+async function emailReviewerCookie() {
+  const user = await db.user.create({ data: { email: reviewerEmail, emailVerifiedAt: new Date() } });
+  reviewerId = user.id;
+  const token = randomBytes(32).toString("hex");
+  await db.emailSession.create({ data: { userId: user.id, tokenHash: createHash("sha256").update(token).digest("hex"), expiresAt: new Date(Date.now() + 10 * 60_000) } });
+  return `artiq_email_session=${token}`;
+}
 function request(path: string, method = "GET", body?: unknown, session?: string, requestOrigin = origin) {
   return new NextRequest(`${origin}${path}`, { method, headers: {
     ...(method !== "GET" ? { Origin: requestOrigin, "Content-Type": "application/json" } : {}),
-    ...(session ? { Cookie: session, "X-Wallet-Address": session === ownerCookie ? owner : session === reviewerCookie ? reviewer : other } : {}),
+    ...(session ? { Cookie: session, ...(session === reviewerCookie ? { "X-Artiq-Account-ID": reviewerId } : { "X-Wallet-Address": session === ownerCookie ? owner : other }) } : {}),
   }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
 }
 const application = { itemType: "NFT", creationMethod: "AI_GENERATED", creatorName: "Test creator", contactEmail: "creator@example.com", title: "Study No. 1", description: "An AI-generated NFT collection.", imageUrl: "https://example.com/art.png", priceUsdc: "25.5", maxSupply: 100 };
@@ -51,7 +63,7 @@ before(async () => {
   imageRoute = await import("../../app/api/uploads/[id]/route");
   adminQueue = await import("../../app/api/admin/submissions/route");
   itemStatus = await import("../../app/api/items/[id]/status/route");
-  ownerCookie = await cookie(owner); reviewerCookie = await cookie(reviewer); otherCookie = await cookie(other);
+  ownerCookie = await cookie(owner); reviewerCookie = await emailReviewerCookie(); otherCookie = await cookie(other);
 });
 after(async () => { await db?.$disconnect(); rmSync(directory, { recursive: true, force: true }); });
 
@@ -82,6 +94,7 @@ test("submission authentication, AI policy, privacy, approval, rejection, and im
   assert.equal(approved.status, 200);
   const approvedSubmission = (await approved.json()).submission;
   assert.equal(approvedSubmission.status, "APPROVED");
+  assert.equal((await db.submission.findUniqueOrThrow({ where: { id: submission.id } })).reviewedBy, `user:${reviewerId}`);
   assert.ok(approvedSubmission.itemId);
   const publicCatalog = await catalog.GET(request("/api/items?itemType=NFT"));
   const items = (await publicCatalog.json()).items;

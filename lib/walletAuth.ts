@@ -49,13 +49,8 @@ export function normalizeWalletAddress(value: unknown): string | null {
     : null;
 }
 
-export function isAdminWallet(walletAddress: string): boolean {
-  const address = normalizeWalletAddress(walletAddress);
-  if (!address) return false;
-  return (process.env.ARTIQ_ADMIN_WALLETS ?? "")
-    .split(",")
-    .some((value) => normalizeWalletAddress(value.trim()) === address);
-}
+/** @deprecated Wallet ownership never grants reviewer privileges. */
+export const isAdminWallet: (walletAddress: string) => boolean = () => false;
 
 export function hashSessionToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
@@ -94,7 +89,7 @@ export async function getWalletSession(request: NextRequest): Promise<WalletSess
     const session = await getPrivySession(request);
     if (!session || request.headers.get("x-artiq-account-id") !== session.userId) return null;
     const wallet = selectPrivyWallet(request, session);
-    return wallet ? { walletAddress: wallet, isAdmin: isAdminWallet(wallet) } : null;
+    return wallet ? { walletAddress: wallet, isAdmin: false } : null;
   }
   const token = request.cookies.get(WALLET_SESSION_COOKIE)?.value;
   if (!token || !/^[a-f0-9]{64}$/.test(token)) return null;
@@ -102,7 +97,7 @@ export async function getWalletSession(request: NextRequest): Promise<WalletSess
     where: { tokenHash: hashSessionToken(token) },
   });
   if (!session || session.expiresAt <= new Date()) return null;
-  return { walletAddress: session.walletAddress, isAdmin: isAdminWallet(session.walletAddress) };
+  return { walletAddress: session.walletAddress, isAdmin: false };
 }
 
 export const authorizeWallet = getWalletSession;

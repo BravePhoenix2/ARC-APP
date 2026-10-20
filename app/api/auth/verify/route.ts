@@ -7,7 +7,6 @@ import { ensureTesterProfile } from "@/lib/testerLeaderboard";
 import {
   createWalletMessage,
   hashSessionToken,
-  isAdminWallet,
   newAuthToken,
   normalizeWalletAddress,
   readAuthBody,
@@ -85,7 +84,7 @@ export async function POST(request: NextRequest) {
     if (!created) {
       return NextResponse.json({ error: "This sign-in request was already used. Sign in again." }, { status: 401, headers });
     }
-    const response = NextResponse.json({ walletAddress, isAdmin: isAdminWallet(walletAddress) }, { headers });
+    const response = NextResponse.json({ walletAddress, isAdmin: false }, { headers });
     setWalletSessionCookie(response, token);
     clearEmailSessionCookie(response);
     return response;

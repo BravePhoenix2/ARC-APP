@@ -31,6 +31,9 @@ process.env.NEXT_PUBLIC_STUDIO_FACTORY_ADDRESS = factory;
 process.env.NEXT_PUBLIC_ART_MARKET_ADDRESS = market;
 process.env.NEXT_PUBLIC_AUCTION_HOUSE_ADDRESS = auctions;
 process.env.ARTIQ_ADMIN_WALLETS = reviewer;
+process.env.ARTIQ_ADMIN_EMAILS = "reviewer@example.com";
+delete process.env.NEXT_PUBLIC_PRIVY_APP_ID;
+delete process.env.PRIVY_APP_ID;
 process.env.GMAIL_SMTP_USER = "test.sender@gmail.com";
 process.env.GMAIL_SMTP_APP_PASSWORD = "abcdefghijklmnop";
 process.env.ARTIQ_EMAIL_CODE_SECRET = "01".repeat(32);
@@ -301,7 +304,7 @@ test("my rank requires the signed account header and cannot be selected by a que
 
 test("creator milestone is awarded only after approval and cannot be farmed with repeat submissions", async () => {
   const login = await emailLogin();
-  const admin = await walletLogin(reviewer);
+  const admin = await emailLogin("reviewer@example.com");
   async function submission(title: string) {
     return db.submission.create({ data: { creatorId: login.userId, creatorName: "Creator", itemType: "NFT", title, description: "A submitted NFT collection.", imageUrl: "https://example.com/art.png", priceUsdc: 1, maxSupply: 5, nftKind: "COLLECTIBLE" } });
   }
