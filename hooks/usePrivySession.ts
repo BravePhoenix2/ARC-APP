@@ -13,12 +13,18 @@ export type PrivyAccount = {
 
 export type PrivyAccountChoice = { id: string; label: string };
 export type PrivyLoginOptions = { loginMethods?: Array<"email" | "wallet"> };
+export type PrivyProfile = { id: string; email: string | null; walletAddress: string | null };
+export type PrivyAuthenticationState = "loading" | "signed-out" | "verifying" | "authenticated" | "verification-error" | "signing-out";
 
 export type PrivySession = {
   configured: boolean;
   ready: boolean;
   /** Authentication requires both a current Privy identity and server verification. */
   authenticated: boolean;
+  /** SDK sign-in is presentation only. Private requests must use authenticated/user. */
+  sdkAuthenticated: boolean;
+  profile: PrivyProfile | null;
+  authenticationState: PrivyAuthenticationState;
   user: PrivyAccount | null;
   error: string | null;
   login: (options?: PrivyLoginOptions) => void;
@@ -37,6 +43,9 @@ const unconfiguredSession: PrivySession = {
   configured: false,
   ready: true,
   authenticated: false,
+  sdkAuthenticated: false,
+  profile: null,
+  authenticationState: "signed-out",
   user: null,
   error: null,
   login: () => undefined,

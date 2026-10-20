@@ -314,6 +314,15 @@ export default function SubmissionReviewPage() {
 
         {session.isLoading ? (
           <div role="status" className="gallery-card mt-10 flex items-center gap-3 p-7 text-sm text-[var(--muted-text)]"><LoaderCircle size={18} className="animate-spin" aria-hidden="true" /> Checking reviewer access…</div>
+        ) : session.sdkAuthenticated && !session.authenticated ? (
+          <section className="gallery-card mx-auto mt-10 max-w-xl p-7 sm:p-9">
+            <ShieldCheck size={28} className="text-[#b55fbe]" aria-hidden="true" />
+            <h2 className="mt-5 text-2xl">Finish verifying your account</h2>
+            <p className="mt-3 break-all text-sm leading-6 text-[var(--muted-text)]">You’re signed in{session.profile?.email ? ` as ${session.profile.email}` : ""}. We need to finish verifying your account before opening the review queue.</p>
+            {session.pendingAccounts.length > 0 && <div className="mt-5 space-y-3"><p className="text-sm font-semibold">Choose your existing Artiq account</p>{session.pendingAccounts.map((account) => <button key={account.id} type="button" disabled={session.isSyncing} onClick={() => void session.selectAccount(account.id)} className="block w-full break-all rounded-xl border border-[var(--border-soft)] px-4 py-3 text-left text-sm hover:bg-[var(--chip-bg)] disabled:opacity-60">{account.label}</button>)}</div>}
+            {session.error && <p role="alert" className="mt-4 text-sm leading-6 text-[#EF476F]">{session.error}</p>}
+            <div className="mt-6 flex flex-wrap gap-3">{!session.pendingAccounts.length && <button type="button" onClick={() => void session.refresh()} disabled={session.isSyncing} className="gallery-button rounded-full px-5 py-3 text-sm font-semibold text-white disabled:opacity-60">{session.isSyncing ? "Verifying…" : "Retry verification"}</button>}<button type="button" onClick={() => void session.logout()} className={secondaryButton}>Sign out to change account</button></div>
+          </section>
         ) : !session.authenticated ? (
           <section className="gallery-card mx-auto mt-10 max-w-xl p-7 sm:p-9">
             <span className="inline-flex rounded-2xl bg-[#b55fbe]/10 p-3 text-[#b55fbe]"><ShieldCheck size={25} aria-hidden="true" /></span>

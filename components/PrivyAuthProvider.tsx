@@ -1,11 +1,11 @@
 "use client";
 
-import { getIdentityToken, useLinkAccount, usePrivy, useWallets } from "@privy-io/react-auth";
+import { getIdentityToken, useIdentityToken, useLinkAccount, usePrivy, useUser, useWallets } from "@privy-io/react-auth";
 import { useSetActiveWallet } from "@privy-io/wagmi";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useAccount, useDisconnect } from "wagmi";
-import { PrivySessionContext, type PrivyAccount, type PrivyAccountChoice, type PrivyLoginOptions } from "@/hooks/usePrivySession";
+import { PrivySessionContext, type PrivyAccount, type PrivyAccountChoice, type PrivyAuthenticationState, type PrivyLoginOptions } from "@/hooks/usePrivySession";
 import { PRIVY_SESSION_CHANGED, PRIVY_SETUP_MESSAGE } from "@/lib/privyClient";
 
 const PRIVATE_QUERY_ROOTS = new Set(["submissions", "admin-submissions", "item-detail", "tester-me"]);
@@ -43,6 +43,9 @@ export function UnconfiguredPrivyAuthProvider({ children }: { children: ReactNod
     configured: false,
     ready: true,
     authenticated: false,
+    sdkAuthenticated: false,
+    profile: null,
+    authenticationState: "signed-out" as const,
     user: null,
     error,
     login,
@@ -62,6 +65,8 @@ export function UnconfiguredPrivyAuthProvider({ children }: { children: ReactNod
 /** Converts signed Privy tokens to a short-lived, server-verified Artiq session. */
 export default function PrivyAuthProvider({ children }: { children: ReactNode }) {
   const { ready, authenticated: sdkAuthenticated, user: sdkUser, getAccessToken, login: openLogin, logout: sdkLogout } = usePrivy();
+  const { refreshUser } = useUser();
+  const { identityToken: observedIdentityToken } = useIdentityToken();
   const { wallets } = useWallets();
   const { setActiveWallet } = useSetActiveWallet();
   const { address } = useAccount();
@@ -82,22 +87,29 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
   const lastAccount = useRef<string | null>(null);
   const tokenGetter = useRef(getAccessToken);
   tokenGetter.current = getAccessToken;
+  const refreshSdkUser = useRef(refreshUser);
+  refreshSdkUser.current = refreshUser;
   const invalidatePendingSync = useCallback(() => {
     ++generation.current;
     pending.current?.controller.abort();
     pending.current = null;
   }, []);
 
-  // Bind every response to the SDK identity and linked accounts that requested
-  // it. A changed wallet or SDK identity cannot reuse a prior account's result.
+  // Only identity-bearing account fields change the security binding. Wallet
+  // reconnects and SDK metadata refreshes must not reset an email session.
+  const linkedAccounts = sdkUser?.linkedAccounts.flatMap((account) => {
+    if (account.type === "email") return [`email:${account.address.trim().toLowerCase()}`];
+    if (account.type === "wallet" && account.chainType === "ethereum") return [`wallet:${account.address.toLowerCase()}`];
+    return [];
+  }).sort() ?? [];
   const identity = sdkUser ? JSON.stringify({
     id: sdkUser.id,
-    accounts: sdkUser.linkedAccounts,
-    wallet: address?.toLowerCase() ?? null,
+    accounts: Array.from(new Set(linkedAccounts)),
   }) : "";
   const binding = ready && sdkAuthenticated ? identity : "";
-  const current = useRef({ binding, ready, sdkAuthenticated, address });
-  current.current = { binding, ready, sdkAuthenticated, address };
+  const selectedWallet = address && linkedAccounts.includes(`wallet:${address.toLowerCase()}`) ? address : undefined;
+  const current = useRef({ binding, ready, sdkAuthenticated, hasVerified: Boolean(verified), hasPendingChoice: pendingAccounts.length > 0 });
+  current.current = { binding, ready, sdkAuthenticated, hasVerified: Boolean(verified), hasPendingChoice: pendingAccounts.length > 0 };
 
   const clearSession = useCallback(() => {
     setVerified(null);
@@ -125,7 +137,6 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
 
   const sync = useCallback(async (preferredAccountId?: string): Promise<boolean> => {
     const requestedBinding = current.current.binding;
-    const selectedWallet = current.current.address;
     if (!requestedBinding || !current.current.ready || !current.current.sdkAuthenticated || loggingOut.current || suspended.current) return false;
     if (pending.current?.binding === requestedBinding && pending.current.accountId === preferredAccountId) return pending.current.promise;
     pending.current?.controller.abort();
@@ -142,14 +153,28 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
         if (!isCurrent()) return false;
         const accessToken = await tokenGetter.current();
         if (!isCurrent()) return false;
-        const identityToken = await getIdentityToken();
+        if (!accessToken) throw new Error("Your sign-in has expired. Sign out and sign in again.");
+        let identityToken = await getIdentityToken().catch(() => null);
         if (!isCurrent()) return false;
-        if (!accessToken || !identityToken) throw new Error("Could not verify your sign-in. Please try again.");
+        if (!identityToken) {
+          // Privy may finish login before publishing its identity token. The
+          // documented refresh also recovers sessions created before the app
+          // enabled identity tokens; no unsigned SDK identity reaches the API.
+          await refreshSdkUser.current().catch(() => undefined);
+          if (!isCurrent()) return false;
+          identityToken = await getIdentityToken().catch(() => null);
+          if (!isCurrent()) return false;
+        }
+        // A missing identity token is supported by the server's authenticated
+        // Privy profile lookup. Only Privy can attest email/wallet ownership;
+        // the unsigned SDK user is never sent as an authentication substitute.
         const response = await fetch("/api/auth/privy/session", {
           method: "POST",
           credentials: "same-origin",
           cache: "no-store",
-          headers: { "Content-Type": "application/json", ...(selectedWallet ? { "X-Wallet-Address": selectedWallet } : {}) },
+          // Wallet selection is separate from account authentication. Private
+          // transaction requests bind the selected, server-verified wallet.
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ accessToken, identityToken, ...(preferredAccountId ? { preferredAccountId } : {}) }),
           signal: controller.signal,
         });
@@ -219,6 +244,13 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
       void revokeServerSession().catch(() => undefined);
     }
   }, [binding, clearSession, ready, revokeServerSession, sync]);
+
+  // A token can arrive after the login callback. Resume verification rather
+  // than leaving a successfully signed-in user at a second Sign in button.
+  const hasIdentityToken = Boolean(observedIdentityToken);
+  useEffect(() => {
+    if (binding && hasIdentityToken && !pending.current && !current.current.hasVerified && !current.current.hasPendingChoice) void sync();
+  }, [binding, hasIdentityToken, sync]);
 
   useEffect(() => {
     if (!binding) return;
@@ -307,10 +339,21 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
   }, [clearSession, disconnectAsync, queryClient, revokeServerSession, sdkLogout]);
 
   const user = binding && !isLoggingOut && verified?.binding === binding && verified.expiresAt > Date.now() ? verified.user : null;
+  const signedIn = ready && sdkAuthenticated && Boolean(sdkUser) && !isLoggingOut && !suspended.current;
+  const profile = useMemo(() => signedIn && sdkUser ? {
+    id: sdkUser.id,
+    email: sdkUser.email?.address ?? sdkUser.linkedAccounts.find((account) => account.type === "email")?.address ?? null,
+    walletAddress: selectedWallet ?? sdkUser.wallet?.address ?? null,
+  } : null, [sdkUser, selectedWallet, signedIn]);
+  const authenticationState: PrivyAuthenticationState = !ready ? "loading" : isLoggingOut ? "signing-out" :
+    !signedIn ? "signed-out" : user ? "authenticated" : isSyncing || !error ? "verifying" : "verification-error";
   const value = useMemo(() => ({
     configured: true,
     ready,
     authenticated: Boolean(user),
+    sdkAuthenticated: signedIn,
+    profile,
+    authenticationState,
     user,
     error,
     login,
@@ -323,7 +366,7 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
     isSyncing,
     pendingAccounts,
     selectAccount,
-  }), [connectWallet, connectedWallets, error, isLoggingOut, isSyncing, login, logout, pendingAccounts, ready, refresh, sdkAuthenticated, selectAccount, selectWallet, user]);
+  }), [authenticationState, connectWallet, connectedWallets, error, isLoggingOut, isSyncing, login, logout, pendingAccounts, profile, ready, refresh, sdkAuthenticated, selectAccount, selectWallet, signedIn, user]);
 
   return <PrivySessionContext.Provider value={value}>{children}</PrivySessionContext.Provider>;
 }

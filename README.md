@@ -148,8 +148,9 @@ configured, the app renders normally and sign-in shows a setup notice.
 
 1. Create an app named **Artiq Testnet** at [Privy Dashboard](https://dashboard.privy.io).
 2. Under **User management > Authentication**, enable **Email** and **Ethereum
-   wallet** login. Under **Advanced**, enable **Return user data in an identity
-   token**. The server requires that signed identity token to verify account links.
+   wallet** login. Optionally enable **Advanced > Return user data in an identity
+   token**. Without that token, the server retrieves verified account links from
+   Privy's authenticated current-user API after verifying the access token.
 3. In app settings, allow `http://localhost:3000` and your current public HTTPS
    app origin. Temporary Cloudflare tunnel domains change; update the allowed
    origin and Artiq public URL whenever the tunnel changes. If app clients are
@@ -173,7 +174,13 @@ Privy sends the new sign-in codes. Existing Gmail SMTP configuration remains
 private and is retained only for legacy authentication compatibility. Never put
 an app secret or private wallet key in a `NEXT_PUBLIC_` variable.
 
-The server verifies both Privy tokens before setting a revocable HttpOnly session.
+The server verifies the Privy access token and proves linked-account ownership
+using either the signed identity token or Privy's authenticated current-user API
+before setting a revocable HttpOnly session. No app secret is required. After
+Privy sign-in, the navbar shows a profile avatar while this verification finishes;
+private pages remain locked until the server verifies the account. If verification
+fails, the profile menu and reviewer page offer a retry without repeating email
+login. Wallet reconnections do not reset a verified email session.
 A matching verified legacy email or wallet preserves the existing account and
 its submissions. If both identify different previous accounts, the user chooses
 which account to use; histories are not silently merged or deleted. Once linked,

@@ -11,7 +11,7 @@ import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT, type JWK, type 
 import { encodeAbiParameters, encodeEventTopics, parseAbi, type Address, type Hash } from "viem";
 
 // All identities, JWT keys, uploads, sessions and receipts belong to this
-// disposable process. The fetch stub permits only a local JWKS response;
+// disposable process. The fetch stub permits only local Privy API fixtures;
 // these tests cannot send mail, call an RPC, or contact a real Privy app.
 const directory = mkdtempSync(join(tmpdir(), "artiq-privy-auth-"));
 const origin = "http://localhost:3000";
@@ -65,11 +65,18 @@ const receipts = new Map<string, Record<string, unknown>>();
 const fetchedUrls: string[] = [];
 let rpcReads = 0;
 let mailAttempts = 0;
+let jwksFailureAppId: string | null = null;
+type CurrentUserPlan = { body?: unknown; raw?: string; status?: number; headers?: Record<string, string>; failure?: "network" | "timeout"; networkCode?: string; failureDetails?: string };
+const currentUserPlans: CurrentUserPlan[] = [];
+const currentUserRequests: Array<{ method: string; headers: Headers; redirect: RequestRedirect | undefined; signal: AbortSignal | null | undefined }> = [];
 
 const nowSeconds = () => Math.floor(Date.now() / 1000);
 const did = () => `did:privy:${randomBytes(12).toString("hex")}`;
 const emailAccount = (address: string): LinkedAccount => ({ type: "email", address, lv: nowSeconds() - 1 });
 const walletAccount = (address: string, extra: LinkedAccount = {}): LinkedAccount => ({ type: "wallet", address, chain_type: "ethereum", wallet_client_type: "metamask", lv: nowSeconds() - 1, ...extra });
+const fullEmailAccount = (address: string): LinkedAccount => ({ type: "email", address, first_verified_at: nowSeconds() - 100, latest_verified_at: nowSeconds() - 1, verified_at: nowSeconds() - 1 });
+const fullWalletAccount = (address: string): LinkedAccount => ({ type: "wallet", address, chain_type: "ethereum", wallet_client_type: "metamask", first_verified_at: nowSeconds() - 100, latest_verified_at: nowSeconds() - 1, verified_at: nowSeconds() - 1 });
+const currentUserBody = (privyDid: string, accounts: LinkedAccount[]) => ({ user: { id: privyDid, created_at: nowSeconds() - 100, linked_accounts: accounts }, identity_token: null });
 
 function request(path: string, method = "GET", body?: unknown, login?: Pick<Login, "user" | "cookie">, selectedWallet?: string, browserOrigin = origin) {
   return new NextRequest(`${origin}${path}`, {
@@ -147,9 +154,29 @@ before(async () => {
   signingKey = pair.privateKey;
   publicJwk = { ...await exportJWK(pair.publicKey), kid: "artiq-test-key", alg: "ES256", use: "sig" };
   originalFetch = globalThis.fetch;
-  globalThis.fetch = async (input) => {
+  globalThis.fetch = async (input, init) => {
     const url = String(input instanceof Request ? input.url : input);
     fetchedUrls.push(url);
+    if (url === "https://auth.privy.io/api/v1/users/me") {
+      const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+      const method = init?.method ?? (input instanceof Request ? input.method : "GET");
+      currentUserRequests.push({ method, headers, redirect: init?.redirect, signal: init?.signal });
+      assert.equal(method, "GET", "the fallback uses Privy's official current-user read endpoint");
+      assert.equal(headers.get("privy-app-id"), appId);
+      assert.match(headers.get("authorization") ?? "", /^Bearer ey/);
+      assert.equal(init?.redirect, "error", "provider redirects must not receive the user's bearer token");
+      assert.ok(init?.signal instanceof AbortSignal, "the provider read must have a timeout signal");
+      const plan = currentUserPlans.shift();
+      assert.ok(plan, "all current-user reads must have a deliberate local fixture");
+      if (plan.failure === "network") throw Object.assign(new TypeError("fetch failed"), { cause: { code: plan.networkCode ?? "ECONNRESET", message: plan.failureDetails } });
+      if (plan.failure === "timeout") throw new DOMException(plan.failureDetails ?? "Fixture request timed out", "TimeoutError");
+      return new Response(plan.raw ?? JSON.stringify(plan.body ?? {}), {
+        status: plan.status ?? 200, headers: { "Content-Type": "application/json", ...plan.headers },
+      });
+    }
+    if (jwksFailureAppId && url === `https://auth.privy.io/api/v1/apps/${jwksFailureAppId}/jwks.json`) {
+      throw new TypeError("fetch failed");
+    }
     assert.equal(url, `https://auth.privy.io/api/v1/apps/${appId}/jwks.json`, "only the configured official JWKS endpoint may be contacted");
     return new Response(JSON.stringify({ keys: [publicJwk] }), { status: 200, headers: { "Content-Type": "application/json" } });
   };
@@ -201,7 +228,9 @@ beforeEach(async () => {
   await db.emailChallenge.deleteMany();
   await db.walletChallenge.deleteMany();
   await db.user.deleteMany();
-  receipts.clear(); rpcReads = 0; mailAttempts = 0;
+  receipts.clear(); rpcReads = 0; mailAttempts = 0; jwksFailureAppId = null;
+  currentUserPlans.length = 0;
+  currentUserRequests.length = 0;
 });
 
 after(async () => {
@@ -227,7 +256,7 @@ test("rejects unconfigured, foreign, malformed and oversized sign-ins before cre
   const missing = request("/api/auth/privy/session", "POST", tokens);
   missing.headers.delete("origin");
   assert.equal((await route.POST(missing)).status, 403);
-  for (const body of [null, [], {}, { accessToken: tokens.accessToken }, { ...tokens, preferredAccountId: { id: "spoofed" } }, { ...tokens, extra: "x".repeat(100_000) }]) {
+  for (const body of [null, [], {}, { ...tokens, identityToken: {} }, { ...tokens, preferredAccountId: { id: "spoofed" } }, { ...tokens, extra: "x".repeat(100_000) }]) {
     assert.equal((await route.POST(request("/api/auth/privy/session", "POST", body))).status, 400);
   }
   const malformed = new NextRequest(`${origin}/api/auth/privy/session`, { method: "POST", headers: { Origin: origin, "Content-Type": "application/json" }, body: "{" });
@@ -262,6 +291,213 @@ test("configured Privy disables legacy sign-in issuance while preserving existin
   assert.equal((await (await legacyEmailRequest.GET()).json()).available, false);
   assert.equal((await legacyEmailSession.GET(new NextRequest(`${origin}/api/auth/email/session`, { headers: { Cookie: email.cookie } }))).status, 200);
   assert.equal((await legacyWalletSession.GET(new NextRequest(`${origin}/api/auth/session`, { headers: { Cookie: wallet.cookie } }))).status, 200);
+});
+
+test("an access-token-only login reads Privy's verified current user and restores an existing email reviewer's account", async () => {
+  const previous = await legacyEmail(reviewerEmail);
+  const privyDid = did();
+  const tokens = await tokenPair({ privyDid });
+  let currentCookie = previous.cookie;
+  for (const identityToken of [undefined, null, ""]) {
+    currentUserPlans.push({ body: currentUserBody(privyDid, [fullEmailAccount(reviewerEmail)]) });
+    const incoming = request("/api/auth/privy/session", "POST", {
+      accessToken: tokens.accessToken, identityToken,
+      // The user can choose neither the upstream identity nor its privileges.
+      email: "attacker@example.com", privyDid: did(), isAdmin: false,
+      userEndpoint: "https://attacker.example/profile",
+    });
+    const separator = currentCookie.indexOf("=");
+    incoming.cookies.set(currentCookie.slice(0, separator), currentCookie.slice(separator + 1));
+    const response = await route.POST(incoming);
+    const body = await response.json();
+    assert.equal(response.status, 200, JSON.stringify(body));
+    assert.equal(body.user.id, previous.user.id);
+    assert.equal(body.user.email, reviewerEmail);
+    assert.equal(body.user.isAdmin, true);
+    assert.deepEqual(body.user.walletAddresses, []);
+    const token = response.headers.get("set-cookie")!.match(/(?:^|,\s*)artiq_privy_session=([^;,]+)/)![1];
+    currentCookie = `${cookieName}=${token}`;
+    const reviewer = { user: body.user, cookie: currentCookie };
+    assert.equal((await adminQueue.GET(request("/api/admin/submissions", "GET", undefined, reviewer))).status, 200);
+    assert.ok(Date.parse(body.expiresAt) <= (nowSeconds() + 3600) * 1000, "the fallback session cannot outlive its verified access token");
+  }
+  assert.equal(currentUserRequests.length, 3);
+  assert.ok(currentUserRequests.every((call) => call.headers.get("authorization") === `Bearer ${tokens.accessToken}`));
+  assert.equal(await db.user.count(), 1);
+  assert.equal(await db.privySession.count(), 1);
+  assert.equal(await db.emailSession.count(), 0);
+  assert.equal(await db.testerProfile.count(), 1);
+  assert.equal(await db.testerMilestone.count({ where: { kind: "SIGN_IN" } }), 1);
+});
+
+test("a supplied invalid identity token cannot be replaced with a more permissive profile lookup", async () => {
+  const tokens = await tokenPair({ accounts: [emailAccount(reviewerEmail)] });
+  const invalid = await route.POST(request("/api/auth/privy/session", "POST", { ...tokens, identityToken: "invalid-token" }));
+  assert.equal(invalid.status, 401);
+  assert.equal((await invalid.json()).code, "INVALID_PRIVY_TOKEN");
+  assert.equal(currentUserRequests.length, 0, "a failed signed identity proof never downgrades to the fallback");
+  assert.equal(await db.user.count(), 0);
+  assert.equal(await db.privySession.count(), 0);
+  assert.equal((await adminQueue.GET(request("/api/admin/submissions"))).status, 401);
+});
+
+test("forged or foreign access tokens are rejected before any current-user API request", async () => {
+  const badTokens = [
+    "forged-access-token",
+    (await tokenPair({ accessClaims: { aud: "foreign-app" } })).accessToken,
+    (await tokenPair({ accessClaims: { iss: "attacker.example" } })).accessToken,
+    (await tokenPair({ accessClaims: { exp: nowSeconds() - 120 } })).accessToken,
+    (await tokenPair({ accessClaims: { sid: "" } })).accessToken,
+  ];
+  for (const accessToken of badTokens) {
+    const response = await route.POST(request("/api/auth/privy/session", "POST", { accessToken, identityToken: null, email: reviewerEmail, isAdmin: true }));
+    assert.equal(response.status, 401);
+    assert.equal((await response.json()).code, "INVALID_PRIVY_TOKEN");
+  }
+  assert.equal(currentUserRequests.length, 0);
+  assert.equal(await db.user.count(), 0);
+  assert.equal(await db.privySession.count(), 0);
+});
+
+test("current-user profiles must match the cryptographically verified Privy DID", async () => {
+  const tokens = await tokenPair();
+  currentUserPlans.push({ body: currentUserBody(did(), [fullEmailAccount(reviewerEmail)]) });
+  const response = await route.POST(request("/api/auth/privy/session", "POST", { accessToken: tokens.accessToken, identityToken: null }));
+  assert.equal(response.status, 401);
+  assert.equal((await response.json()).code, "INVALID_PRIVY_TOKEN");
+  assert.equal(currentUserRequests.length, 1);
+  assert.equal(await db.user.count(), 0);
+  assert.equal(await db.privySession.count(), 0);
+  assert.equal(await db.testerProfile.count(), 0);
+});
+
+test("unverified current-user contact fields never authorize a reviewer or attach an unrelated wallet", async () => {
+  const privyDid = did();
+  const tokens = await tokenPair({ privyDid });
+  currentUserPlans.push({ body: currentUserBody(privyDid, [
+    fullWalletAccount(ownerWallet),
+    { type: "email", address: reviewerEmail },
+    { type: "email", address: reviewerEmail, verified_at: 0, latest_verified_at: 0 },
+    { type: "wallet", address: otherWallet, chain_type: "ethereum" },
+  ]) });
+  const response = await route.POST(request("/api/auth/privy/session", "POST", {
+    accessToken: tokens.accessToken, identityToken: null, email: reviewerEmail, isAdmin: true,
+    linked_accounts: [fullEmailAccount(reviewerEmail)],
+  }));
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.user.email, null);
+  assert.equal(body.user.isAdmin, false);
+  assert.deepEqual(body.user.walletAddresses, [ownerWallet]);
+  const token = response.headers.get("set-cookie")!.match(/(?:^|,\s*)artiq_privy_session=([^;,]+)/)![1];
+  assert.equal((await adminQueue.GET(request("/api/admin/submissions", "GET", undefined, { user: body.user, cookie: `${cookieName}=${token}` }))).status, 403);
+});
+
+test("current-user authentication failures and provider outages fail closed without revoking a valid reviewer session", async () => {
+  const signed = await login([emailAccount(reviewerEmail)]);
+  const tokens = await tokenPair({ privyDid: signed.privyDid });
+  const cases: Array<{ plan: CurrentUserPlan; status: number; code: string }> = [
+    { plan: { status: 401 }, status: 401, code: "INVALID_PRIVY_TOKEN" },
+    { plan: { status: 403 }, status: 401, code: "INVALID_PRIVY_TOKEN" },
+    { plan: { status: 503 }, status: 503, code: "PRIVY_VERIFICATION_UNAVAILABLE" },
+    { plan: { failure: "network" }, status: 503, code: "PRIVY_VERIFICATION_UNAVAILABLE" },
+    { plan: { failure: "timeout" }, status: 503, code: "PRIVY_VERIFICATION_UNAVAILABLE" },
+    { plan: { raw: "{" }, status: 503, code: "PRIVY_VERIFICATION_UNAVAILABLE" },
+    { plan: { body: { user: null } }, status: 401, code: "INVALID_PRIVY_TOKEN" },
+    { plan: { body: currentUserBody(signed.privyDid, []), headers: { "Content-Length": "1000000" } }, status: 503, code: "PRIVY_VERIFICATION_UNAVAILABLE" },
+    { plan: { raw: JSON.stringify({ ...currentUserBody(signed.privyDid, [fullEmailAccount(reviewerEmail)]), padding: "x".repeat(70_000) }) }, status: 503, code: "PRIVY_VERIFICATION_UNAVAILABLE" },
+  ];
+  for (const { plan, status, code } of cases) {
+    currentUserPlans.push(plan);
+    const response = await route.POST(request("/api/auth/privy/session", "POST", { accessToken: tokens.accessToken, identityToken: null }, signed));
+    assert.equal(response.status, status, JSON.stringify(plan).slice(0, 200));
+    assert.equal((await response.json()).code, code);
+    assert.equal(await db.user.count(), 1);
+    assert.equal(await db.privySession.count(), 1, "failed fallback cannot issue, rotate or revoke a session");
+    assert.equal((await adminQueue.GET(request("/api/admin/submissions", "GET", undefined, signed))).status, 200);
+  }
+  assert.equal(currentUserRequests.length, cases.length);
+});
+
+test("verification service outages remain retryable and do not invalidate an existing verified reviewer cookie", async () => {
+  const signed = await login([emailAccount(reviewerEmail)]);
+  const originalAppId = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
+  const outageAppId = "clartiqprivyverificationoutage";
+  const tokens = await tokenPair({
+    privyDid: signed.privyDid, accounts: [emailAccount(reviewerEmail)],
+    accessClaims: { aud: outageAppId }, identityClaims: { aud: outageAppId },
+  });
+  let response: Response;
+  try {
+    process.env.NEXT_PUBLIC_PRIVY_APP_ID = outageAppId;
+    jwksFailureAppId = outageAppId;
+    response = await route.POST(request("/api/auth/privy/session", "POST", tokens, signed));
+  } finally {
+    process.env.NEXT_PUBLIC_PRIVY_APP_ID = originalAppId;
+    jwksFailureAppId = null;
+  }
+  assert.equal(response!.status, 503);
+  assert.equal((await response!.json()).code, "PRIVY_VERIFICATION_UNAVAILABLE");
+  assert.equal(await db.user.count(), 1);
+  assert.equal(await db.privySession.count(), 1, "failed verification does not rotate or revoke a valid cookie");
+  const restored = await route.GET(new NextRequest(`${origin}/api/auth/privy/session`, { headers: { Cookie: signed.cookie } }));
+  assert.equal(restored.status, 200);
+  assert.equal((await restored.json()).user.isAdmin, true);
+  assert.equal((await adminQueue.GET(request("/api/admin/submissions", "GET", undefined, signed))).status, 200);
+});
+
+test("server verification diagnostics identify provider failures without logging private credentials or profile data", async () => {
+  const signed = await login([emailAccount(reviewerEmail)]);
+  const tokens = await tokenPair({ privyDid: signed.privyDid });
+  const privateDetails = `private-provider-payload:${reviewerEmail}:${signed.privyDid}:${tokens.accessToken}`;
+  const cases: Array<{ plan: CurrentUserPlan; reason: string; upstreamStatus?: number; networkCode?: string }> = [
+    { plan: { status: 503, body: { error: privateDetails } }, reason: "http-status", upstreamStatus: 503 },
+    { plan: { failure: "network", networkCode: "ENOTFOUND", failureDetails: privateDetails }, reason: "network", networkCode: "ENOTFOUND" },
+    { plan: { failure: "network", networkCode: privateDetails, failureDetails: privateDetails }, reason: "network" },
+    { plan: { failure: "timeout", failureDetails: privateDetails }, reason: "timeout" },
+    { plan: { raw: `{${JSON.stringify(privateDetails)}` }, reason: "invalid-json" },
+    { plan: { body: { privateUnexpectedShape: privateDetails } }, reason: "invalid-profile" },
+    { plan: { body: { privateUnexpectedShape: privateDetails }, headers: { "Content-Length": "1000000" } }, reason: "oversized" },
+  ];
+  const originalWarn = console.warn;
+  const warnings: unknown[][] = [];
+  try {
+    console.warn = (...values: unknown[]) => { warnings.push(values); };
+    for (const { plan, reason, upstreamStatus, networkCode } of cases) {
+      warnings.length = 0;
+      currentUserPlans.push(plan);
+      const response = await route.POST(request("/api/auth/privy/session", "POST", { accessToken: tokens.accessToken, identityToken: null }, signed));
+      assert.equal(response.status, 503);
+      const responseBody = await response.json();
+      assert.equal(responseBody.code, "PRIVY_VERIFICATION_UNAVAILABLE");
+      const failure = warnings.find((entry) => entry[0] === "[artiq-auth]" && entry[1] && typeof entry[1] === "object")?.[1] as Record<string, unknown> | undefined;
+      assert.ok(failure, "a server-only diagnostic is emitted for this provider failure");
+      assert.equal(failure.event, "privy_session_verification_failed");
+      assert.equal(failure.code, "PRIVY_VERIFICATION_UNAVAILABLE");
+      const diagnostic = failure.diagnostic && typeof failure.diagnostic === "object" ? failure.diagnostic as Record<string, unknown> : failure;
+      assert.equal(diagnostic.stage, "current-user");
+      assert.equal(diagnostic.reason, reason);
+      assert.equal(diagnostic.upstreamStatus, upstreamStatus);
+      assert.equal(diagnostic.networkCode, networkCode);
+      assert.ok(typeof failure.elapsedMs === "number" && Number.isFinite(failure.elapsedMs) && failure.elapsedMs >= 0);
+      assert.ok(Object.keys(diagnostic).every((key) => ["event", "code", "stage", "reason", "upstreamStatus", "networkCode", "elapsedMs"].includes(key)), "only bounded diagnostic fields may reach logs");
+      assert.ok(!("stage" in responseBody) && !("networkCode" in responseBody), "operational diagnostics remain on the server");
+      const output = JSON.stringify({ warnings, responseBody });
+      for (const secret of [tokens.accessToken, tokens.identityToken, reviewerEmail, signed.privyDid, privateDetails]) {
+        assert.ok(!output.includes(secret), "JWTs, verified identities and upstream messages must stay out of logs and responses");
+      }
+      assert.equal(await db.privySession.count(), 1);
+      assert.equal((await adminQueue.GET(request("/api/admin/submissions", "GET", undefined, signed))).status, 200);
+    }
+  } finally {
+    console.warn = originalWarn;
+  }
+  const forgedDiagnostic = Object.assign(new Error(privateDetails), {
+    stage: privateDetails, reason: privateDetails, diagnostic: { stage: privateDetails },
+    cause: { code: privateDetails, message: privateDetails },
+  });
+  assert.deepEqual(auth.privyVerificationDiagnostic(forgedDiagnostic), { stage: "access-token", reason: "invalid-token" },
+    "arbitrary error properties cannot inject data into the safe diagnostic output");
 });
 
 test("cryptographically verifies both tokens and rejects forged, expired or mismatched claims", async () => {
@@ -505,6 +741,44 @@ test("a verified allowlisted email reviews private applications without connecti
   assert.equal((await reviewRoute.PATCH(request(`/api/admin/submissions/${rejected.id}`, "PATCH", { decision: "REJECTED", reviewNote: "Please provide clearer ownership details." }, signed), { params: { id: rejected.id } })).status, 200);
   assert.equal((await db.submission.findUniqueOrThrow({ where: { id: rejected.id } })).reviewedBy, `user:${signed.user.id}`);
   assert.equal(await db.item.count(), 1, "rejection does not publish artwork");
+});
+
+test("a stale browser wallet cannot block email reviewer bootstrap or grant unlinked wallet access", async () => {
+  const signed = await login([emailAccount(reviewerEmail)]);
+  const before = {
+    userCount: await db.user.count(),
+    profileCount: await db.testerProfile.count(),
+    milestoneCount: await db.testerMilestone.count(),
+  };
+  const tokens = await tokenPair({ privyDid: signed.privyDid, accounts: [emailAccount(reviewerEmail)] });
+  const staleWallet = await route.POST(request("/api/auth/privy/session", "POST", tokens, signed, otherWallet));
+  assert.equal(staleWallet.status, 200, "a wallet left connected from a different identity must not block proven email sign-in");
+  const body = await staleWallet.json();
+  assert.equal(body.user.id, signed.user.id);
+  assert.equal(body.user.isAdmin, true);
+  assert.equal(body.user.walletAddress, null);
+  assert.deepEqual(body.user.walletAddresses, [], "an unlinked browser wallet never becomes a verified account wallet");
+  const token = staleWallet.headers.get("set-cookie")!.match(/(?:^|,\s*)artiq_privy_session=([^;,]+)/)![1];
+  const restored = { ...signed, cookie: `${cookieName}=${token}` };
+  const cookieOnly = new NextRequest(`${origin}/api/auth/privy/session`, { headers: { Cookie: restored.cookie } });
+  const snapshot = await route.GET(cookieOnly);
+  assert.equal(snapshot.status, 200, "page reload can read its own verified HttpOnly session without a wallet header");
+  assert.equal((await snapshot.json()).user.isAdmin, true);
+  const staleBootstrap = await route.GET(request("/api/auth/privy/session", "GET", undefined, restored, otherWallet));
+  assert.equal(staleBootstrap.status, 200, "a stale wallet does not erase the current email session during restoration");
+  const staleBody = await staleBootstrap.json();
+  assert.equal(staleBody.user.isAdmin, true);
+  assert.deepEqual(staleBody.user.walletAddresses, []);
+  assert.equal((await adminQueue.GET(request("/api/admin/submissions", "GET", undefined, restored, otherWallet))).status, 401,
+    "private APIs still reject an unlinked wallet header even after successful bootstrap");
+  assert.equal((await adminQueue.GET(request("/api/admin/submissions", "GET", undefined, restored))).status, 200);
+  assert.equal((await route.GET(request("/api/auth/privy/session", "GET", undefined, signed))).status, 401,
+    "successful refresh rotates the previous session");
+  assert.deepEqual({
+    userCount: await db.user.count(),
+    profileCount: await db.testerProfile.count(),
+    milestoneCount: await db.testerMilestone.count(),
+  }, before, "refresh and restoration cannot create duplicate accounts or tester credit");
 });
 
 test("wallet grants, unverified emails, contact fields and lookalike addresses never authorize a reviewer", async () => {

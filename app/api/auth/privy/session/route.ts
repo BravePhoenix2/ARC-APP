@@ -3,7 +3,7 @@ import { getAddress } from "viem";
 import { EMAIL_SESSION_COOKIE, clearEmailSessionCookie, getEmailSession } from "@/lib/emailAuth";
 import {
   PRIVY_SESSION_COOKIE, clearPrivySessionCookie, getPrivyAppId, getPrivySession,
-  selectPrivyWallet, setPrivySessionCookie, verifyPrivyTokens,
+  privyVerificationDiagnostic, privyVerificationFailureCode, selectPrivyWallet, setPrivySessionCookie, verifyPrivyTokens,
   type PrivySession, type VerifiedPrivyIdentity,
 } from "@/lib/privyAuth";
 import { prisma } from "@/lib/prisma";
@@ -123,13 +123,17 @@ async function revokeRequestSessions(tx: Prisma.TransactionClient, request: Next
 export async function GET(request: NextRequest) {
   try {
     const session = await getPrivySession(request);
-    if (session && (request.headers.get("x-wallet-address") === null || selectPrivyWallet(request, session))) {
+    // Wallet reconnection and embedded-wallet creation can race a signed identity
+    // refresh. This endpoint restores the verified account, not wallet ownership:
+    // an unrelated wallet selection must not erase a valid email session.
+    if (session) {
       return NextResponse.json(sessionBody(request, session), { headers });
     }
     const response = NextResponse.json({ error: "Sign in to continue." }, { status: 401, headers });
     clearPrivySessionCookie(response);
     return response;
   } catch {
+    console.warn("[artiq-auth]", { event: "privy_session_read_failed", code: "PRIVY_SESSION_READ_FAILED" });
     return NextResponse.json({ error: "Sign-in is unavailable. Please try again." }, { status: 503, headers });
   }
 }
@@ -143,21 +147,27 @@ export async function POST(request: NextRequest) {
   }
   if (!body || typeof body !== "object" || Array.isArray(body)) return NextResponse.json({ error: "Provide a valid sign-in request." }, { status: 400, headers });
   const { accessToken, identityToken, preferredAccountId } = body as Record<string, unknown>;
-  if (typeof accessToken !== "string" || typeof identityToken !== "string" ||
+  if (typeof accessToken !== "string" || !accessToken ||
       (preferredAccountId !== undefined && (typeof preferredAccountId !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(preferredAccountId)))) {
     return NextResponse.json({ error: "Provide your current Privy sign-in tokens." }, { status: 400, headers });
   }
+  if (identityToken !== undefined && identityToken !== null && typeof identityToken !== "string") return NextResponse.json({ error: "Provide your current Privy sign-in tokens." }, { status: 400, headers });
   let identity: VerifiedPrivyIdentity;
-  try { identity = await verifyPrivyTokens({ accessToken, identityToken }); } catch {
-    return NextResponse.json({ error: "Your sign-in could not be verified. Sign in again and try once more." }, { status: 401, headers });
+  const verificationStartedAt = Date.now();
+  try { identity = await verifyPrivyTokens({ accessToken, identityToken }); } catch (cause) {
+    const code = privyVerificationFailureCode(cause);
+    console.warn("[artiq-auth]", { event: "privy_session_verification_failed", code, ...privyVerificationDiagnostic(cause), elapsedMs: Date.now() - verificationStartedAt });
+    if (code === "PRIVY_VERIFICATION_UNAVAILABLE") {
+      return NextResponse.json({ error: "Sign-in verification is temporarily unavailable. Please retry in a moment.", code }, { status: 503, headers });
+    }
+    return NextResponse.json({ error: "Your sign-in could not be verified. Sign in again and try once more.", code }, { status: 401, headers });
   }
   const requestedWallet = request.headers.get("x-wallet-address");
-  if (requestedWallet !== null && !identity.walletAddresses.includes(requestedWallet.toLowerCase())) {
-    return NextResponse.json({ error: "Choose a wallet linked to your sign-in account." }, { status: 401, headers });
-  }
   // Retain the validated active wallet first for cookie-only ownership reads.
-  // Reviewer access is determined independently by the verified email.
-  const activeWallet = requestedWallet?.toLowerCase();
+  // An unlinked/transient selection is ignored during session bootstrap. Private
+  // wallet operations still require a wallet in this signed identity snapshot.
+  const activeWallet = requestedWallet && identity.walletAddresses.includes(requestedWallet.toLowerCase())
+    ? requestedWallet.toLowerCase() : null;
   const sessionWallets = activeWallet
     ? [activeWallet, ...identity.walletAddresses.filter((wallet) => wallet !== activeWallet)]
     : identity.walletAddresses;
@@ -186,6 +196,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "That account cannot be linked to this sign-in. Use its existing sign-in method.", code: error.message }, { status: 409, headers });
     }
     // Unique conflicts may be two simultaneous first sign-ins. Retrying will resolve the newly bound account.
+    console.warn("[artiq-auth]", { event: "privy_session_write_failed", code: "PRIVY_SESSION_WRITE_FAILED" });
     return NextResponse.json({ error: "Your account could not be opened. Please try again." }, { status: 503, headers });
   }
 }

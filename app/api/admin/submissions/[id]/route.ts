@@ -30,7 +30,9 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
       }
       // A conditional update prevents two reviewers publishing the same application.
       const claimed = await tx.submission.updateMany({ where: { id: params.id, status: "PENDING" }, data: {
-        status: decision, reviewNote: note, artReviewConfirmed: decision === "APPROVED" && application.itemType === "WEB2_ART" && artReviewConfirmed === true, reviewedBy: `user:${session.userId}`, reviewedAt: new Date(),
+        status: decision,
+        reviewNote: note,
+        artReviewConfirmed: decision === "APPROVED" && application.itemType === "WEB2_ART" && artReviewConfirmed === true, reviewedBy: `user:${session.userId}`, reviewedAt: new Date(),
       } });
       if (claimed.count !== 1) throw new Error("ALREADY_REVIEWED");
       if (decision === "APPROVED") {
