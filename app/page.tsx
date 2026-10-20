@@ -4,7 +4,7 @@ import Atmosphere from "@/components/Atmosphere";
 import Link from "next/link";
 import ArticLogo from "@/components/ArticLogo";
 import Eyebrow from "@/components/Eyebrow";
-import ThemeToggle from "@/components/ThemeToggle";
+import ConnectWalletButton from "@/components/ConnectWalletButton";
 import { OrbitCircle, OrbitOval, OrbitSquare, OrbitTriangle } from "@/components/orbit-shapes";
 
 const FEATURES = [
@@ -87,24 +87,9 @@ export default function Home() {
       <Atmosphere />
       <div className="grid lg:min-h-screen lg:grid-cols-2">
         <div className="hero-copy relative flex min-h-[420px] flex-col px-6 py-6 sm:px-10 lg:px-16 xl:px-20">
-          <header className="flex items-center justify-between">
+          <header className="flex flex-wrap items-center justify-between gap-3">
             <ArticLogo className="text-xl sm:text-2xl" />
-
-            <div className="flex items-center gap-6 lg:gap-8">
-              <nav className="hidden items-center gap-6 text-sm font-medium text-[var(--muted-text-strong)] md:flex lg:gap-8">
-                <a href="#works" className="transition hover:text-[var(--page-text)]">
-                  Works
-                </a>
-                <a href="#contact" className="transition hover:text-[var(--page-text)]">
-                  Contact
-                </a>
-                <a href="#about" className="transition hover:text-[var(--page-text)]">
-                  About
-                </a>
-              </nav>
-              <Link href="/settings" className="text-sm font-medium text-[var(--muted-text)] hover:text-[var(--page-text)]">Settings</Link>
-              <ThemeToggle />
-            </div>
+            <div className="min-w-0 max-w-full"><ConnectWalletButton /></div>
           </header>
 
           <div className="flex flex-1 flex-col justify-center py-10 lg:py-14">
@@ -122,7 +107,7 @@ export default function Home() {
 
             <div className="mt-7 lg:mt-8">
               <Link
-                href="/marketplace"
+                href="/nfts"
                 className="gallery-button inline-flex items-center justify-center border border-[#EF476F] bg-[#EF476F] px-6 py-3.5 text-sm font-semibold text-white transition hover:bg-[#d73c63] sm:px-8 sm:py-4 sm:text-base"
               >
                 Launch App <span aria-hidden="true">↗</span>
@@ -291,18 +276,6 @@ export default function Home() {
         <div className="gallery-footer rounded-2xl bg-[var(--section-alt-bg)] px-6 py-8 shadow-[var(--card-shadow)] sm:px-10 sm:py-10">
           <div className="flex flex-col gap-8 sm:flex-row sm:items-center sm:justify-between">
             <ArticLogo className="text-lg" />
-
-            <nav id="about" className="flex flex-wrap items-center gap-6 text-sm font-medium text-[var(--muted-text-strong)]">
-              <a href="#works" className="transition hover:text-[var(--page-text)]">
-                Works
-              </a>
-              <a href="#contact" className="transition hover:text-[var(--page-text)]">
-                Contact
-              </a>
-              <a href="#about" className="transition hover:text-[var(--page-text)]">
-                About
-              </a>
-            </nav>
 
             <p className="text-sm text-[var(--faint-text)]">© {new Date().getFullYear()} Artic. Built on Arc.</p>
           </div>

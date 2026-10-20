@@ -2,6 +2,7 @@ import { randomBytes, randomInt } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { EMAIL_CHALLENGE_SECONDS, hashEmailCode, normalizeEmail } from "@/lib/emailAuth";
 import { prisma } from "@/lib/prisma";
+import { getPrivyAppId } from "@/lib/privyAuth";
 import { isEmailConfigured, sendSignInEmail } from "@/lib/sendEmail";
 import { readAuthBody, sameOrigin, walletRequestOrigin } from "@/lib/walletAuth";
 
@@ -17,12 +18,15 @@ class EmailRateLimit extends Error {
 }
 
 export async function GET() {
-  return NextResponse.json({ available: isEmailConfigured() }, { headers });
+  return NextResponse.json({ available: !getPrivyAppId() && isEmailConfigured() }, { headers });
 }
 
 export async function POST(request: NextRequest) {
   if (!sameOrigin(request)) {
     return NextResponse.json({ error: "This request must come from Artiq." }, { status: 403, headers });
+  }
+  if (getPrivyAppId()) {
+    return NextResponse.json({ error: "Use the Sign in button to continue with email or your wallet.", code: "USE_PRIVY_LOGIN" }, { status: 409, headers });
   }
   const body = await readAuthBody(request);
   const email = normalizeEmail(body?.email);
@@ -61,10 +65,20 @@ export async function POST(request: NextRequest) {
     });
     reserved = true;
     await sendSignInEmail({ email, code, origin });
-    const delivered = await prisma.emailChallenge.updateMany({
-      where: { id: challengeId, consumedAt: null, expiresAt: { gt: new Date() } }, data: { delivered: true },
+    const delivered = await prisma.$transaction(async (tx) => {
+      const sentAt = new Date();
+      const current = await tx.emailChallenge.updateMany({
+        where: { id: challengeId, consumedAt: null, expiresAt: { gt: sentAt } }, data: { delivered: true },
+      });
+      if (current.count !== 1) return false;
+      // A successful resend replaces older codes. A delayed older delivery cannot revoke a newer one.
+      await tx.emailChallenge.updateMany({
+        where: { email, origin, id: { not: challengeId }, consumedAt: null, createdAt: { lte: now } },
+        data: { consumedAt: sentAt },
+      });
+      return true;
     });
-    if (delivered.count !== 1) throw new Error("Email sign-in request expired.");
+    if (!delivered) throw new Error("Email sign-in request expired.");
     return NextResponse.json({ challengeId, email, expiresAt: expiresAt.toISOString(), resendAfter: 60 }, { headers });
   } catch (error) {
     if (error instanceof EmailRateLimit) {

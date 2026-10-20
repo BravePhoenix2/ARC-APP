@@ -1,0 +1,547 @@
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { createHash, randomBytes } from "node:crypto";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { after, before, beforeEach, test } from "node:test";
+import { NextRequest } from "next/server";
+import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT, type JWK, type JWTPayload } from "jose";
+import { encodeAbiParameters, encodeEventTopics, parseAbi, type Address, type Hash } from "viem";
+
+// All identities, JWT keys, uploads, sessions and receipts belong to this
+// disposable process. The fetch stub permits only a local JWKS response;
+// these tests cannot send mail, call an RPC, or contact a real Privy app.
+const directory = mkdtempSync(join(tmpdir(), "artiq-privy-auth-"));
+const origin = "http://localhost:3000";
+const appId = "clartiqprivytest00000000001";
+const ownerWallet = "0x1111111111111111111111111111111111111111" as Address;
+const otherWallet = "0x2222222222222222222222222222222222222222" as Address;
+const reviewerWallet = "0x9999999999999999999999999999999999999999" as Address;
+const market = "0x3333333333333333333333333333333333333333" as Address;
+const cookieName = "artiq_privy_session";
+const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=", "base64");
+process.env.DATABASE_URL = `file:${join(directory, "auth.db")}`;
+process.env.ARTIQ_APP_ORIGIN = origin;
+process.env.NEXT_PUBLIC_PRIVY_APP_ID = appId;
+process.env.PRIVY_APP_ID = appId;
+process.env.NEXT_PUBLIC_ARC_CHAIN_ID = "5042002";
+process.env.NEXT_PUBLIC_ART_MARKET_ADDRESS = market;
+process.env.ARTIQ_AI_PIXEL_SCREENING = "false";
+process.env.ARTIQ_ADMIN_WALLETS = reviewerWallet;
+process.env.GMAIL_SMTP_USER = "test.sender@gmail.com";
+process.env.GMAIL_SMTP_APP_PASSWORD = "abcdefghijklmnop";
+process.env.ARTIQ_EMAIL_CODE_SECRET = "01".repeat(32);
+
+type Tokens = { accessToken: string; identityToken: string };
+type PublicUser = { id: string; email: string | null; walletAddress: string | null; walletAddresses: string[]; authMethod: string; isAdmin: boolean };
+type Login = { user: PublicUser; cookie: string; privyDid: string; expiresAt: string };
+type LinkedAccount = Record<string, unknown>;
+let signingKey: Awaited<ReturnType<typeof generateKeyPair>>["privateKey"];
+let publicJwk: JWK;
+let auth: typeof import("../../lib/privyAuth");
+let route: typeof import("../../app/api/auth/privy/session/route");
+let db: typeof import("../../lib/prisma")["prisma"];
+let board: typeof import("../../lib/testerLeaderboard");
+let submissions: typeof import("../../app/api/submissions/route");
+let uploads: typeof import("../../app/api/uploads/route");
+let imageRoute: typeof import("../../app/api/uploads/[id]/route");
+let adminQueue: typeof import("../../app/api/admin/submissions/route");
+let activityRoute: typeof import("../../app/api/tester/activity/route");
+let legacyNonce: typeof import("../../app/api/auth/nonce/route");
+let legacyWalletVerify: typeof import("../../app/api/auth/verify/route");
+let legacyEmailRequest: typeof import("../../app/api/auth/email/request/route");
+let legacyEmailVerify: typeof import("../../app/api/auth/email/verify/route");
+let legacyWalletSession: typeof import("../../app/api/auth/session/route");
+let legacyEmailSession: typeof import("../../app/api/auth/email/session/route");
+let restoreRpc: (() => void) | undefined;
+let restoreMailer: (() => void) | undefined;
+let originalFetch: typeof fetch;
+const receipts = new Map<string, Record<string, unknown>>();
+const fetchedUrls: string[] = [];
+let rpcReads = 0;
+let mailAttempts = 0;
+
+const nowSeconds = () => Math.floor(Date.now() / 1000);
+const did = () => `did:privy:${randomBytes(12).toString("hex")}`;
+const emailAccount = (address: string): LinkedAccount => ({ type: "email", address, lv: nowSeconds() - 1 });
+const walletAccount = (address: string, extra: LinkedAccount = {}): LinkedAccount => ({ type: "wallet", address, chain_type: "ethereum", wallet_client_type: "metamask", lv: nowSeconds() - 1, ...extra });
+
+function request(path: string, method = "GET", body?: unknown, login?: Pick<Login, "user" | "cookie">, selectedWallet?: string, browserOrigin = origin) {
+  return new NextRequest(`${origin}${path}`, {
+    method,
+    headers: {
+      Origin: browserOrigin,
+      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      ...(login ? { Cookie: login.cookie, "X-Artiq-Account-ID": login.user.id } : {}),
+      ...(selectedWallet ? { "X-Wallet-Address": selectedWallet } : {}),
+    },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+}
+
+async function tokenPair(input: { privyDid?: string; accounts?: LinkedAccount[]; accessClaims?: JWTPayload; identityClaims?: JWTPayload } = {}): Promise<Tokens> {
+  const subject = input.privyDid ?? did();
+  const common = { iss: "privy.io", aud: appId, sub: subject, iat: nowSeconds(), exp: nowSeconds() + 3600 };
+  return {
+    accessToken: await new SignJWT({ ...common, sid: `sid-${randomBytes(8).toString("hex")}`, ...input.accessClaims }).setProtectedHeader({ alg: "ES256", kid: "artiq-test-key", typ: "JWT" }).sign(signingKey),
+    identityToken: await new SignJWT({ ...common, linked_accounts: JSON.stringify(input.accounts ?? [emailAccount("creator@example.com")]), ...input.identityClaims }).setProtectedHeader({ alg: "ES256", kid: "artiq-test-key", typ: "JWT" }).sign(signingKey),
+  };
+}
+
+async function login(accounts: LinkedAccount[] = [emailAccount("creator@example.com")], options: { privyDid?: string; preferredAccountId?: string; legacyCookie?: string; selectedWallet?: string } = {}): Promise<Login> {
+  const privyDid = options.privyDid ?? did();
+  const tokens = await tokenPair({ privyDid, accounts });
+  const incoming = request("/api/auth/privy/session", "POST", { ...tokens, ...(options.preferredAccountId ? { preferredAccountId: options.preferredAccountId } : {}) }, undefined, options.selectedWallet);
+  if (options.legacyCookie) {
+    for (const cookie of options.legacyCookie.split(";")) {
+      const [name, value] = cookie.trim().split("=");
+      incoming.cookies.set(name, value);
+    }
+  }
+  const response = await route.POST(incoming);
+  const body = await response.json();
+  assert.equal(response.status, 200, JSON.stringify(body));
+  assert.equal(response.headers.get("cache-control"), "private, no-store");
+  assert.equal(body.user.authMethod, "PRIVY");
+  const rawCookie = response.headers.get("set-cookie");
+  assert.ok(rawCookie);
+  const value = rawCookie.match(/(?:^|,\s*)artiq_privy_session=([^;,]+)/)?.[1];
+  assert.match(value ?? "", /^[a-f0-9]{64}$/);
+  assert.ok(rawCookie.includes("HttpOnly"));
+  assert.ok(rawCookie.includes("SameSite=lax"));
+  return { ...body, cookie: `${cookieName}=${value}`, privyDid };
+}
+
+async function legacyEmail(email: string) {
+  const user = await db.user.create({ data: { email, emailVerifiedAt: new Date() } });
+  const token = randomBytes(32).toString("hex");
+  await db.emailSession.create({ data: { userId: user.id, tokenHash: createHash("sha256").update(token).digest("hex"), expiresAt: new Date(Date.now() + 60_000) } });
+  await board.ensureTesterProfile(db, user.id);
+  return { user, cookie: `artiq_email_session=${token}` };
+}
+
+async function legacyWallet(walletAddress: string) {
+  const user = await db.user.create({ data: { walletAddress } });
+  const token = randomBytes(32).toString("hex");
+  await db.walletSession.create({ data: { walletAddress, tokenHash: createHash("sha256").update(token).digest("hex"), expiresAt: new Date(Date.now() + 60_000) } });
+  await board.ensureTesterProfile(db, user.id);
+  return { user, cookie: `artiq_wallet_session=${token}` };
+}
+
+function artReceipt(wallet: Address): Hash {
+  const hash = `0x${randomBytes(32).toString("hex")}` as Hash;
+  const abi = parseAbi(["event ArtPurchased(uint256 indexed listingId,address indexed buyer,uint256 price)"]);
+  receipts.set(hash, { status: "success", from: wallet, to: market, logs: [{ address: market, topics: encodeEventTopics({ abi, eventName: "ArtPurchased", args: { listingId: BigInt(1), buyer: wallet } }), data: encodeAbiParameters([{ type: "uint256" }], [BigInt(1)]) }] });
+  return hash;
+}
+
+before(async () => {
+  writeFileSync(join(directory, "auth.db"), "");
+  execFileSync(process.execPath, ["node_modules/prisma/build/index.js", "db", "push"], { env: process.env, stdio: "pipe" });
+  const pair = await generateKeyPair("ES256");
+  signingKey = pair.privateKey;
+  publicJwk = { ...await exportJWK(pair.publicKey), kid: "artiq-test-key", alg: "ES256", use: "sig" };
+  originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    const url = String(input instanceof Request ? input.url : input);
+    fetchedUrls.push(url);
+    assert.equal(url, `https://auth.privy.io/api/v1/apps/${appId}/jwks.json`, "only the configured official JWKS endpoint may be contacted");
+    return new Response(JSON.stringify({ keys: [publicJwk] }), { status: 200, headers: { "Content-Type": "application/json" } });
+  };
+  const mailers = Array.from(new Set([
+    (await import("nodemailer")).default,
+    createRequire(join(process.cwd(), "package.json"))("nodemailer").default as typeof import("nodemailer"),
+  ]));
+  const originalMailers = mailers.map((mailer) => mailer.createTransport);
+  for (const mailer of mailers) Object.assign(mailer, {
+    createTransport: () => ({
+      sendMail: async () => { mailAttempts++; throw new Error("No SMTP calls are permitted in the Privy integration suite."); },
+      close: () => undefined,
+    }),
+  });
+  restoreMailer = () => mailers.forEach((mailer, index) => Object.assign(mailer, { createTransport: originalMailers[index] }));
+  ({ prisma: db } = await import("../../lib/prisma"));
+  [auth, route, board, submissions, uploads, imageRoute, adminQueue, activityRoute] = await Promise.all([
+    import("../../lib/privyAuth"), import("../../app/api/auth/privy/session/route"), import("../../lib/testerLeaderboard"),
+    import("../../app/api/submissions/route"), import("../../app/api/uploads/route"), import("../../app/api/uploads/[id]/route"),
+    import("../../app/api/admin/submissions/route"), import("../../app/api/tester/activity/route"),
+  ]);
+  [legacyNonce, legacyWalletVerify, legacyEmailRequest, legacyEmailVerify, legacyWalletSession, legacyEmailSession] = await Promise.all([
+    import("../../app/api/auth/nonce/route"), import("../../app/api/auth/verify/route"),
+    import("../../app/api/auth/email/request/route"), import("../../app/api/auth/email/verify/route"),
+    import("../../app/api/auth/session/route"), import("../../app/api/auth/email/session/route"),
+  ]);
+  const { deploymentClient } = await import("../../lib/deploymentVerification");
+  const original = { getChainId: deploymentClient.getChainId, getTransactionReceipt: deploymentClient.getTransactionReceipt, readContract: deploymentClient.readContract };
+  Object.assign(deploymentClient, {
+    getChainId: async () => { rpcReads++; return 5042002; },
+    getTransactionReceipt: async ({ hash }: { hash: string }) => { rpcReads++; const receipt = receipts.get(hash); assert.ok(receipt, "all receipt reads must come from the in-process fixture"); return receipt; },
+    readContract: async () => { throw new Error("Unexpected contract read; no real RPC is permitted."); },
+  });
+  restoreRpc = () => Object.assign(deploymentClient, original);
+});
+
+beforeEach(async () => {
+  await db.testerMilestone.deleteMany();
+  await db.testerProfile.deleteMany();
+  await db.submission.deleteMany();
+  await db.activity.deleteMany();
+  await db.listing.deleteMany();
+  await db.item.deleteMany();
+  await db.uploadedImage.deleteMany();
+  await db.privySession.deleteMany();
+  await db.emailSession.deleteMany();
+  await db.walletSession.deleteMany();
+  await db.emailChallenge.deleteMany();
+  await db.walletChallenge.deleteMany();
+  await db.user.deleteMany();
+  receipts.clear(); rpcReads = 0; mailAttempts = 0;
+});
+
+after(async () => {
+  if (originalFetch) globalThis.fetch = originalFetch;
+  restoreRpc?.();
+  restoreMailer?.();
+  await db?.$disconnect();
+  rmSync(directory, { recursive: true, force: true });
+});
+
+test("rejects unconfigured, foreign, malformed and oversized sign-ins before creating accounts", async () => {
+  const original = { PRIVY_APP_ID: process.env.PRIVY_APP_ID, NEXT_PUBLIC_PRIVY_APP_ID: process.env.NEXT_PUBLIC_PRIVY_APP_ID };
+  try {
+    delete process.env.PRIVY_APP_ID;
+    delete process.env.NEXT_PUBLIC_PRIVY_APP_ID;
+    assert.equal((await route.POST(request("/api/auth/privy/session", "POST", { accessToken: "fake", identityToken: "fake" }))).status, 503);
+  } finally { Object.assign(process.env, original); }
+  const tokens = await tokenPair();
+  const foreign = request("/api/auth/privy/session", "POST", tokens, undefined, undefined, "https://attacker.example");
+  foreign.headers.set("host", "attacker.example");
+  foreign.headers.set("x-forwarded-host", "attacker.example");
+  assert.equal((await route.POST(foreign)).status, 403);
+  const missing = request("/api/auth/privy/session", "POST", tokens);
+  missing.headers.delete("origin");
+  assert.equal((await route.POST(missing)).status, 403);
+  for (const body of [null, [], {}, { accessToken: tokens.accessToken }, { ...tokens, preferredAccountId: { id: "spoofed" } }, { ...tokens, extra: "x".repeat(100_000) }]) {
+    assert.equal((await route.POST(request("/api/auth/privy/session", "POST", body))).status, 400);
+  }
+  const malformed = new NextRequest(`${origin}/api/auth/privy/session`, { method: "POST", headers: { Origin: origin, "Content-Type": "application/json" }, body: "{" });
+  assert.equal((await route.POST(malformed)).status, 400);
+  assert.equal(await db.user.count(), 0);
+  assert.equal(await db.privySession.count(), 0);
+  assert.equal(await db.testerProfile.count(), 0);
+});
+
+test("configured Privy disables legacy sign-in issuance while preserving existing sessions for migration", async () => {
+  const email = await legacyEmail("legacy-auth@example.com");
+  const wallet = await legacyWallet(ownerWallet);
+  const counters = async () => Promise.all([
+    db.user.count(), db.walletChallenge.count(), db.emailChallenge.count(),
+    db.walletSession.count(), db.emailSession.count(), db.privySession.count(), db.testerProfile.count(),
+  ]);
+  const before = await counters();
+  const attempts = [
+    [legacyNonce, "/api/auth/nonce", { walletAddress: ownerWallet }],
+    [legacyWalletVerify, "/api/auth/verify", { walletAddress: ownerWallet, nonce: "aa".repeat(24), signature: `0x${"bb".repeat(65)}` }],
+    [legacyEmailRequest, "/api/auth/email/request", { email: email.user.email }],
+    [legacyEmailVerify, "/api/auth/email/verify", { email: email.user.email, challengeId: "cc".repeat(24), code: "123456" }],
+  ] as const;
+  for (const [handler, path, body] of attempts) {
+    const result = await handler.POST(request(path, "POST", body));
+    assert.equal(result.status, 409, path);
+    assert.equal((await result.json()).code, "USE_PRIVY_LOGIN", path);
+    assert.equal((await handler.POST(request(path, "POST", body, undefined, undefined, "https://attacker.example"))).status, 403, "origin checks still run first");
+  }
+  assert.deepEqual(await counters(), before, "blocked legacy calls must not write accounts, challenges, sessions or milestones");
+  assert.equal(mailAttempts, 0, "the old email sender is not invoked even when its credentials are configured");
+  assert.equal((await (await legacyEmailRequest.GET()).json()).available, false);
+  assert.equal((await legacyEmailSession.GET(new NextRequest(`${origin}/api/auth/email/session`, { headers: { Cookie: email.cookie } }))).status, 200);
+  assert.equal((await legacyWalletSession.GET(new NextRequest(`${origin}/api/auth/session`, { headers: { Cookie: wallet.cookie } }))).status, 200);
+});
+
+test("cryptographically verifies both tokens and rejects forged, expired or mismatched claims", async () => {
+  const resolver = createLocalJWKSet({ keys: [publicJwk] });
+  const valid = await tokenPair({ accounts: [emailAccount("verified@example.com")] });
+  assert.equal((await auth.verifyPrivyTokens(valid, resolver)).email, "verified@example.com");
+  const badPairs = [
+    await tokenPair({ accessClaims: { aud: "another-app" } }),
+    await tokenPair({ identityClaims: { aud: "another-app" } }),
+    await tokenPair({ accessClaims: { iss: "attacker.example" } }),
+    await tokenPair({ identityClaims: { iss: "attacker.example" } }),
+    await tokenPair({ accessClaims: { exp: nowSeconds() - 120 } }),
+    await tokenPair({ identityClaims: { exp: nowSeconds() - 120 } }),
+    await tokenPair({ identityClaims: { sub: did() } }),
+    await tokenPair({ accessClaims: { nbf: nowSeconds() + 300 } }),
+    await tokenPair({ accessClaims: { sid: "" } }),
+    await tokenPair({ accessClaims: { exp: undefined } }),
+    await tokenPair({ identityClaims: { iat: nowSeconds() + 300 } }),
+    await tokenPair({ identityClaims: { linked_accounts: [] } }),
+  ];
+  const foreignKey = await generateKeyPair("ES256");
+  const forgedIdentity = await new SignJWT({ iss: "privy.io", aud: appId, sub: did(), exp: nowSeconds() + 3600, iat: nowSeconds(), linked_accounts: "[]" }).setProtectedHeader({ alg: "ES256", kid: "artiq-test-key" }).sign(foreignKey.privateKey);
+  badPairs.push({ ...valid, identityToken: forgedIdentity });
+  const wrongAlgorithm = await new SignJWT({ iss: "privy.io", aud: appId, sub: did(), exp: nowSeconds() + 3600, iat: nowSeconds() }).setProtectedHeader({ alg: "HS256", kid: "artiq-test-key" }).sign(randomBytes(32));
+  badPairs.push({ ...valid, accessToken: wrongAlgorithm });
+  for (const pair of badPairs) {
+    await assert.rejects(auth.verifyPrivyTokens(pair, resolver));
+    assert.equal((await route.POST(request("/api/auth/privy/session", "POST", pair))).status, 401);
+  }
+  assert.equal(await db.user.count(), 0);
+  assert.equal(await db.privySession.count(), 0);
+});
+
+test("accepts only verified linked email and Ethereum wallets from the signed identity token", async () => {
+  const tokens = await tokenPair({ accounts: [
+    { type: "email", address: "unverified@example.com" },
+    { type: "email", address: "zero@example.com", lv: 0 },
+    emailAccount("  Verified@Example.COM  "),
+    walletAccount(ownerWallet), walletAccount(ownerWallet.toUpperCase().replace("0X", "0x")),
+    walletAccount(otherWallet, { lv: undefined }),
+    walletAccount(otherWallet, { user_can_sign: false }),
+    walletAccount(reviewerWallet, { chain_type: "solana" }),
+    { type: "google_oauth", email: "spoofed-admin@example.com", lv: nowSeconds() },
+  ] });
+  const result = await auth.verifyPrivyTokens(tokens, createLocalJWKSet({ keys: [publicJwk] }));
+  assert.equal(result.email, "verified@example.com");
+  assert.deepEqual(result.walletAddresses, [ownerWallet]);
+  assert.ok(result.expiresAt.getTime() <= (nowSeconds() + 3600) * 1000);
+});
+
+test("creates one stable account, hashes its short session and ignores unsigned identity or role fields", async () => {
+  const privyDid = did();
+  const tokens = await tokenPair({ privyDid, accounts: [emailAccount("new@example.com"), walletAccount(ownerWallet)] });
+  const response = await route.POST(request("/api/auth/privy/session", "POST", { ...tokens, email: "attacker@example.com", privyId: did(), walletAddress: reviewerWallet, isAdmin: true }));
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.user.email, "new@example.com");
+  assert.equal(body.user.isAdmin, false);
+  const user = await db.user.findUniqueOrThrow({ where: { id: body.user.id } });
+  assert.equal(user.privyId, privyDid);
+  assert.equal(user.email, "new@example.com");
+  assert.ok(user.emailVerifiedAt);
+  const value = response.headers.get("set-cookie")!.match(/(?:^|,\s*)artiq_privy_session=([^;,]+)/)![1];
+  const persisted = await db.privySession.findUniqueOrThrow({ where: { tokenHash: createHash("sha256").update(value).digest("hex") } });
+  assert.equal(persisted.userId, user.id);
+  assert.notEqual(persisted.tokenHash, value);
+  assert.ok(persisted.expiresAt.getTime() <= Date.now() + 3600_000);
+  assert.ok(!JSON.stringify(persisted).includes(tokens.accessToken));
+  assert.ok(!JSON.stringify(persisted).includes(tokens.identityToken));
+  const signed = await login([emailAccount("new@example.com"), walletAccount(ownerWallet)], { privyDid });
+  assert.equal(signed.user.id, user.id);
+  assert.equal(await db.user.count(), 1);
+  assert.equal(await db.testerProfile.count(), 1);
+  assert.equal(await db.testerMilestone.count({ where: { kind: "SIGN_IN" } }), 1);
+  const identity = await route.GET(request("/api/auth/privy/session", "GET", undefined, signed));
+  assert.equal(identity.status, 200);
+  assert.equal((await identity.json()).user.id, user.id);
+});
+
+test("simultaneous first sign-ins and a retry cannot duplicate an account or its sign-in milestone", async () => {
+  const privyDid = did();
+  const tokens = await tokenPair({ privyDid, accounts: [emailAccount("concurrent@example.com")] });
+  const responses = await Promise.all([
+    route.POST(request("/api/auth/privy/session", "POST", tokens)),
+    route.POST(request("/api/auth/privy/session", "POST", tokens)),
+  ]);
+  assert.ok(responses.some((response) => response.status === 200));
+  assert.ok(responses.every((response) => response.status === 200 || response.status === 503));
+  const signed = await login([emailAccount("concurrent@example.com")], { privyDid });
+  assert.equal((await db.user.findUniqueOrThrow({ where: { privyId: privyDid } })).id, signed.user.id);
+  assert.equal(await db.user.count(), 1);
+  assert.equal(await db.testerProfile.count(), 1);
+  assert.equal(await db.testerMilestone.count({ where: { kind: "SIGN_IN" } }), 1);
+});
+
+test("migrates verified email ownership and preserves creator data and existing tester points", async () => {
+  const previous = await legacyEmail("returning@example.com");
+  await board.awardTesterMilestone(db, previous.user.id, "APPROVED_CREATOR");
+  const image = await db.uploadedImage.create({ data: { ownerUserId: previous.user.id, mimeType: "image/png", data: new Uint8Array(png) } });
+  const item = await db.item.create({ data: { creatorId: previous.user.id, itemType: "NFT", title: "Existing work" } });
+  const before = await board.getTesterEntry(previous.user.id);
+  const signed = await login([emailAccount("returning@example.com")], { legacyCookie: previous.cookie });
+  assert.equal(signed.user.id, previous.user.id);
+  assert.equal(await db.user.count(), 1);
+  assert.equal((await db.uploadedImage.findUniqueOrThrow({ where: { id: image.id } })).ownerUserId, previous.user.id);
+  assert.equal((await db.item.findUniqueOrThrow({ where: { id: item.id } })).creatorId, previous.user.id);
+  assert.equal((await board.getTesterEntry(previous.user.id))?.points, before?.points);
+  assert.equal(await db.testerMilestone.count({ where: { kind: "SIGN_IN" } }), 1);
+  assert.equal(await db.emailSession.count(), 0, "Privy replaces the presented legacy session");
+});
+
+test("an old unverified contact email cannot transfer ownership of its account", async () => {
+  const old = await db.user.create({ data: { email: "contact-only@example.com", username: "Older artist" } });
+  const image = await db.uploadedImage.create({ data: { ownerUserId: old.id, mimeType: "image/png", data: new Uint8Array(png) } });
+  const signed = await login([emailAccount("contact-only@example.com")]);
+  assert.notEqual(signed.user.id, old.id);
+  assert.equal((await db.user.findUniqueOrThrow({ where: { id: old.id } })).privyId, null);
+  assert.equal((await imageRoute.GET(request(`/api/uploads/${image.id}`, "GET", undefined, signed), { params: { id: image.id } })).status, 404);
+  assert.equal(await db.user.count(), 2);
+});
+
+test("migrates an external wallet account without changing its identity or duplicating its profile", async () => {
+  const previous = await legacyWallet(ownerWallet);
+  const signed = await login([walletAccount(ownerWallet)], { legacyCookie: previous.cookie });
+  assert.equal(signed.user.id, previous.user.id);
+  assert.equal((await db.user.findUniqueOrThrow({ where: { id: previous.user.id } })).walletAddress, ownerWallet);
+  assert.equal(await db.user.count(), 1);
+  assert.equal(await db.testerProfile.count(), 1);
+  assert.equal(await db.walletSession.count(), 0);
+});
+
+test("requires an owned account choice when email and wallet belong to different existing accounts", async () => {
+  const email = await legacyEmail("separate@example.com");
+  const wallet = await legacyWallet(ownerWallet);
+  const attacker = await db.user.create({ data: { email: "unrelated@example.com", emailVerifiedAt: new Date() } });
+  const privyDid = did();
+  const tokens = await tokenPair({ privyDid, accounts: [emailAccount(email.user.email!), walletAccount(ownerWallet)] });
+  const result = await route.POST(request("/api/auth/privy/session", "POST", tokens));
+  assert.equal(result.status, 409);
+  const choices = await result.json();
+  assert.equal(choices.code, "ACCOUNT_SELECTION_REQUIRED");
+  assert.deepEqual(choices.accounts.map((entry: { id: string }) => entry.id).sort(), [email.user.id, wallet.user.id].sort());
+  assert.ok(!JSON.stringify(choices).includes(email.user.email!), "the account picker does not expose private email");
+  assert.equal(await db.privySession.count(), 0);
+  assert.equal(await db.user.count({ where: { privyId: { not: null } } }), 0);
+  assert.equal((await route.POST(request("/api/auth/privy/session", "POST", { ...tokens, preferredAccountId: attacker.id }))).status, 409);
+  const signed = await login([emailAccount(email.user.email!), walletAccount(ownerWallet)], { privyDid, preferredAccountId: email.user.id });
+  assert.equal(signed.user.id, email.user.id);
+  assert.equal(await db.user.count(), 3, "separate account histories are never silently merged");
+  assert.equal((await db.user.findUniqueOrThrow({ where: { id: wallet.user.id } })).privyId, null);
+  const rebind = await route.POST(request("/api/auth/privy/session", "POST", { ...tokens, preferredAccountId: wallet.user.id }));
+  assert.equal(rebind.status, 409, "a later account-selection hint cannot rebind an existing DID");
+  assert.equal((await db.user.findUniqueOrThrow({ where: { privyId: privyDid } })).id, email.user.id);
+});
+
+test("a valid legacy proof selects its own candidate and a different DID cannot steal a bound account", async () => {
+  const email = await legacyEmail("legacy-choice@example.com");
+  const wallet = await legacyWallet(ownerWallet);
+  const signed = await login([emailAccount(email.user.email!), walletAccount(ownerWallet)], { legacyCookie: wallet.cookie });
+  assert.equal(signed.user.id, wallet.user.id);
+  const takeover = await route.POST(request("/api/auth/privy/session", "POST", { ...await tokenPair({ accounts: [walletAccount(ownerWallet)] }), preferredAccountId: wallet.user.id }));
+  assert.equal(takeover.status, 409);
+  assert.equal((await db.user.findUniqueOrThrow({ where: { id: wallet.user.id } })).privyId, signed.privyDid);
+  assert.equal(await db.user.count(), 2);
+});
+
+test("protects private uploads and applications with the stable account ID and rejects body impersonation", async () => {
+  const owner = await login([emailAccount("owner@example.com"), walletAccount(ownerWallet)]);
+  const other = await login([emailAccount("other@example.com")]);
+  const form = new FormData();
+  form.set("file", new File([png], "nft.png", { type: "image/png" }));
+  const uploaded = await uploads.POST(new NextRequest(`${origin}/api/uploads`, { method: "POST", headers: { Origin: origin, Cookie: owner.cookie, "X-Artiq-Account-ID": owner.user.id }, body: form }));
+  assert.equal(uploaded.status, 201);
+  const { url } = await uploaded.json();
+  const imageId = url.split("/").pop();
+  assert.equal((await db.uploadedImage.findUniqueOrThrow({ where: { id: imageId } })).ownerUserId, owner.user.id);
+  const imageRequest = request(url, "GET", undefined, owner);
+  imageRequest.headers.delete("x-artiq-account-id");
+  assert.equal((await imageRoute.GET(imageRequest, { params: { id: imageId } })).status, 200);
+  assert.equal((await imageRoute.GET(request(url, "GET", undefined, other), { params: { id: imageId } })).status, 404);
+  assert.equal((await imageRoute.GET(request(url), { params: { id: imageId } })).status, 404);
+  const application = { itemType: "NFT", creationMethod: "AI_GENERATED", creatorName: "Privy artist", title: "Privy NFT", description: "A work submitted through verified Privy authentication.", imageUrl: url, priceUsdc: "2", maxSupply: 10, creatorId: other.user.id, email: other.user.email, walletAddress: reviewerWallet, isAdmin: true };
+  const missingHeader = request("/api/submissions", "POST", application, owner);
+  missingHeader.headers.delete("x-artiq-account-id");
+  assert.equal((await submissions.POST(missingHeader)).status, 401);
+  const wrongHeader = request("/api/submissions", "POST", application, owner);
+  wrongHeader.headers.set("x-artiq-account-id", other.user.id);
+  assert.equal((await submissions.POST(wrongHeader)).status, 401);
+  assert.equal((await submissions.POST(request("/api/submissions", "POST", application, other))).status, 400);
+  const created = await submissions.POST(request("/api/submissions", "POST", application, owner));
+  assert.equal(created.status, 201);
+  assert.equal((await created.json()).submission.creatorId, owner.user.id);
+  assert.equal((await (await submissions.GET(request("/api/submissions", "GET", undefined, other))).json()).submissions.length, 0);
+  assert.equal((await (await submissions.GET(request("/api/submissions", "GET", undefined, owner))).json()).submissions.length, 1);
+});
+
+test("grants reviewer access only to an explicitly selected verified allowlisted wallet", async () => {
+  const accounts = [emailAccount("reviewer-contact@example.com"), walletAccount(ownerWallet), walletAccount(reviewerWallet)];
+  const signed = await login(accounts, { selectedWallet: reviewerWallet });
+  assert.equal(signed.user.walletAddress, reviewerWallet);
+  assert.equal((await db.user.findUniqueOrThrow({ where: { id: signed.user.id } })).walletAddress, ownerWallet, "selecting a wallet does not rewrite the creator's stored identity");
+  const privateOwner = await db.user.create({ data: { email: "private-image-owner@example.com", emailVerifiedAt: new Date() } });
+  const image = await db.uploadedImage.create({ data: { ownerUserId: privateOwner.id, mimeType: "image/png", data: new Uint8Array(png) } });
+  const imagePath = `/api/uploads/${image.id}`;
+  const headerlessSession = await route.GET(new NextRequest(`${origin}/api/auth/privy/session`, { headers: { Cookie: signed.cookie } }));
+  assert.equal(headerlessSession.status, 200);
+  assert.equal((await headerlessSession.json()).user.walletAddress, reviewerWallet);
+  const reviewerImage = await imageRoute.GET(new NextRequest(`${origin}${imagePath}`, { headers: { Cookie: signed.cookie } }), { params: { id: image.id } });
+  assert.equal(reviewerImage.status, 200, "browser image requests retain the selected reviewer wallet without custom headers");
+  assert.equal(reviewerImage.headers.get("cache-control"), "private, no-store");
+  assert.deepEqual(Buffer.from(await reviewerImage.arrayBuffer()), png);
+  assert.equal((await adminQueue.GET(request("/api/admin/submissions", "GET", undefined, signed))).status, 401, "admin requests still require an explicit wallet binding");
+  assert.equal((await adminQueue.GET(request("/api/admin/submissions", "GET", undefined, signed, ownerWallet))).status, 403);
+  assert.equal((await adminQueue.GET(request("/api/admin/submissions", "GET", undefined, signed, otherWallet))).status, 401, "headers cannot select an unlinked wallet");
+  assert.equal((await adminQueue.GET(request("/api/admin/submissions", "GET", undefined, signed, reviewerWallet))).status, 200);
+  const accountSpoof = request("/api/admin/submissions", "GET", undefined, signed, reviewerWallet);
+  accountSpoof.headers.set("x-artiq-account-id", "different-account");
+  assert.equal((await adminQueue.GET(accountSpoof)).status, 401);
+  const emailOnly = await login([emailAccount("email-admin@example.com")]);
+  assert.equal((await adminQueue.GET(request("/api/admin/submissions", "GET", undefined, emailOnly, reviewerWallet))).status, 401);
+  const switched = await login(accounts, { privyDid: signed.privyDid, legacyCookie: signed.cookie, selectedWallet: ownerWallet });
+  assert.equal(switched.user.id, signed.user.id);
+  assert.equal(switched.user.walletAddress, ownerWallet);
+  assert.equal((await imageRoute.GET(new NextRequest(`${origin}${imagePath}`, { headers: { Cookie: switched.cookie } }), { params: { id: image.id } })).status, 404, "a non-reviewer selection cannot view another creator's private image");
+  assert.equal((await route.GET(new NextRequest(`${origin}/api/auth/privy/session`, { headers: { Cookie: signed.cookie } }))).status, 401, "selection refresh revokes the older reviewer session");
+});
+
+test("credits only transactions from verified linked wallets and never accepts unlinked receipt claims", async () => {
+  const signed = await login([emailAccount("receipts@example.com"), walletAccount(ownerWallet)]);
+  const foreignHash = artReceipt(otherWallet);
+  assert.equal((await activityRoute.POST(request("/api/tester/activity", "POST", { txHash: foreignHash, kind: "BUY_ART" }, signed, ownerWallet))).status, 403);
+  const unlinkedSelection = request("/api/tester/activity", "POST", { txHash: foreignHash, kind: "BUY_ART" }, signed, otherWallet);
+  assert.equal((await activityRoute.POST(unlinkedSelection)).status, 401);
+  const ownHash = artReceipt(ownerWallet);
+  const result = await activityRoute.POST(request("/api/tester/activity", "POST", { txHash: ownHash, kind: "BUY_ART", points: 9_999_999 }, signed, ownerWallet));
+  assert.equal(result.status, 200);
+  assert.equal((await result.json()).recorded, true);
+  assert.equal(await db.testerMilestone.count({ where: { kind: "BUY_ART" } }), 1);
+  const repeated = await activityRoute.POST(request("/api/tester/activity", "POST", { txHash: ownHash, kind: "BUY_ART" }, signed, ownerWallet));
+  assert.equal(repeated.status, 200);
+  assert.equal((await repeated.json()).recorded, false);
+  assert.equal(await db.testerMilestone.count({ where: { kind: "BUY_ART" } }), 1);
+  assert.ok(rpcReads > 0, "receipt checks use the in-process verifier fixture");
+});
+
+test("invalid or expired Privy cookies fail closed even when a legacy reviewer cookie is present", async () => {
+  const legacy = await legacyWallet(reviewerWallet);
+  const forged = { user: { ...legacy.user, walletAddresses: [reviewerWallet], authMethod: "PRIVY", isAdmin: true } as PublicUser, cookie: `${cookieName}=${"ff".repeat(32)}; ${legacy.cookie}` };
+  assert.equal((await route.GET(request("/api/auth/privy/session", "GET", undefined, forged))).status, 401);
+  assert.equal((await submissions.GET(request("/api/submissions", "GET", undefined, forged, reviewerWallet))).status, 401);
+  assert.equal((await adminQueue.GET(request("/api/admin/submissions", "GET", undefined, forged, reviewerWallet))).status, 401);
+  const signed = await login([emailAccount("expired@example.com")]);
+  await db.privySession.updateMany({ where: { userId: signed.user.id }, data: { expiresAt: new Date(Date.now() - 1_000) } });
+  assert.equal((await route.GET(request("/api/auth/privy/session", "GET", undefined, signed))).status, 401);
+  assert.equal((await submissions.GET(request("/api/submissions", "GET", undefined, { ...signed, cookie: `${signed.cookie}; ${legacy.cookie}` }, reviewerWallet))).status, 401);
+});
+
+test("uses secure production cookies, respects the earliest JWT expiry and revokes sessions on same-origin logout", async () => {
+  const previousNodeEnv = process.env.NODE_ENV;
+  const tokens = await tokenPair({ accounts: [emailAccount("short-session@example.com")], accessClaims: { exp: nowSeconds() + 900 }, identityClaims: { exp: nowSeconds() + 600 } });
+  let signed: Login;
+  try {
+    Object.assign(process.env, { NODE_ENV: "production" });
+    const response = await route.POST(request("/api/auth/privy/session", "POST", tokens));
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    const cookie = response.headers.get("set-cookie")!;
+    assert.ok(cookie.includes("Secure"));
+    assert.ok(cookie.includes("HttpOnly"));
+    assert.ok(cookie.includes("SameSite=lax"));
+    const value = cookie.match(/(?:^|,\s*)artiq_privy_session=([^;,]+)/)![1];
+    signed = { ...body, cookie: `${cookieName}=${value}`, privyDid: "unused" };
+    assert.ok(Date.parse(body.expiresAt) <= (nowSeconds() + 600) * 1000);
+  } finally {
+    if (previousNodeEnv === undefined) Reflect.deleteProperty(process.env, "NODE_ENV");
+    else Object.assign(process.env, { NODE_ENV: previousNodeEnv });
+  }
+  const foreign = request("/api/auth/privy/session", "DELETE", undefined, signed!, undefined, "https://attacker.example");
+  assert.equal((await route.DELETE(foreign)).status, 403);
+  assert.equal((await route.GET(request("/api/auth/privy/session", "GET", undefined, signed!))).status, 200);
+  const deleted = await route.DELETE(request("/api/auth/privy/session", "DELETE", undefined, signed!));
+  assert.equal(deleted.status, 200);
+  assert.ok(deleted.headers.get("set-cookie")?.includes("Max-Age=0"));
+  assert.equal((await route.GET(request("/api/auth/privy/session", "GET", undefined, signed!))).status, 401);
+  assert.equal(await db.privySession.count(), 0);
+  assert.ok(fetchedUrls.length > 0, "actual route token verification loaded the stubbed official JWKS endpoint");
+});

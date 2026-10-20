@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { after, before, test } from "node:test";
@@ -36,6 +37,10 @@ async function challenge() {
 before(async () => {
   directory = await mkdtemp(path.join(os.tmpdir(), "artiq-wallet-auth-"));
   process.env.DATABASE_URL = `file:${path.join(directory, "auth.db")}`;
+  await writeFile(path.join(directory, "auth.db"), "");
+  // Verified sign-in now provisions the account and its tester profile in the
+  // same transaction. Initialize the complete schema in this isolated DB.
+  execFileSync(process.execPath, ["node_modules/prisma/build/index.js", "db", "push"], { env: process.env, stdio: "pipe" });
   ({ prisma: db } = await import("../../lib/prisma"));
   [nonceRoute, verifyRoute, sessionRoute, auth] = await Promise.all([
     import("../../app/api/auth/nonce/route"),
@@ -43,14 +48,6 @@ before(async () => {
     import("../../app/api/auth/session/route"),
     import("../../lib/walletAuth"),
   ]);
-  await db.$executeRaw`CREATE TABLE "WalletChallenge" (
-    "id" TEXT NOT NULL PRIMARY KEY, "walletAddress" TEXT NOT NULL, "nonce" TEXT NOT NULL UNIQUE,
-    "message" TEXT NOT NULL, "expiresAt" DATETIME NOT NULL, "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-  )`;
-  await db.$executeRaw`CREATE TABLE "WalletSession" (
-    "id" TEXT NOT NULL PRIMARY KEY, "tokenHash" TEXT NOT NULL UNIQUE, "walletAddress" TEXT NOT NULL,
-    "expiresAt" DATETIME NOT NULL, "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-  )`;
 });
 
 after(async () => {

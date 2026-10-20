@@ -6,6 +6,7 @@ import { type Config, type Connector, useAccount, useBalance, useConfig, useConn
 import { formatUnits } from "viem";
 import { arcChain } from "@/lib/arcConfig";
 import { getWalletOptions } from "@/lib/walletOptions";
+import { usePrivySession } from "@/hooks/usePrivySession";
 
 export type WalletError =
   | { type: "no-wallet" }
@@ -56,6 +57,7 @@ function requestError(error: unknown, fallback: string): WalletError {
  * balance on Arc), and helpers to connect / switch network / disconnect.
  */
 export function useWallet() {
+  const privySession = usePrivySession();
   const config = useConfig();
   const { address, chainId, status, connector: activeConnector, isConnected, isConnecting, isReconnecting } = useAccount();
   const { connectAsync, connectors } = useConnect();
@@ -92,6 +94,10 @@ export function useWallet() {
     : null;
 
   const connect = useCallback(async (connector?: Connector): Promise<boolean> => {
+    if (privySession.configured) {
+      privySession.connectWallet();
+      return false;
+    }
     if (requestingRef.current || pendingWalletRequests.has(config) || isConnecting || isReconnecting) return false;
     requestingRef.current = true;
     pendingWalletRequests.add(config);
@@ -134,7 +140,7 @@ export function useWallet() {
       pendingWalletRequests.delete(config);
       setIsRequesting(false);
     }
-  }, [config, connectAsync, connectors, isConnecting, isReconnecting, switchChainAsync]);
+  }, [config, connectAsync, connectors, isConnecting, isReconnecting, privySession, switchChainAsync]);
 
   const switchToArc = useCallback(async () => {
     if (pendingWalletRequests.has(config)) return;
@@ -183,7 +189,12 @@ export function useWallet() {
     connect,
     switchToArc,
     ensureArc,
-    disconnect: () => { setError(null); networkAttempts.delete(config); disconnectWallet(); },
+    disconnect: () => {
+      setError(null);
+      networkAttempts.delete(config);
+      if (privySession.configured) void privySession.logout();
+      else disconnectWallet();
+    },
     error,
     clearError: () => setError(null),
   };

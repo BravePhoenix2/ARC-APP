@@ -11,6 +11,8 @@ import { useQuery } from "@tanstack/react-query";
 import ArticLogo from "@/components/ArticLogo";
 import ThemeToggle from "@/components/ThemeToggle";
 import ConnectWalletButton from "@/components/ConnectWalletButton";
+import TesterCount from "@/components/TesterCount";
+import { NFT_KIND_INFO, type NftKind } from "@/lib/nftTypes";
 
 type Mode = "nft" | "art";
 
@@ -18,6 +20,7 @@ type MarketplaceItem = {
   id: string;
   itemType: "NFT" | "WEB2_ART";
   creationMethod?: "UNKNOWN" | "HUMAN" | "AI_GENERATED" | "AI_ASSISTED";
+  nftKind?: NftKind | null;
   title: string;
   description: string | null;
   imageUrl: string | null;
@@ -62,7 +65,7 @@ function ItemCard({ item }: { item: MarketplaceItem }) {
   const badge = isNft && item.status ? NFT_STATUS_STYLE[item.status] : null;
 
   return (
-    <div className="gallery-card overflow-hidden">
+    <Link href={isNft ? `/nfts/${item.id}` : `/art/${item.id}`} className="gallery-card block overflow-hidden focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#b55fbe]">
       <div className="gallery-card-media relative aspect-square bg-[var(--chip-bg)]">
         {item.imageUrl ? (
           <Image src={item.imageUrl} alt={item.title} fill unoptimized sizes="(min-width: 1280px) 22vw, (min-width: 640px) 30vw, 45vw" className="object-cover" />
@@ -87,6 +90,7 @@ function ItemCard({ item }: { item: MarketplaceItem }) {
         )}
       </div>
       <div className="space-y-2 p-4">
+        {isNft && <span className="inline-block rounded-full border border-[var(--border-soft)] px-2 py-1 text-[9px] font-semibold">{NFT_KIND_INFO[item.nftKind || "COLLECTIBLE"].label}{item.nftKind === "SOULBOUND" ? " · Non-transferable" : ""}</span>}
         {isNft && (item.creationMethod === "AI_GENERATED" || item.creationMethod === "AI_ASSISTED") && <span className="inline-block rounded-full bg-[#b55fbe]/10 px-2 py-1 text-[9px] font-semibold text-[var(--muted-text)]">{item.creationMethod === "AI_GENERATED" ? "AI-generated NFT" : "AI-assisted NFT"}</span>}
         <p className="truncate text-[10px] font-medium tracking-wide text-[var(--faint-text)]">{item.creator.username || (item.creator.walletAddress ? `${item.creator.walletAddress.slice(0, 6)}…${item.creator.walletAddress.slice(-4)}` : "Artiq creator")}</p>
         <p className="text-sm font-semibold text-[var(--page-text)]">{item.title}</p>
@@ -100,7 +104,7 @@ function ItemCard({ item }: { item: MarketplaceItem }) {
               : "Price — USDC"}
         </p>
       </div>
-    </div>
+    </Link>
   );
 }
 
@@ -223,6 +227,7 @@ function MarketplaceShell() {
             <ConnectWalletButton />
           </div>
         </div>
+        <nav aria-label="Explore Artiq" className="flex flex-wrap items-center justify-center gap-x-7 gap-y-2 border-t border-[var(--border-soft)] px-5 py-3 text-[11px] font-semibold"><Link href="/nfts">NFT collections</Link><Link href="/nfts/create">Creator studio</Link><Link href="/auctions">Auctions</Link><Link href="/leaderboard">Leaderboard</Link><Link href="/apply?type=WEB2_ART">Submit original art</Link></nav>
       </header>
 
       {arcChain.testnet && <div className="border-b border-[var(--border-soft)] bg-[#b55fbe]/10 px-6 py-2 text-center text-xs leading-5 text-[var(--muted-text)]">Arc Testnet pilot · Test USDC only, no real money. <a href="https://faucet.circle.com" target="_blank" rel="noreferrer" className="font-semibold underline underline-offset-2">Get test USDC ↗</a></div>}
@@ -230,7 +235,8 @@ function MarketplaceShell() {
         <p className="mb-3 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.2em] text-[var(--muted-text)]"><span className="h-1.5 w-1.5 rounded-full bg-[#EF476F]" /> The Artiq collection</p>
         <h1 className="max-w-2xl text-3xl font-semibold tracking-tight sm:text-5xl">{mode === "nft" ? <>Art without <span className="hero-word">limits.</span></> : <>Made by hand. <span className="hero-word">Collected by you.</span></>}</h1>
         <p className="mt-4 max-w-xl text-sm leading-6 text-[var(--muted-text)]">{mode === "nft" ? "Discover digital expressions, fresh perspectives, and your next collectible." : "Explore original pieces, tactile textures, and art that lives beyond the screen."}</p>
-        <Link href={`/apply?type=${mode === "nft" ? "NFT" : "WEB2_ART"}`} className="gallery-button mt-5 inline-flex items-center px-5 py-3 text-sm font-semibold text-white">Submit your {mode === "nft" ? "NFT collection" : "art"} <span aria-hidden="true">↗</span></Link>
+        <Link href={mode === "nft" ? "/nfts/create" : "/apply?type=WEB2_ART"} className="gallery-button mt-5 inline-flex items-center px-5 py-3 text-sm font-semibold text-white">Submit your {mode === "nft" ? "NFT collection" : "art"} <span aria-hidden="true">↗</span></Link>
+        <div className="mt-5"><TesterCount /></div>
       </section>
 
       <div className="grid gap-8 px-6 py-8 sm:px-10 lg:grid-cols-[240px_1fr] lg:gap-10 lg:px-16 lg:py-12 xl:px-20">

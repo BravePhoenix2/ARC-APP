@@ -2,182 +2,87 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Mail } from "lucide-react";
+import { ChevronDown, LoaderCircle, LogOut, UserRound } from "lucide-react";
 import { useWallet } from "@/hooks/useWallet";
-import { useEmailSession } from "@/hooks/useEmailSession";
-import WalletPicker, { walletErrorMessage } from "@/components/WalletPicker";
+import { usePrivySession } from "@/hooks/usePrivySession";
+import { walletErrorMessage } from "@/components/WalletPicker";
 
-function EmailAccountButton() {
-  const session = useEmailSession();
-  const [menuOpen, setMenuOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function closeOutside(event: MouseEvent) {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) setMenuOpen(false);
-    }
-    function closeOnEscape(event: KeyboardEvent) { if (event.key === "Escape") setMenuOpen(false); }
-    document.addEventListener("mousedown", closeOutside);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("mousedown", closeOutside);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, []);
-
-  if (!session.user) return <Link href="/apply?auth=email" aria-label="Continue with email" className="inline-flex items-center justify-center gap-2 rounded-full border border-[var(--border-soft)] px-3 py-2 text-sm font-semibold transition hover:bg-[var(--chip-bg)]"><Mail size={15} aria-hidden="true" /><span>Email</span></Link>;
-  const email = session.user.email;
-  const label = email.length > 23 ? `${email.slice(0, 12)}…${email.slice(-8)}` : email;
-  return (
-    <div ref={rootRef} className="relative">
-      <button type="button" aria-expanded={menuOpen} aria-label={`Email account: ${email}`} onClick={() => setMenuOpen((open) => !open)} className="inline-flex max-w-[200px] items-center gap-2 rounded-full border border-[var(--border-soft)] bg-[var(--chip-bg)] px-3 py-2 text-sm font-semibold transition hover:bg-[var(--border-soft)]"><Mail size={15} className="shrink-0 text-[#b55fbe]" aria-hidden="true" /><span className="truncate">{label}</span></button>
-      {menuOpen && <div className="absolute right-0 top-full z-40 mt-2 w-64 overflow-hidden rounded-xl border border-[var(--border-soft)] bg-[var(--card-bg)] shadow-lg"><p className="break-all border-b border-[var(--border-soft)] px-4 py-3 text-xs text-[var(--muted-text)]">Signed in as {email}</p><Link href="/apply#my-applications" onClick={() => setMenuOpen(false)} className="block px-4 py-3 text-sm hover:bg-[var(--chip-bg)]">My applications</Link><button type="button" onClick={() => void session.signOut().then((success) => { if (success) setMenuOpen(false); })} disabled={session.isSigningOut} className="block w-full px-4 py-3 text-left text-sm hover:bg-[var(--chip-bg)] disabled:opacity-60">{session.isSigningOut ? "Signing out…" : "Sign out of email"}</button>{session.error && <p role="alert" className="px-4 pb-3 text-xs leading-5 text-[#d73c63] dark:text-[#ff8eab]">{session.error}</p>}</div>}
-    </div>
-  );
-}
-
-export default function ConnectWalletButton({ walletOnly = false }: { walletOnly?: boolean }) {
-  return <div className="flex flex-wrap items-center justify-end gap-2">{!walletOnly && <EmailAccountButton />}<WalletConnectionButton /></div>;
-}
-
-function WalletConnectionButton() {
-  const {
-    address,
-    connectors,
-    activeConnector,
-    chainId,
-    isConnected,
-    isConnecting,
-    isWrongNetwork,
-    isSwitching,
-    truncatedAddress,
-    usdcBalance,
-    isBalanceLoading,
-    isBalanceError,
-    refetchBalance,
-    connect,
-    switchToArc,
-    ensureArc,
-    disconnect,
-    error,
-    clearError,
-  } = useWallet();
-
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-
+/** One entry point for email, external wallets, and embedded wallets. */
+export default function ConnectWalletButton() {
+  const session = usePrivySession();
+  const wallet = useWallet();
+  const [open, setOpen] = useState(false);
+  const [menuLeft, setMenuLeft] = useState<number>();
+  const [signingOut, setSigningOut] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
   const attemptedNetwork = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!isConnected || !isWrongNetwork) {
-      attemptedNetwork.current = null;
-      return;
-    }
-    if (isConnecting || isSwitching) return;
-    const key = `${address}:${chainId}`;
+    if (!session.authenticated || !wallet.isConnected || !wallet.isWrongNetwork) { attemptedNetwork.current = null; return; }
+    if (wallet.isConnecting || wallet.isSwitching) return;
+    const key = `${wallet.address}:${wallet.chainId}`;
     if (attemptedNetwork.current === key) return;
     attemptedNetwork.current = key;
-    // Ask once per account/network change, including restored sessions.
-    // A rejected request stays visible until the user retries.
-    if (!error) void ensureArc();
-  }, [address, chainId, isConnected, isWrongNetwork, isConnecting, isSwitching, error, ensureArc]);
+    if (!wallet.error) void wallet.ensureArc();
+  }, [session.authenticated, wallet.address, wallet.chainId, wallet.isConnected, wallet.isWrongNetwork, wallet.isConnecting, wallet.isSwitching, wallet.error, wallet.ensureArc]);
 
   useEffect(() => {
-    function onClickOutside(e: MouseEvent) {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
-        setMenuOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", onClickOutside);
-    return () => document.removeEventListener("mousedown", onClickOutside);
+    const outside = (event: MouseEvent) => { if (root.current && !root.current.contains(event.target as Node)) setOpen(false); };
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") { setOpen(false); root.current?.querySelector("button")?.focus(); } };
+    document.addEventListener("mousedown", outside);
+    document.addEventListener("keydown", escape);
+    return () => { document.removeEventListener("mousedown", outside); document.removeEventListener("keydown", escape); };
   }, []);
+  useEffect(() => { if (session.pendingAccounts.length) setOpen(true); }, [session.pendingAccounts.length]);
 
-  if (!isConnected) {
-    return (
-      <div ref={rootRef} className="relative">
-        <button
-          type="button"
-          onClick={() => { clearError(); setPickerOpen(true); }}
-          aria-haspopup="dialog"
-          aria-expanded={pickerOpen}
-          disabled={isConnecting}
-          className="inline-flex items-center justify-center rounded-full border border-[#EF476F] bg-[#EF476F] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#d73c63] disabled:cursor-not-allowed disabled:opacity-60 sm:px-5"
-        >
-          {isConnecting ? "Connecting…" : "Connect Wallet"}
-        </button>
+  const user = session.user;
+  const label = wallet.truncatedAddress || user?.email || (user?.walletAddress ? `${user.walletAddress.slice(0, 6)}…${user.walletAddress.slice(-4)}` : "My account");
+  const loading = session.configured && (!session.ready || session.isSyncing);
+  const balance = wallet.isBalanceLoading ? "Loading USDC…" : wallet.isBalanceError || wallet.usdcBalance === null ? "USDC unavailable" : `${wallet.usdcBalance} USDC`;
 
-        <WalletPicker open={pickerOpen} onClose={() => setPickerOpen(false)} connectors={connectors} connect={connect} isConnecting={isConnecting} error={error} clearError={clearError} />
-      </div>
-    );
-  }
+  useEffect(() => {
+    if (!open) return;
+    const alignMenu = () => {
+      const bounds = root.current?.getBoundingClientRect();
+      if (!bounds) return;
+      const width = Math.min(288, window.innerWidth - 32);
+      const left = Math.max(16, Math.min(bounds.right - width, window.innerWidth - width - 16));
+      setMenuLeft(left - bounds.left);
+    };
+    alignMenu();
+    window.addEventListener("resize", alignMenu);
+    return () => window.removeEventListener("resize", alignMenu);
+  }, [open, label]);
 
-  if (isWrongNetwork) {
-    return (
-      <div ref={rootRef} className="relative">
-        <button
-          type="button"
-          onClick={switchToArc}
-          disabled={isSwitching || isConnecting}
-          className="inline-flex items-center justify-center gap-2 rounded-full border border-[#EF476F] px-4 py-2 text-sm font-semibold text-[#EF476F] disabled:opacity-60"
-        >
-          {isSwitching || isConnecting ? "Switching…" : "Switch to Arc"}
-        </button>
-        <div className="absolute right-0 top-full z-40 mt-2 w-64 rounded-xl border border-[var(--border-soft)] bg-[var(--card-bg)] p-3 shadow-lg">
-          <p role="status" className="text-xs text-[var(--muted-text)]">
-            {error ? walletErrorMessage(error) : "Your wallet is on the wrong network."}
-          </p>
-          <p className="mt-2 text-xs text-[var(--muted-text)]">{truncatedAddress}</p>
-          <button type="button" onClick={disconnect} className="mt-2 text-xs font-semibold text-[#EF476F]">Disconnect</button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div ref={rootRef} className="relative">
-      <button
-        type="button"
-        onClick={() => setMenuOpen((v) => !v)}
-        aria-expanded={menuOpen}
-        className="inline-flex items-center gap-2 rounded-full border border-[var(--border-soft)] bg-[var(--chip-bg)] px-4 py-2 text-sm font-semibold text-[var(--page-text)] transition hover:bg-[var(--border-soft)]"
-      >
-        <span className="h-2 w-2 rounded-full bg-[#2FE6A6]" />
-        {isBalanceLoading ? "Loading USDC…" : isBalanceError || usdcBalance === null ? "USDC unavailable" : `${usdcBalance} USDC`}
-        <span className="text-[var(--muted-text)]">{truncatedAddress}</span>
-      </button>
-
-      {menuOpen && (
-        <div className="absolute right-0 top-full z-40 mt-2 w-44 overflow-hidden rounded-xl border border-[var(--border-soft)] bg-[var(--card-bg)] shadow-lg">
-          <p className="border-b border-[var(--border-soft)] px-4 py-3 text-xs text-[var(--muted-text)]">{activeConnector?.name ?? "Wallet"}</p>
-          {isBalanceError && (
-            <button type="button" onClick={() => void refetchBalance()} className="block w-full px-4 py-3 text-left text-sm text-[var(--page-text)]">
-              Retry balance
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => {
-              disconnect();
-              setMenuOpen(false);
-              setPickerOpen(true);
-            }}
-            className="block w-full px-4 py-3 text-left text-sm text-[var(--page-text)] transition hover:bg-[var(--chip-bg)]"
-          >
-            Change wallet
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              disconnect();
-              setMenuOpen(false);
-            }}
-            className="block w-full px-4 py-3 text-left text-sm text-[var(--page-text)] transition hover:bg-[var(--chip-bg)]"
-          >
-            Disconnect
-          </button>
-        </div>
-      )}
-    </div>
-  );
+  return <div ref={root} className="relative min-w-0 max-w-full">
+    <button type="button" aria-expanded={open} aria-haspopup="true" onClick={() => {
+      if (user || session.pendingAccounts.length || !session.configured) { setOpen((value) => !value); return; }
+      setOpen(true); session.login();
+    }} disabled={loading} className={`inline-flex max-w-full items-center justify-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold transition disabled:opacity-60 ${user ? "border-[var(--border-soft)] bg-[var(--chip-bg)] hover:bg-[var(--border-soft)]" : "border-[#EF476F] bg-[#EF476F] text-white hover:bg-[#d73c63]"}`}>
+      {loading ? <LoaderCircle size={15} className="shrink-0 animate-spin" aria-hidden="true" /> : <UserRound size={15} className="shrink-0" aria-hidden="true" />}
+      <span className="max-w-[130px] truncate sm:max-w-[190px]">{loading ? "Signing in…" : user ? label : "Sign in"}</span>
+      {user && <><span className="hidden text-xs text-[var(--muted-text)] md:inline">{wallet.isConnected ? balance : "Account"}</span><ChevronDown size={13} className="shrink-0" aria-hidden="true" /></>}
+    </button>
+    {open && <div role="region" aria-label="Artiq account" style={{ left: menuLeft }} className="absolute right-0 top-full z-50 mt-2 w-72 max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-[var(--border-soft)] bg-[var(--card-bg)] p-4 shadow-xl">
+      {!session.configured ? <p role="status" className="text-sm leading-6 text-[var(--muted-text)]">Sign-in is being set up. Please check back shortly.</p> : user ? <>
+        <p className="break-all text-sm font-semibold">{user.email || label}</p>
+        {wallet.address && <p className="mt-2 break-all font-mono text-[11px] text-[var(--muted-text)]">{wallet.address}</p>}
+        {wallet.isConnected && <p className="mt-2 text-xs text-[var(--muted-text)]">{balance}</p>}
+        {wallet.isWrongNetwork && <button type="button" disabled={wallet.isSwitching} onClick={() => void wallet.switchToArc()} className="mt-3 text-xs font-semibold text-[#EF476F]">{wallet.isSwitching ? "Switching…" : "Switch to Arc Testnet"}</button>}
+        {wallet.isBalanceError && <button type="button" onClick={() => void wallet.refetchBalance()} className="mt-3 block text-xs font-semibold text-[#b55fbe]">Retry balance</button>}
+        <Link href="/apply#my-applications" onClick={() => setOpen(false)} className="mt-4 block border-t border-[var(--border-soft)] pt-3 text-sm hover:text-[#b55fbe]">My applications</Link>
+        {session.connectedWallets.length > 1 && <label className="mt-3 block text-xs text-[var(--muted-text)]">Active wallet<select aria-label="Active wallet" value={wallet.address?.toLowerCase() ?? ""} onChange={(event) => void session.selectWallet(event.target.value)} className="mt-2 block w-full rounded-lg border border-[var(--border-soft)] bg-[var(--card-bg)] p-2">{session.connectedWallets.map((item) => <option key={item.address} value={item.address.toLowerCase()}>{item.label} · {item.address.slice(0, 6)}…{item.address.slice(-4)}</option>)}</select></label>}
+        <button type="button" onClick={() => { setOpen(false); session.connectWallet(); }} className="mt-3 block text-sm hover:text-[#b55fbe]">Add a wallet</button>
+        <button type="button" disabled={signingOut} onClick={() => { setSigningOut(true); void session.logout().then((success) => { if (success) setOpen(false); }).finally(() => setSigningOut(false)); }} className="mt-3 flex items-center gap-2 text-sm text-[#EF476F] disabled:opacity-60"><LogOut size={14} aria-hidden="true" />{signingOut ? "Signing out…" : "Sign out"}</button>
+      </> : session.pendingAccounts.length ? <>
+        <h2 className="text-sm font-semibold">Choose your existing account</h2>
+        <p className="mt-2 text-xs leading-6 text-[var(--muted-text)]">We found more than one account you own. Choose which account to use for this sign-in.</p>
+        {session.pendingAccounts.map((account) => <button key={account.id} type="button" disabled={session.isSyncing} onClick={() => void session.selectAccount(account.id)} className="mt-3 block w-full break-all rounded-xl border border-[var(--border-soft)] px-3 py-2 text-left text-xs hover:bg-[var(--chip-bg)] disabled:opacity-60">{account.label}</button>)}
+      </> : <p role="status" className="text-xs leading-6 text-[var(--muted-text)]">{session.isSyncing ? "Verifying your sign-in…" : "Continue with email or your preferred wallet in the sign-in dialog."}</p>}
+      {session.error && <p role="alert" className="mt-3 text-xs leading-6 text-[#d73c63] dark:text-[#ff8eab]">{session.error}</p>}
+      {session.error && session.configured && !session.pendingAccounts.length && <button type="button" onClick={() => { if (user) void session.refresh(); else session.login(); }} className="mt-3 text-xs font-semibold text-[#b55fbe]">Try again</button>}
+      {!user && session.configured && (session.error || session.pendingAccounts.length > 0) && <button type="button" disabled={signingOut} onClick={() => { setSigningOut(true); void session.logout().then((success) => { if (success) setOpen(false); }).finally(() => setSigningOut(false)); }} className="mt-3 block text-xs font-semibold text-[var(--muted-text)] disabled:opacity-60">{signingOut ? "Signing out…" : "Sign out and start again"}</button>}
+      {wallet.error && user && <p role="alert" className="mt-3 text-xs leading-6 text-[#d73c63] dark:text-[#ff8eab]">{walletErrorMessage(wallet.error)}</p>}
+    </div>}
+  </div>;
 }

@@ -1,4 +1,5 @@
 import { createConfig, http } from "wagmi";
+import { createConfig as createPrivyConfig } from "@privy-io/wagmi";
 import { injected } from "wagmi/connectors/injected";
 import { arcChain, arcConfig } from "./arcConfig";
 
@@ -36,8 +37,18 @@ export const wagmiConfig = createConfig({
   ssr: true,
 });
 
+// Privy owns its external and embedded wallet connectors. Its factory disables
+// wagmi's independent discovery and reconnection so both stay in sync.
+export const privyWagmiConfig = createPrivyConfig({
+  chains: [arcChain],
+  transports: { [arcChain.id]: http(arcConfig.rpcUrl) },
+  ssr: true,
+});
+
 declare module "wagmi" {
   interface Register {
-    config: typeof wagmiConfig;
+    // Privy supplies both injected and embedded connectors. Register its broad
+    // connector type rather than narrowing every hook to injected providers.
+    config: typeof privyWagmiConfig;
   }
 }

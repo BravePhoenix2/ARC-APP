@@ -233,6 +233,33 @@ test("concurrent verification consumes a code once and creates only one session"
   assert.equal(await db.user.count({ where: { email: signed.email } }), 1);
 });
 
+test("a successfully delivered resend invalidates the older pending code", async () => {
+  const older = await challenge("resend-success@example.com");
+  await db.emailChallenge.update({ where: { id: older.challengeId }, data: { createdAt: new Date(Date.now() - 61_000) } });
+  const newer = await challenge(older.email);
+  assert.notEqual(newer.challengeId, older.challengeId);
+  assert.ok((await db.emailChallenge.findUniqueOrThrow({ where: { id: older.challengeId } })).consumedAt);
+  assert.equal((await verify(older)).status, 400, "an old email cannot sign in after its replacement was delivered");
+  assert.equal((await verify(newer)).status, 200);
+  assert.equal(await db.user.count({ where: { email: older.email } }), 1);
+});
+
+test("a failed resend preserves the previously delivered pending code", async () => {
+  const older = await challenge("resend-failure@example.com");
+  await db.emailChallenge.update({ where: { id: older.challengeId }, data: { createdAt: new Date(Date.now() - 61_000) } });
+  failDelivery = true;
+  try {
+    assert.equal((await requestRoute.POST(request("/api/auth/email/request", "POST", { email: older.email }))).status, 503);
+  } finally {
+    failDelivery = false;
+  }
+  assert.equal((await db.emailChallenge.findUniqueOrThrow({ where: { id: older.challengeId } })).consumedAt, null);
+  const failed = await db.emailChallenge.findFirstOrThrow({ where: { email: older.email, id: { not: older.challengeId } } });
+  assert.equal(failed.delivered, false);
+  assert.ok(failed.consumedAt);
+  assert.equal((await verify(older)).status, 200, "SMTP failure must not lock out someone who already received a valid code");
+});
+
 test("sign-out is same-origin, revokes sessions, and rejects forged or expired cookies", async () => {
   const identity = await login("sign-out@example.com");
   const fake = { ...identity, cookie: `artiq_email_session=${"ff".repeat(32)}` };
@@ -279,6 +306,15 @@ test("email creators own private uploads and applications without acquiring revi
     imageUrl, priceUsdc: "12.5", maxSupply: 10,
     creatorId: walletUser.id, creatorWalletAddress: reviewerWallet, walletAddress: reviewerWallet, isAdmin: true,
   };
+  const legacyWallet = "0x1111111111111111111111111111111111111111";
+  const legacyImage = await db.uploadedImage.create({ data: { ownerWallet: legacyWallet, ownerUserId: null, mimeType: "image/png", data: new Uint8Array(png) } });
+  const legacyUrl = `/api/uploads/${legacyImage.id}`;
+  assert.equal((await imageRoute.GET(request(legacyUrl, "GET", undefined, owner), { params: { id: legacyImage.id } })).status, 404, "email sessions cannot inherit legacy wallet-only uploads");
+  assert.equal((await submissions.POST(request("/api/submissions", "POST", { ...application, imageUrl: legacyUrl, creatorWalletAddress: legacyWallet, walletAddress: legacyWallet }, owner))).status, 400, "claiming a wallet in the body cannot assign its old uploads to an email account");
+  const legacyOwnerToken = randomBytes(32).toString("hex");
+  await db.walletSession.create({ data: { walletAddress: legacyWallet, tokenHash: createHash("sha256").update(legacyOwnerToken).digest("hex"), expiresAt: new Date(Date.now() + 60_000) } });
+  const legacyOwnerRequest = new NextRequest(`${origin}${legacyUrl}`, { headers: { Cookie: `artiq_wallet_session=${legacyOwnerToken}` } });
+  assert.equal((await imageRoute.GET(legacyOwnerRequest, { params: { id: legacyImage.id } })).status, 200, "the signed owner wallet retains access to its legacy upload");
   const missingAccount = request("/api/submissions", "POST", application, owner);
   missingAccount.headers.delete("x-artiq-account-id");
   assert.equal((await submissions.POST(missingAccount)).status, 401);

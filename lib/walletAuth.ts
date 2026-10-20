@@ -3,6 +3,7 @@ import type { NextRequest, NextResponse } from "next/server";
 import { getAddress, isAddress } from "viem";
 import { arcChain } from "@/lib/arcConfig";
 import { prisma } from "@/lib/prisma";
+import { PRIVY_SESSION_COOKIE, getPrivySession, selectPrivyWallet } from "@/lib/privyAuth";
 
 export const WALLET_SESSION_COOKIE = "artiq_wallet_session";
 export const WALLET_SESSION_SECONDS = 24 * 60 * 60;
@@ -88,6 +89,13 @@ export function createWalletMessage(input: {
 }
 
 export async function getWalletSession(request: NextRequest): Promise<WalletSession | null> {
+  // A Privy session is authoritative. An invalid session must never fall back to a legacy wallet cookie.
+  if (request.cookies.get(PRIVY_SESSION_COOKIE)) {
+    const session = await getPrivySession(request);
+    if (!session || request.headers.get("x-artiq-account-id") !== session.userId) return null;
+    const wallet = selectPrivyWallet(request, session);
+    return wallet ? { walletAddress: wallet, isAdmin: isAdminWallet(wallet) } : null;
+  }
   const token = request.cookies.get(WALLET_SESSION_COOKIE)?.value;
   if (!token || !/^[a-f0-9]{64}$/.test(token)) return null;
   const session = await prisma.walletSession.findUnique({

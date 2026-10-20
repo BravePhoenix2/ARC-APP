@@ -8,6 +8,7 @@ import Atmosphere from "@/components/Atmosphere";
 import ArticLogo from "@/components/ArticLogo";
 import { useTheme, type ThemePreference } from "@/hooks/useTheme";
 import { useWallet } from "@/hooks/useWallet";
+import { useArtiqAccount } from "@/hooks/useArtiqAccount";
 import { arcChain } from "@/lib/arcConfig";
 
 const appearances = [
@@ -21,6 +22,7 @@ const secondaryButton = "rounded-full border border-[var(--border-soft)] px-4 py
 export default function SettingsPage() {
   const { preference, setPreference } = useTheme();
   const wallet = useWallet();
+  const account = useArtiqAccount();
   const [notice, setNotice] = useState("");
   const [copiedAddress, setCopiedAddress] = useState<string | null>(null);
 
@@ -57,16 +59,23 @@ export default function SettingsPage() {
       <div className="mx-auto max-w-5xl px-6 py-10 sm:px-10 sm:py-14">
         <p className="text-[10px] font-semibold uppercase tracking-[.2em] text-[var(--faint-text)]">Make yourself at home</p>
         <h1 className="mt-3 text-4xl font-semibold sm:text-5xl">Your <span className="hero-word">settings.</span></h1>
-        <p className="mt-4 text-sm leading-6 text-[var(--muted-text)]">Manage your appearance, connected wallet, and network.</p>
+        <p className="mt-4 text-sm leading-6 text-[var(--muted-text)]">Manage your account, appearance, connected wallets, and network.</p>
         <p role="status" aria-live="polite" className="mt-4 min-h-6 text-sm text-[var(--muted-text)]">{notice}</p>
 
         <div className="mt-6 grid gap-6">
+          <section className={panel} aria-labelledby="account-heading">
+            <h2 id="account-heading" className="text-lg">Your Artiq account</h2>
+            <p className="mt-2 break-all text-sm text-[var(--muted-text)]">{account.user ? account.user.email || account.user.walletAddress || "Signed in" : "One sign-in for your art, collections, and connected wallets."}</p>
+            <div className="mt-5 flex"><ConnectWalletButton /></div>
+          </section>
           <section className={panel} aria-labelledby="creator-heading">
             <h2 id="creator-heading" className="text-lg">Creator studio</h2>
             <p className="mt-2 text-sm text-[var(--muted-text)]">Apply to publish your NFT collection or original artwork. Applications are reviewed before appearing in the marketplace.</p>
             <div className="mt-5 flex flex-wrap gap-3">
               <Link href="/apply" className={secondaryButton}>My applications</Link>
               <Link href="/admin/submissions" className={secondaryButton}>Reviewer dashboard</Link>
+              <Link href="/nfts/create" className={secondaryButton}>Create an NFT</Link>
+              <Link href="/settings/protocol" className={secondaryButton}>Testnet project setup</Link>
             </div>
           </section>
           <section className={panel} aria-labelledby="appearance-heading">
@@ -92,12 +101,12 @@ export default function SettingsPage() {
                   <button type="button" onClick={copyAddress} className={`${secondaryButton} flex items-center gap-2`}>{copiedAddress === wallet.address ? <Check size={14} /> : <Copy size={14} />} Copy address</button>
                   <a href={`${arcChain.blockExplorers!.default.url}/address/${wallet.address}`} target="_blank" rel="noreferrer" className={`${secondaryButton} flex items-center gap-2`}>View on explorer <ExternalLink size={14} /></a>
                   {wallet.isBalanceError && <button type="button" onClick={() => void wallet.refetchBalance()} className={secondaryButton}>Retry balance</button>}
-                  <button type="button" onClick={() => { wallet.disconnect(); setCopiedAddress(null); setNotice("Wallet disconnected."); }} className={`${secondaryButton} text-[#EF476F]`}>Disconnect</button>
+                  <button type="button" onClick={() => void account.logout().then((success) => { if (success) { setCopiedAddress(null); setNotice("Signed out."); } })} className={`${secondaryButton} text-[#EF476F]`}>Sign out</button>
                 </div>
               </>
             ) : (
               <>
-                <p className="mt-3 text-sm text-[var(--muted-text)]">Connect your wallet to see your address and USDC balance.</p>
+                <p className="mt-3 text-sm text-[var(--muted-text)]">Sign in to use your Artiq wallet or link an existing wallet and see its USDC balance.</p>
                 <div className="mt-5"><ConnectWalletButton /></div>
               </>
             )}

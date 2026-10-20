@@ -3,6 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { matchesRequestWallet } from "@/lib/requestWallet";
 import { getWalletSession, sameOrigin } from "@/lib/walletAuth";
 import { limitedJson } from "@/lib/requestBody";
+import type { Prisma } from "@/lib/generated/prisma/client";
+import { awardTesterMilestone } from "@/lib/testerLeaderboard";
 
 export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
   if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
@@ -38,12 +40,17 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
           creatorId: application.creatorId, creationMethod: application.creationMethod, itemType: application.itemType, title: application.title,
           description: application.description, imageUrl: application.imageUrl,
           ...(application.itemType === "NFT" ? {
+            nftKind: application.nftKind ?? "COLLECTIBLE", symbol: application.symbol,
+            metadataUri: application.metadataUri, maxPerWallet: application.maxPerWallet,
+            royaltyBps: application.nftKind === "SOULBOUND" ? 0 : application.royaltyBps,
+            ...(application.attributes !== null ? { attributes: application.attributes as Prisma.InputJsonValue } : {}),
             mintPriceUsdc: application.priceUsdc, maxSupply: application.maxSupply,
             mintStartTime: application.mintStartTime, contractAddress: application.contractAddress,
             mintedCount: 0, status: "UPCOMING",
           } : { priceUsdc: application.priceUsdc, category: application.category, quantityAvailable: 1, sold: false }),
         } });
         await tx.submission.update({ where: { id: params.id }, data: { itemId: item.id } });
+        await awardTesterMilestone(tx, application.creatorId, "APPROVED_CREATOR");
       }
       return tx.submission.findUniqueOrThrow({ where: { id: params.id } });
     });

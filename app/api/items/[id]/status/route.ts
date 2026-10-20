@@ -30,6 +30,9 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     if (!NFT_STATUSES.includes(body.status)) {
       return NextResponse.json({ error: `status must be one of ${NFT_STATUSES.join(", ")}` }, { status: 400 });
     }
+    if (item.nftKind === "SOULBOUND" && body.status === "LISTED") {
+      return NextResponse.json({ error: "Soulbound NFTs are non-transferable and cannot be listed for resale." }, { status: 400 });
+    }
     const updated = await prisma.item.update({ where: { id: params.id }, data: { status: body.status } });
     return NextResponse.json({ item: updated });
   }

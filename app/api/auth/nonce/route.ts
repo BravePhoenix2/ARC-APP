@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getPrivyAppId } from "@/lib/privyAuth";
 import {
   createWalletMessage,
   normalizeWalletAddress,
@@ -16,6 +17,9 @@ export async function POST(request: NextRequest) {
   const headers = { "Cache-Control": "no-store" };
   if (!sameOrigin(request)) {
     return NextResponse.json({ error: "This request must come from Artiq." }, { status: 403, headers });
+  }
+  if (getPrivyAppId()) {
+    return NextResponse.json({ error: "Use the Sign in button to continue with email or your wallet.", code: "USE_PRIVY_LOGIN" }, { status: 409, headers });
   }
   const body = await readAuthBody(request);
   const walletAddress = normalizeWalletAddress(body?.walletAddress);

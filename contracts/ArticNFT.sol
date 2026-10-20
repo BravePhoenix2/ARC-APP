@@ -7,12 +7,12 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 
 /// @title ArticNFT
 /// @notice A single creator's NFT collection. Mint payments are made in
-/// Arc's native currency, which is USDC (6 decimals) rather than ETH — there
+/// Arc's native currency, which is USDC (18 decimals) rather than ETH — there
 /// is no ERC-20 token involved, mint price is just compared against
 /// `msg.value` like a normal native-currency payable contract would compare
 /// against wei.
 contract ArticNFT is ERC721, Ownable, ReentrancyGuard {
-    /// @notice Price to mint a single token, in native USDC (6 decimals).
+    /// @notice Price to mint a single token, in native USDC (18 decimals).
     uint256 public mintPrice;
 
     /// @notice Unix timestamp minting opens at. Minting reverts before this.

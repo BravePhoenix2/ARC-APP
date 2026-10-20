@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyMessage } from "viem";
 import { prisma } from "@/lib/prisma";
+import { getPrivyAppId } from "@/lib/privyAuth";
 import { EMAIL_SESSION_COOKIE, clearEmailSessionCookie } from "@/lib/emailAuth";
+import { ensureTesterProfile } from "@/lib/testerLeaderboard";
 import {
   createWalletMessage,
   hashSessionToken,
@@ -22,6 +24,9 @@ export async function POST(request: NextRequest) {
   const headers = { "Cache-Control": "no-store" };
   if (!sameOrigin(request)) {
     return NextResponse.json({ error: "This request must come from Artiq." }, { status: 403, headers });
+  }
+  if (getPrivyAppId()) {
+    return NextResponse.json({ error: "Use the Sign in button to continue with email or your wallet.", code: "USE_PRIVY_LOGIN" }, { status: 409, headers });
   }
   const body = await readAuthBody(request);
   const walletAddress = normalizeWalletAddress(body?.walletAddress);
@@ -73,6 +78,8 @@ export async function POST(request: NextRequest) {
       await tx.walletSession.create({
         data: { walletAddress, tokenHash: hashSessionToken(token), expiresAt: new Date(now.getTime() + WALLET_SESSION_SECONDS * 1000) },
       });
+      const account = await tx.user.upsert({ where: { walletAddress }, create: { walletAddress }, update: {}, select: { id: true } });
+      await ensureTesterProfile(tx, account.id, { now });
       return true;
     });
     if (!created) {

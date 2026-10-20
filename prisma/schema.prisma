@@ -15,6 +15,13 @@ enum ItemType {
   WEB2_ART
 }
 
+enum NftKind {
+  COLLECTIBLE
+  EDITION
+  SOULBOUND
+  MEMBERSHIP
+}
+
 // NFT lifecycle, per the mint/list flow described in the product proposal.
 enum ItemStatus {
   UPCOMING
@@ -53,6 +60,7 @@ enum CreationMethod {
 
 model User {
   id            String   @id @default(cuid())
+  privyId       String?  @unique
   walletAddress String?  @unique
   email         String?  @unique
   emailVerifiedAt DateTime?
@@ -68,7 +76,36 @@ model User {
   activities Activity[]
   submissions Submission[]
   emailSessions EmailSession[]
+  privySessions PrivySession[]
   uploadedImages UploadedImage[]
+  testerProfile TesterProfile?
+}
+
+// Only verified sign-ins create tester profiles; seeded marketplace users do not count.
+model TesterProfile {
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  joinedAt     DateTime @default(now())
+  lastActiveAt DateTime @default(now())
+  milestones   TesterMilestone[]
+
+  @@index([lastActiveAt])
+}
+
+model TesterMilestone {
+  id        String        @id @default(cuid())
+  profileId String
+  profile   TesterProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  kind      String
+  chainId   Int?
+  txHash    String?
+  createdAt DateTime      @default(now())
+
+  // Each task scores once. A verified transaction cannot be credited to two accounts.
+  @@unique([profileId, kind])
+  @@unique([chainId, txHash])
+  @@index([kind])
 }
 
 // One table for everything uploaded — itemType tells you which half of the
@@ -87,6 +124,12 @@ model Item {
   creator   User   @relation(fields: [creatorId], references: [id])
 
   // --- NFT fields ---
+  nftKind         NftKind?
+  symbol          String?
+  metadataUri     String?
+  maxPerWallet    Int?
+  royaltyBps      Int?
+  attributes      Json?
   contractAddress String?
   mintPriceUsdc   Float?
   mintStartTime   DateTime?
@@ -100,12 +143,15 @@ model Item {
   priceUsdc          Float?
   quantityAvailable  Int?
   sold               Boolean       @default(false)
+  artListingId       String?
+  artListingSeller   String?
 
   listings   Listing[]
   activities Activity[]
   submission Submission?
 
   @@index([itemType])
+  @@index([nftKind])
   @@index([status])
 }
 
@@ -154,6 +200,12 @@ model Submission {
   imageUrl        String
   priceUsdc       Float
   category        ArtCategory?
+  nftKind         NftKind?
+  symbol          String?
+  metadataUri     String?
+  maxPerWallet    Int?
+  royaltyBps      Int?
+  attributes      Json?
   contractAddress String?
   maxSupply       Int?
   mintStartTime   DateTime?
@@ -233,4 +285,20 @@ model EmailSession {
   createdAt DateTime @default(now())
 
   @@index([expiresAt])
+}
+
+// Artiq stores an opaque, revocable session, never a Privy access or identity token.
+model PrivySession {
+  id              String   @id @default(cuid())
+  tokenHash       String   @unique
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  privyDid        String
+  verifiedEmail   String?
+  walletAddresses Json
+  expiresAt       DateTime
+  createdAt       DateTime @default(now())
+
+  @@index([expiresAt])
+  @@index([userId])
 }

@@ -2,6 +2,84 @@
 
 Next.js marketplace with Prisma/SQLite and Solidity contracts.
 
+## Testnet leaderboard and account count
+
+`/leaderboard` ranks verified tester accounts and shows total accounts, accounts
+active in the last seven days, and total points. Public rankings use generated
+tester aliases; email addresses, full wallets, and private application details
+are excluded. NFT and marketplace counters refresh every 30 seconds. The landing page has no
+tester counter. Counts represent verified accounts, not distinct people. Seeded
+marketplace users are excluded. Privy-linked identities share one Artiq account;
+previous separate accounts are never merged automatically.
+
+Each account earns each milestone once: verified sign-in (10), first approved
+creator application (25), collection deployment (20), NFT mint (30), art purchase
+(40), auction bid (15), joining a reward round (10), and claiming a reward (15).
+The maximum is 165 points. Ties use join time, then the public profile ID.
+Pending and rejected applications stay private and earn no creator milestone.
+Points provide recognition; USDC reward eligibility remains a separate contract
+check based on minting or buying art.
+
+On-chain actions count only after the server verifies a successful receipt,
+event, sender, contract, and Arc Testnet chain ID. A receipt cannot be credited
+to two tester accounts. Privy sessions sync automatically after app
+transactions when the receipt sender belongs to the signed linked-wallet list.
+Legacy email sessions still require an account-bound ownership signature.
+Pending hashes are retained locally for retry;
+a previous transaction hash can also be submitted for server verification.
+
+For existing installations, run `npm run tester:backfill` after the additive
+schema sync. This imports only accounts with retained verified email, signed
+wallet-session, or authenticated submission evidence and is safe to repeat.
+
+## NFT studio, auctions, and collector rewards
+
+`/nfts` lists reviewed collections with search, format filters, and price sorting.
+`/nfts/create` supports ERC-721 collectibles, ERC-1155 editions (one token ID with
+multiple copies), locked ERC-5192 soulbound NFTs, and transferable ERC-721
+membership passes. Membership benefits are described by the creator; expiry,
+subscriptions, and access enforcement are not automatic. Original Art still
+requires human authorship review. AI-generated and assisted NFTs remain allowed.
+
+Applications retain the review step. After approval, the creator can deploy from
+the collection detail page and collectors can mint there. Privy email sign-in can
+create an embedded wallet. A selected wallet must sign deployments,
+mints, payments, and claims. A successful receipt is verified against the approved
+settings before the app attaches a collection or art checkout listing.
+
+The new contracts are restricted to **Arc Testnet** in the app. To activate them:
+
+1. Open `/settings/protocol` and connect a wallet funded with test USDC.
+2. Confirm the three contract deployments. Completed steps are saved locally.
+3. Copy the public address configuration into `.env.local`, rebuild, and restart.
+
+Alternatively, `npm run studio:deploy:testnet` uses an already configured private
+testnet deployer. No private key is required by the browser setup. Re-export
+browser bytecode after contract edits with `npm run studio:artifacts`.
+
+`/auctions` supports escrowed ERC-721 auctions with a reserve, deadline, 5% minimum
+bid increases, ERC-2981 royalties, pull refunds/proceeds, and a separate winner
+NFT claim. Soulbound tokens and ERC-1155 editions cannot use this auction.
+
+Reward rounds are funded independently from auctions. A wallet qualifies after
+minting through the configured studio factory or buying art through the
+configured art market. The first N eligible wallets to join before the deadline
+share the funded pool equally, based on the final participant count. Anyone can
+finalize after the deadline; each participant claims once. Rounding dust returns
+to the sponsor, or the entire pool if nobody joined. There are no automatic
+payments, paid reward entry, random draws, or eligibility inferred from an email
+address or an unverified historical database row. Free factory mints also qualify;
+one place per wallet does not establish one place per person.
+
+Art checkout records a test payment and credits the seller for withdrawal. It
+does not escrow physical delivery or grant usage rights automatically. Art-market
+listing creation is permissionless on-chain; the Artiq UI only attaches receipts
+to approved artwork owned by the signed-in creator. Test USDC has no monetary
+value. Native USDC amounts use **18 decimals** for all payable calls.
+
+Run `npm test` for the local contracts and `npm run test:app` for application,
+authentication, review, metadata, and receipt verification tests.
+
 ## Local development
 
 Use Node.js 22.12+ (Node.js 24 LTS is supported).
@@ -15,7 +93,13 @@ npm run dev
 
 Open http://localhost:3000. `db:setup` generates Prisma Client, creates the
 SQLite tables, and seeds demo items. The seed can be rerun without duplicating
-demo records. Installation also generates Prisma Client automatically.
+demo records. Installation also generates Prisma Client automatically. The project `.npmrc`
+uses `legacy-peer-deps` because Privy declares unused optional smart-account peers
+that conflict with current viem's `ox`; the React, wagmi, Privy bridge, and viem
+versions used by the app are explicitly compatible and locked. The Next webpack
+config narrows the connector barrel to the injected entry used by Privy, avoiding
+an unused Tempo connector import, and externalizes Privy’s optional Solana adapters.
+`@stripe/stripe-js` is installed because Privy’s bundled SDK imports it.
 
 The app and Prisma CLI default to `file:./prisma/dev.db` when `DATABASE_URL`
 is absent. Keep `.env.local` private. Blockchain transactions require a wallet,
@@ -40,16 +124,67 @@ ARTIQ_LOCAL_PREVIEW=true ARTIQ_PREVIEW_ORIGIN=https://your-tunnel.trycloudflare.
 The remote form and screening endpoint require this exact host and browser
 origin. Stop the tunnel to end public access. Stop this run and use the normal
 development command to restore wallet sign-in. Actual submission and reviewer
-APIs still require wallet authentication in preview mode.
+APIs still require a verified account in preview mode.
 
-## Wallet connections
+## Privy sign-in setup
 
-Connect Wallet opens a picker for installed browser wallets, including MetaMask,
-Rabby, Coinbase Wallet, Trust Wallet, and Phantom. Wallets that announce themselves
-through EIP-6963 are discovered automatically, with a generic browser-wallet
-fallback for older extensions. Each choice uses that wallet's own provider.
-The picker offers installation links for missing wallets. On mobile, open Artiq
-in the wallet's built-in browser. WalletConnect QR connections are not enabled.
+For an existing SQLite installation that predates Privy, back up the database,
+then apply this additive upgrade once before the normal schema sync:
+
+```sh
+npx prisma db execute --file prisma/upgrades/20261020_privy_auth.sql
+npm run db:push
+npm run db:generate
+```
+
+New databases use the usual `npm run db:setup`. This project uses schema pushes;
+the one-time upgrade adds only a nullable user ID, a session table, and indexes.
+It avoids rebuilding or deleting existing user records.
+
+The single **Sign in** button uses Privy for email OTP and Ethereum wallets.
+Email users without a wallet get an embedded Ethereum wallet. Arc Testnet is the
+default and supported chain, with native USDC for gas. Until a real App ID is
+configured, the app renders normally and sign-in shows a setup notice.
+
+1. Create an app named **Artiq Testnet** at [Privy Dashboard](https://dashboard.privy.io).
+2. Under **User management > Authentication**, enable **Email** and **Ethereum
+   wallet** login. Under **Advanced**, enable **Return user data in an identity
+   token**. The server requires that signed identity token to verify account links.
+3. In app settings, allow `http://localhost:3000` and your current public HTTPS
+   app origin. Temporary Cloudflare tunnel domains change; update the allowed
+   origin and Artiq public URL whenever the tunnel changes. If app clients are
+   enabled, use the matching public client ID and its allowed origins.
+4. Copy the public **App ID** from **Configuration > App settings > Basics** into
+   the private `.env.local` file:
+
+   ```dotenv
+   NEXT_PUBLIC_PRIVY_APP_ID=your_real_public_app_id
+   NEXT_PUBLIC_PRIVY_CLIENT_ID=
+   ```
+
+   The client ID is optional. No Privy app secret is needed for this integration:
+   the server verifies ES256 tokens using Privy's public JWKS.
+5. Restart development, or rebuild and restart production. Test email login,
+   external-wallet login, refresh, wallet linking/switching, and sign-out on both
+   localhost and the allowed public origin. Fund the selected wallet with Arc
+   **testnet** USDC before attempting blockchain transactions.
+
+Privy sends the new sign-in codes. Existing Gmail SMTP configuration remains
+private and is retained only for legacy authentication compatibility. Never put
+an app secret or private wallet key in a `NEXT_PUBLIC_` variable.
+
+The server verifies both Privy tokens before setting a revocable HttpOnly session.
+A matching verified legacy email or wallet preserves the existing account and
+its submissions. If both identify different previous accounts, the user chooses
+which account to use; histories are not silently merged or deleted. Once linked,
+the Privy DID remains the account key. Private requests are bound to the verified
+Artiq account ID, and reviewer access still requires an allowlisted, linked wallet.
+An email login never grants reviewer privileges by itself. Once Privy is
+configured, new legacy OTP and wallet-signature logins are disabled; only existing
+legacy sessions remain readable for migration until they expire.
+
+See [Privy React setup](https://docs.privy.io/basics/react/setup) and
+[identity token setup](https://docs.privy.io/user-management/users/identity-tokens).
 
 ## Checks
 
@@ -66,8 +201,8 @@ Use `npm start` after a successful build to serve the production build.
 
 ## Creator applications
 
-Visit `/apply` to sign in with a one-time email code or connect a wallet and sign
-a free ownership-verification message. Either account can submit an NFT collection
+Visit `/apply` and use **Sign in** to continue with email or a wallet through
+Privy. A verified Artiq account can submit an NFT collection
 or original art for review. Original art requires a
 PNG/JPEG/WebP upload (up to 5 MB), a declaration that no generative AI was used,
 and at least 30 characters explaining the creation process. NFTs may use uploaded
@@ -85,32 +220,13 @@ Visit `/admin/submissions` and sign in with a listed wallet to approve or reject
 applications. Approval posts the listing; it does not deploy a contract or mint an
 NFT. Rejections include feedback visible to the creator.
 
-### Email sign-in
+### Legacy email compatibility
 
-The Email option creates an account after a six-digit code is verified. Configure
-Gmail SMTP in the private server environment:
-
-```dotenv
-GMAIL_SMTP_USER=you@gmail.com
-GMAIL_SMTP_APP_PASSWORD=your_google_app_password
-ARTIQ_EMAIL_CODE_SECRET=at_least_32_random_characters
-```
-
-Enable Google 2-Step Verification, then create an app password at
-<https://myaccount.google.com/apppasswords>. Never use your normal Gmail password,
-prefix these secrets with `NEXT_PUBLIC_`, or commit them. Restart the server after
-changing the environment. Codes expire after ten minutes and have five attempts.
-Code hashes and session-token hashes are stored in the database; plaintext codes
-are sent only by email. Resends and total sends are limited to protect delivery.
-Without configured Gmail credentials, the UI explains that email sign-in is being
-set up and wallet sign-in stays available. There is no preview-code fallback.
-
-Email sign-in proves mailbox access and does not create a blockchain wallet.
-Wallet and email accounts remain separate; emails are never automatically linked
-to a wallet or granted reviewer access. Email users' uploads and application
-history are private to their account and reviewers. Public listings show the
-creator's chosen name, never their private account email. Blockchain transactions
-still require a connected wallet. Reviewer access remains wallet based.
+The existing Gmail OTP endpoints remain available for migrating earlier accounts
+and regression tests. The application UI now uses Privy. Keep any existing
+`GMAIL_SMTP_USER`, `GMAIL_SMTP_APP_PASSWORD`, and `ARTIQ_EMAIL_CODE_SECRET` values
+server-only; they are not used by Privy's email delivery. Public listings never
+expose a creator's private sign-in email.
 
 ### Art screening
 

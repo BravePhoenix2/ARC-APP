@@ -22,6 +22,7 @@ let catalog: typeof import("../../app/api/items/route");
 let uploads: typeof import("../../app/api/uploads/route");
 let imageRoute: typeof import("../../app/api/uploads/[id]/route");
 let adminQueue: typeof import("../../app/api/admin/submissions/route");
+let itemStatus: typeof import("../../app/api/items/[id]/status/route");
 let ownerCookie: string;
 let reviewerCookie: string;
 let otherCookie: string;
@@ -49,6 +50,7 @@ before(async () => {
   uploads = await import("../../app/api/uploads/route");
   imageRoute = await import("../../app/api/uploads/[id]/route");
   adminQueue = await import("../../app/api/admin/submissions/route");
+  itemStatus = await import("../../app/api/items/[id]/status/route");
   ownerCookie = await cookie(owner); reviewerCookie = await cookie(reviewer); otherCookie = await cookie(other);
 });
 after(async () => { await db?.$disconnect(); rmSync(directory, { recursive: true, force: true }); });
@@ -192,4 +194,42 @@ test("submission authentication, AI policy, privacy, approval, rejection, and im
   assert.equal((await imageRoute.GET(request(imageUrl), { params: { id: imageUrl.split("/").pop() } })).status, 200, "approved artwork images become public");
   assert.equal((await review.PATCH(request("/api/admin/submissions/x", "PATCH", artApproval, reviewerCookie), { params: { id: physicalId } })).status, 409);
   assert.equal(await db.item.count(), 2, "repeat Art approvals cannot duplicate publication");
+});
+
+test("NFT types survive private review, filter publicly, and block soulbound resale", async () => {
+  const published = new Map<string, string>();
+  for (const nftKind of ["COLLECTIBLE", "EDITION", "SOULBOUND", "MEMBERSHIP"] as const) {
+    const settings = {
+      ...application, title: `${nftKind} study`, nftKind, priceUsdc: "0", symbol: "STUDY", maxPerWallet: 2,
+      royaltyBps: nftKind === "SOULBOUND" ? 0 : 500, metadataUri: "ipfs://bafyexample/metadata.json",
+      attributes: [{ trait_type: "Palette", value: "Blue" }, { trait_type: "Year", value: 2026 }],
+    };
+    const created = await submissions.POST(request("/api/submissions", "POST", settings, ownerCookie));
+    assert.equal(created.status, 201);
+    const { submission } = await created.json();
+    assert.equal(submission.nftKind, nftKind);
+    const beforeApproval = await catalog.GET(request(`/api/items?itemType=NFT&nftKind=${nftKind}`));
+    assert.ok(!(await beforeApproval.json()).items.some((item: { title: string }) => item.title === settings.title));
+    const approved = await review.PATCH(request("/api/admin/submissions/x", "PATCH", { decision: "APPROVED" }, reviewerCookie), { params: { id: submission.id } });
+    assert.equal(approved.status, 200);
+    const itemId = (await approved.json()).submission.itemId;
+    published.set(nftKind, itemId);
+    const response = await catalog.GET(request(`/api/items?itemType=NFT&nftKind=${nftKind}`));
+    assert.equal(response.status, 200);
+    const publicItem = (await response.json()).items.find((item: { id: string }) => item.id === itemId);
+    assert.ok(publicItem);
+    for (const key of ["nftKind", "symbol", "maxPerWallet", "royaltyBps", "metadataUri", "attributes"] as const) assert.deepEqual(publicItem[key], settings[key]);
+    assert.equal(publicItem.mintPriceUsdc, 0);
+    assert.equal(publicItem.status, "UPCOMING", "review approval does not simulate contract deployment");
+  }
+  assert.equal((await catalog.GET(request("/api/items?nftKind=UNKNOWN"))).status, 400);
+  assert.equal((await catalog.GET(request("/api/items?itemType=WEB2_ART&nftKind=SOULBOUND"))).status, 400);
+  assert.equal((await catalog.GET(request("/api/items?status=INVALID"))).status, 400);
+  const soulboundId = published.get("SOULBOUND")!;
+  const soulboundResale = await itemStatus.PATCH(request(`/api/items/${soulboundId}/status`, "PATCH", { status: "LISTED" }, ownerCookie), { params: { id: soulboundId } });
+  assert.equal(soulboundResale.status, 400);
+  assert.match((await soulboundResale.json()).error, /non-transferable/);
+  assert.equal((await db.item.findUniqueOrThrow({ where: { id: soulboundId } })).status, "UPCOMING");
+  const editionId = published.get("EDITION")!;
+  assert.equal((await itemStatus.PATCH(request(`/api/items/${editionId}/status`, "PATCH", { status: "LISTED" }, ownerCookie), { params: { id: editionId } })).status, 200);
 });

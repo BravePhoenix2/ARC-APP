@@ -32,7 +32,7 @@ contract ArticFactory {
     /// @param name_ ERC-721 collection name.
     /// @param symbol_ ERC-721 collection symbol.
     /// @param baseURI_ Base metadata URI (per-token JSON, including rarity traits, lives here).
-    /// @param mintPrice_ Mint price per token, in native USDC (6 decimals).
+    /// @param mintPrice_ Mint price per token, in native USDC (18 decimals).
     /// @param mintStartTime_ Unix timestamp minting opens at.
     /// @param maxSupply_ Maximum tokens that will ever exist in the collection.
     /// @param maxPerWallet_ Maximum tokens a single wallet may mint.

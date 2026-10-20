@@ -8,6 +8,7 @@ const sessionKey = ["auth", "email-session"] as const;
 export const EMAIL_SESSION_CHANGED = "artiq:email-session-changed";
 const knownAccounts = new WeakMap<QueryClient, string | null>();
 const pendingRefreshes = new WeakMap<QueryClient, Promise<void>>();
+const refreshVersions = new WeakMap<QueryClient, number>();
 const pendingSignOuts = new WeakMap<QueryClient, Promise<void>>();
 const latestAuthEvents = new WeakMap<QueryClient, Event>();
 
@@ -55,12 +56,14 @@ export function useEmailSession() {
   const refresh = useCallback(async ({ afterAuthChange = false }: { afterAuthChange?: boolean } = {}): Promise<void> => {
     const pending = pendingRefreshes.get(queryClient);
     if (pending && !afterAuthChange) return pending;
+    const version = (refreshVersions.get(queryClient) ?? 0) + 1;
+    refreshVersions.set(queryClient, version);
     const request = (async () => {
       // An older session response may describe cookies from before verification.
       // Abort it before reading the server's current authentication state.
       await queryClient.cancelQueries({ queryKey: sessionKey, exact: true }, { revert: false });
       // A newer authentication change can supersede this refresh while aborting.
-      if (pendingRefreshes.get(queryClient) !== request) return;
+      if (refreshVersions.get(queryClient) !== version) return;
       await queryClient.invalidateQueries({ queryKey: sessionKey, exact: true }, { cancelRefetch: false });
     })();
     pendingRefreshes.set(queryClient, request);

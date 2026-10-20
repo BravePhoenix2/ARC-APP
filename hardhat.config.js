@@ -13,6 +13,9 @@ module.exports = {
     version: "0.8.24",
     settings: {
       optimizer: { enabled: true, runs: 200 },
+      // Collection deployment keeps the public creation API flat and compiles
+      // through IR to handle its metadata and mint-limit arguments safely.
+      viaIR: true,
       // OpenZeppelin v5.6's Bytes.sol uses the `mcopy` opcode, which only
       // exists from the Cancun hardfork onward.
       evmVersion: "cancun",

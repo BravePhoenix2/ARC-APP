@@ -4,7 +4,9 @@ import {
   emailCodeMatches, normalizeEmail, setEmailSessionCookie,
 } from "@/lib/emailAuth";
 import { prisma } from "@/lib/prisma";
+import { getPrivyAppId } from "@/lib/privyAuth";
 import { isEmailConfigured } from "@/lib/sendEmail";
+import { ensureTesterProfile } from "@/lib/testerLeaderboard";
 import {
   clearWalletSessionCookie, hashSessionToken, newAuthToken, readAuthBody,
   sameOrigin, walletRequestOrigin, WALLET_SESSION_COOKIE,
@@ -17,6 +19,9 @@ const invalidMessage = "This code is incorrect, expired, or already used. Reques
 export async function POST(request: NextRequest) {
   if (!sameOrigin(request)) {
     return NextResponse.json({ error: "This request must come from Artiq." }, { status: 403, headers });
+  }
+  if (getPrivyAppId()) {
+    return NextResponse.json({ error: "Use the Sign in button to continue with email or your wallet.", code: "USE_PRIVY_LOGIN" }, { status: 409, headers });
   }
   const body = await readAuthBody(request);
   const email = normalizeEmail(body?.email);
@@ -63,6 +68,7 @@ export async function POST(request: NextRequest) {
       await tx.emailSession.create({
         data: { userId: account.id, tokenHash: hashSessionToken(token), expiresAt: new Date(now.getTime() + EMAIL_SESSION_SECONDS * 1000) },
       });
+      await ensureTesterProfile(tx, account.id, { now });
       return account;
     });
     if (!user) return NextResponse.json({ error: invalidMessage }, { status: 400, headers });

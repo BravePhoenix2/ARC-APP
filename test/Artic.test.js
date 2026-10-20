@@ -2,7 +2,7 @@ const { expect } = require("chai");
 const { ethers } = require("hardhat");
 const { time } = require("@nomicfoundation/hardhat-network-helpers");
 
-const MINT_PRICE = ethers.parseUnits("10", 6); // 10 "USDC" (6 decimals), paid as native value
+const MINT_PRICE = ethers.parseUnits("10", 18); // Arc native USDC uses 18 decimals.
 const MAX_SUPPLY = 100;
 const MAX_PER_WALLET = 5;
 
@@ -165,7 +165,7 @@ describe("ArticMarketplace", function () {
 
   it("lists and buys an NFT, paying the seller and the marketplace fee in USDC", async function () {
     const { marketplace, nft, deployer, seller, buyer } = await deployMarketplaceWithMintedToken();
-    const price = ethers.parseUnits("50", 6);
+    const price = ethers.parseUnits("50", 18);
 
     await nft.connect(seller).approve(await marketplace.getAddress(), 1);
 
@@ -188,7 +188,7 @@ describe("ArticMarketplace", function () {
 
   it("rejects buying at the wrong price", async function () {
     const { marketplace, nft, seller, buyer } = await deployMarketplaceWithMintedToken();
-    const price = ethers.parseUnits("50", 6);
+    const price = ethers.parseUnits("50", 18);
 
     await nft.connect(seller).approve(await marketplace.getAddress(), 1);
     await marketplace.connect(seller).listItem(await nft.getAddress(), 1, price);
@@ -200,7 +200,7 @@ describe("ArticMarketplace", function () {
 
   it("lets the seller delist and update price, and blocks non-sellers", async function () {
     const { marketplace, nft, seller, buyer } = await deployMarketplaceWithMintedToken();
-    const price = ethers.parseUnits("50", 6);
+    const price = ethers.parseUnits("50", 18);
 
     await nft.connect(seller).approve(await marketplace.getAddress(), 1);
     await marketplace.connect(seller).listItem(await nft.getAddress(), 1, price);
@@ -209,7 +209,7 @@ describe("ArticMarketplace", function () {
       marketplace.connect(buyer).updatePrice(await nft.getAddress(), 1, price + 1n)
     ).to.be.revertedWithCustomError(marketplace, "NotSeller");
 
-    const newPrice = ethers.parseUnits("60", 6);
+    const newPrice = ethers.parseUnits("60", 18);
     await marketplace.connect(seller).updatePrice(await nft.getAddress(), 1, newPrice);
     expect((await marketplace.listings(await nft.getAddress(), 1)).price).to.equal(newPrice);
 
@@ -221,7 +221,7 @@ describe("ArticMarketplace", function () {
     const { marketplace, nft, seller } = await deployMarketplaceWithMintedToken();
 
     await expect(
-      marketplace.connect(seller).listItem(await nft.getAddress(), 1, ethers.parseUnits("50", 6))
+      marketplace.connect(seller).listItem(await nft.getAddress(), 1, ethers.parseUnits("50", 18))
     ).to.be.revertedWithCustomError(marketplace, "MarketplaceNotApproved");
   });
 });

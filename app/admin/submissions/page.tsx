@@ -10,8 +10,9 @@ import Atmosphere from "@/components/Atmosphere";
 import ConnectWalletButton from "@/components/ConnectWalletButton";
 import ThemeToggle from "@/components/ThemeToggle";
 import { useWallet } from "@/hooks/useWallet";
-import { useWalletSession } from "@/hooks/useWalletSession";
+import { useArtiqAccount } from "@/hooks/useArtiqAccount";
 import { arcChain } from "@/lib/arcConfig";
+import { NFT_KIND_INFO, type NftKind, type NftAttribute } from "@/lib/nftTypes";
 
 type SubmissionStatus = "PENDING" | "APPROVED" | "REJECTED";
 type ReviewDecision = Exclude<SubmissionStatus, "PENDING">;
@@ -40,6 +41,12 @@ type Submission = {
   priceUsdc: number | string;
   category?: string | null;
   maxSupply?: number | null;
+  nftKind?: NftKind | null;
+  symbol?: string | null;
+  maxPerWallet?: number | null;
+  royaltyBps?: number | null;
+  metadataUri?: string | null;
+  attributes?: NftAttribute[] | null;
   contractAddress?: string | null;
   mintStartTime?: string | null;
   status: SubmissionStatus;
@@ -92,6 +99,13 @@ function CreationDetails({ submission }: { submission: Submission }) {
       <h3 id={`creation-details-${submission.id}`} className="text-base">Creation details</h3>
       <p className="mt-2 text-xs leading-5 text-[var(--muted-text)]">{isNft ? "AI-generated and AI-assisted works are allowed in NFTs." : "Original art must be human-made. Generative AI artwork is not eligible for this category."}</p>
       <dl className="mt-4 space-y-4 text-sm">
+        {isNft && <>
+          <div><dt className="text-xs text-[var(--faint-text)]">NFT type</dt><dd className="mt-1 font-semibold">{NFT_KIND_INFO[submission.nftKind ?? "COLLECTIBLE"].label} · {NFT_KIND_INFO[submission.nftKind ?? "COLLECTIBLE"].standard}</dd></div>
+          <div><dt className="text-xs text-[var(--faint-text)]">Token settings</dt><dd className="mt-1 leading-6">{submission.symbol || "No symbol"} · {submission.maxPerWallet ? `${submission.maxPerWallet} per wallet` : "No per-wallet limit specified"} · {(Number(submission.royaltyBps ?? 0) / 100).toLocaleString()}% resale royalties</dd></div>
+          {submission.nftKind === "SOULBOUND" && <div><dt className="text-xs text-[var(--faint-text)]">Transfers and resale</dt><dd className="mt-1 leading-6">Non-transferable. Secondary listings are disabled.</dd></div>}
+          {submission.metadataUri && <div><dt className="text-xs text-[var(--faint-text)]">Metadata URI</dt><dd className="mt-1 break-all font-mono text-xs leading-5">{submission.metadataUri}</dd></div>}
+          {!!submission.attributes?.length && <div><dt className="text-xs text-[var(--faint-text)]">Traits</dt><dd className="mt-1 flex flex-wrap gap-2">{submission.attributes.map((attribute, index) => <span key={index} className="rounded-lg border border-[var(--border-soft)] px-3 py-2 text-xs">{attribute.trait_type}: {attribute.value}</span>)}</dd></div>}
+        </>}
         <div><dt className="text-xs text-[var(--faint-text)]">Creator’s stated method</dt><dd className="mt-1 font-semibold">{methods[submission.creationMethod ?? "UNKNOWN"]}</dd></div>
         {!isNft && <div><dt className="text-xs text-[var(--faint-text)]">Human-made declaration</dt><dd className="mt-1">{submission.humanMadeDeclaration === true ? "The creator declared this artwork human-made." : "No human-made declaration was provided."}</dd></div>}
         <div><dt className="text-xs text-[var(--faint-text)]">Creation process</dt><dd className="mt-1 whitespace-pre-wrap break-words leading-6 text-[var(--muted-text)]">{submission.creationProcess?.trim() || "The creator did not provide creation details."}</dd></div>
@@ -233,12 +247,12 @@ function ReviewCard({ submission, onReview }: {
 
 export default function SubmissionReviewPage() {
   const wallet = useWallet();
-  const session = useWalletSession();
+  const session = useArtiqAccount();
   const queryClient = useQueryClient();
   const [status, setStatus] = useState<SubmissionStatus>("PENDING");
   const [notice, setNotice] = useState("");
-  const authorized = session.isAuthenticated && session.isAdmin && !!wallet.address && session.walletAddress?.toLowerCase() === wallet.address.toLowerCase();
-  const queryKey = ["admin-submissions", session.walletAddress, status];
+  const authorized = session.authenticated && session.user?.isAdmin && !!wallet.address && session.walletAddress?.toLowerCase() === wallet.address.toLowerCase();
+  const queryKey = ["admin-submissions", session.accountId, session.walletAddress, status];
 
   useEffect(() => {
     if (!session.isLoading && !authorized) queryClient.removeQueries({ queryKey: ["admin-submissions"] });
@@ -252,7 +266,7 @@ export default function SubmissionReviewPage() {
       if (!session.walletAddress) throw new Error("Sign in with an authorized reviewer wallet to continue.");
       const response = await fetch(`/api/admin/submissions?status=${status}`, {
         cache: "no-store",
-        headers: { "X-Wallet-Address": session.walletAddress },
+        headers: session.headers,
       });
       if (response.status === 401) await session.refresh();
       if (!response.ok) throw new Error(await responseError(response, "We couldn't load the review queue. Refresh and try again."));
@@ -266,12 +280,12 @@ export default function SubmissionReviewPage() {
     setNotice("");
     const response = await fetch(`/api/admin/submissions/${encodeURIComponent(submission.id)}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json", "X-Wallet-Address": session.walletAddress },
+      headers: { "Content-Type": "application/json", ...session.headers },
       body: JSON.stringify({ decision, reviewNote, artReviewConfirmed }),
     });
     if (response.status === 401) await session.refresh();
     if (!response.ok) throw new Error(await responseError(response, "The review could not be saved. Refresh the queue and try again."));
-    queryClient.setQueryData<Submission[]>(["admin-submissions", session.walletAddress, "PENDING"], (previous) => previous?.filter((item) => item.id !== submission.id));
+    queryClient.setQueryData<Submission[]>(["admin-submissions", session.accountId, session.walletAddress, "PENDING"], (previous) => previous?.filter((item) => item.id !== submission.id));
     setNotice(decision === "APPROVED" ? `“${submission.title}” was approved and published in the marketplace.` : `“${submission.title}” was rejected. The creator can see your feedback.`);
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["admin-submissions"] }),
@@ -300,21 +314,20 @@ export default function SubmissionReviewPage() {
 
         {session.isLoading ? (
           <div role="status" className="gallery-card mt-10 flex items-center gap-3 p-7 text-sm text-[var(--muted-text)]"><LoaderCircle size={18} className="animate-spin" aria-hidden="true" /> Checking reviewer access…</div>
-        ) : !wallet.isConnected || !session.isAuthenticated || session.walletAddress?.toLowerCase() !== wallet.address?.toLowerCase() ? (
+        ) : !wallet.isConnected || !session.authenticated || session.walletAddress?.toLowerCase() !== wallet.address?.toLowerCase() ? (
           <section className="gallery-card mx-auto mt-10 max-w-xl p-7 sm:p-9">
             <span className="inline-flex rounded-2xl bg-[#b55fbe]/10 p-3 text-[#b55fbe]"><ShieldCheck size={25} aria-hidden="true" /></span>
             <h2 className="mt-5 text-2xl">Sign in to review</h2>
-            <p className="mt-3 text-sm leading-6 text-[var(--muted-text)]">Connect your reviewer wallet, then sign a message to verify ownership. Signing in does not send a transaction or spend USDC.</p>
-            <div className="mt-6">{!wallet.isConnected ? <ConnectWalletButton /> : <button type="button" onClick={() => void session.signIn()} disabled={session.isSigning || wallet.isWrongNetwork} className="gallery-button inline-flex items-center gap-2 px-5 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">{session.isSigning && <LoaderCircle size={16} className="animate-spin" aria-hidden="true" />}{session.isSigning ? "Check your wallet…" : "Sign in with wallet"}</button>}</div>
-            {wallet.isWrongNetwork && <p className="mt-4 text-sm leading-6 text-[var(--muted-text)]">Switch to Arc using the wallet button above, then sign in.</p>}
+            <p className="mt-3 text-sm leading-6 text-[var(--muted-text)]">Sign in and select a linked reviewer wallet to open the review queue. Only wallets approved by the project owner can review applications.</p>
+            <div className="mt-6 flex"><ConnectWalletButton /></div>
             {session.error && <p role="alert" className="mt-4 text-sm leading-6 text-[#EF476F]">{messageFrom(session.error, "Sign-in failed. Please try again.")}</p>}
           </section>
-        ) : !session.isAdmin ? (
+        ) : !session.user?.isAdmin ? (
           <section className="gallery-card mx-auto mt-10 max-w-xl p-7 sm:p-9">
             <ShieldCheck size={28} className="text-[#b55fbe]" aria-hidden="true" />
             <h2 className="mt-5 text-2xl">Reviewer access required</h2>
             <p className="mt-3 text-sm leading-6 text-[var(--muted-text)]">This wallet doesn’t have reviewer access. Connect an authorized reviewer wallet to open the queue.</p>
-            <div className="mt-6 flex flex-wrap gap-3"><Link href="/marketplace" className={secondaryButton}>Explore marketplace</Link><button type="button" onClick={() => void session.signOut()} className={secondaryButton}>Sign out</button></div>
+            <div className="mt-6 flex flex-wrap gap-3"><Link href="/marketplace" className={secondaryButton}>Explore marketplace</Link><button type="button" onClick={() => void session.logout()} className={secondaryButton}>Sign out</button></div>
             {session.error && <p role="alert" className="mt-4 text-sm leading-6 text-[#EF476F]">{messageFrom(session.error, "Could not sign out. Please try again.")}</p>}
           </section>
         ) : (
