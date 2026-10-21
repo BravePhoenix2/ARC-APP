@@ -62,6 +62,7 @@ async function render() {
   });
 }
 async function focus() { await act(async () => { events.dispatchEvent(new Event("focus")); }); }
+async function refresh() { await act(async () => { await session.refresh(); }); }
 
 beforeEach(() => {
   sdk = { ready: true, authenticated: true, user: { id: "did:privy:reviewer", email: { address: "reviewer@example.com" }, linkedAccounts: [{ type: "email", address: "reviewer@example.com" }] } };
@@ -90,14 +91,14 @@ afterEach(async () => {
 test("provider/network refresh failures keep a valid reviewer session and mounted review notes", async () => {
   responses.push(success()); await render();
   assert.equal(session.authenticated, true);
-  responses.push(Response.json({ error: "Verification unavailable" }, { status: 503 })); await focus();
+  responses.push(Response.json({ error: "Verification unavailable" }, { status: 503 })); await refresh();
   assert.equal(session.authenticated, true);
   assert.equal(session.authenticationState, "authenticated");
   assert.equal(session.error, "Verification unavailable");
-  responses.push(new TypeError("fetch failed")); await focus();
+  responses.push(new TypeError("fetch failed")); await refresh();
   assert.equal(session.authenticated, true);
   assert.equal(draftUnmounts, 0);
-  responses.push(success()); await focus();
+  responses.push(success()); await refresh();
   assert.equal(session.error, null);
 });
 
@@ -113,7 +114,7 @@ test("an embedded wallet appearing refreshes proofs without resetting the review
 
 test("rejected credentials and switching Privy identities clear the previous reviewer", async () => {
   responses.push(success()); await render();
-  responses.push(Response.json({ error: "Invalid token" }, { status: 401 })); await focus();
+  responses.push(Response.json({ error: "Invalid token" }, { status: 401 })); await refresh();
   assert.equal(session.authenticated, false);
   responses.push(success()); await focus();
   sdk = { ...sdk, user: { ...sdk.user, id: "did:privy:other" } };
@@ -133,4 +134,14 @@ test("renewal runs before expiry, but hard expiry still locks a failed session",
   responses.push(Response.json({ error: "Unavailable" }, { status: 503 }));
   await act(async () => { active[1].callback(); });
   assert.equal(session.authenticated, false);
+});
+
+test("tab focus does not repeat provider verification for an unexpired session", async () => {
+  responses.push(success()); await render();
+  const untouched = success();
+  responses.push(untouched);
+  await focus(); await focus(); await focus();
+  assert.equal(responses[0], untouched);
+  assert.equal(session.error, null);
+  assert.equal(session.authenticated, true);
 });

@@ -273,7 +273,13 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
 
   useEffect(() => {
     if (!binding) return;
-    const onFocus = () => { void sync(); };
+    const onFocus = () => {
+      const active = verifiedRef.current;
+      // Switching tabs need not hit Privy's current-user API again. Renewal
+      // handles expiring sessions; explicit retries remain available.
+      if (active?.binding === binding && active.expiresAt - Date.now() > 60_000) return;
+      void sync();
+    };
     const timer = window.setInterval(onFocus, 4 * 60_000);
     window.addEventListener("focus", onFocus);
     return () => {
