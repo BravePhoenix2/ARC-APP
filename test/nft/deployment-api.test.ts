@@ -443,3 +443,17 @@ test("locking rejects oversubscribed Ultimate guarantees and allows a fully back
   assert.equal((await access.POST(request(path, { action: "assign", wallets: [other], tier: "FCFS" }), context)).status, 200);
   assert.equal((await access.POST(request(path, { action: "freeze" }), context)).status, 200);
 });
+
+test("daily discovery returns published work only and never exposes identity or delivery fields", async () => {
+  const discovery = await import("../../app/api/discovery/route");
+  const first = await discovery.GET(); const second = await discovery.GET();
+  assert.equal(first.status, 200); assert.equal(first.headers.get("cache-control"), "no-store");
+  const body = await first.json(); assert.deepEqual(await second.json(), body);
+  assert.match(body.day, /^\d{4}-\d{2}-\d{2}$/); assert.ok(body.items.length);
+  for (const item of body.items) {
+    assert.deepEqual(Object.keys(item).sort(), ["creator", "id", "imageUrl", "itemType", "title"]);
+    assert.deepEqual(Object.keys(item.creator).sort(), ["id", "username", "walletAddress"]);
+    assert.ok(await db.item.findUnique({ where: { id: item.id } }));
+  }
+  assert.equal(JSON.stringify(body).includes("private@example.com"), false);
+});

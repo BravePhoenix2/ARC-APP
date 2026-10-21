@@ -104,10 +104,10 @@ collections use the same rules. Public-only collections keep the existing flow.
 The previously deployed factory cannot support these new rules. Before replacing
 its configured address, run `npm run studio:pin-factories` with the original
 factory still in `.env.local`; this records the original factory on existing
-collection rows. In `/settings/protocol`, choose **Prepare updated factory and
-auction house**. This retains the current art market and deploys a new factory
-and auction house from your wallet. Save the displayed configuration, rebuild,
-and restart. Existing collections retain their original mint rules. Existing
+collection rows. In `/settings/protocol`, choose **Deploy updated factory and auction house**. This retains the current art market and deploys a new factory
+and auction house from your wallet. The button starts the wallet deployments directly. Copy the complete configuration
+only after both transactions confirm, then rebuild and restart. Pending transaction
+hashes and confirmed steps are saved in the browser so retries resume safely. Existing collections retain their original mint rules. Existing
 auctions/reward pools stay on the original house; the new house starts empty and
 checks mint eligibility through the new factory. Keep the old addresses for
 existing auctions and claims. No deployed collection or live auction is migrated.
@@ -372,3 +372,16 @@ node --import tsx --test test/auth/*.test.ts test/submissions/workflow.test.ts t
 ```
 
 These integration tests use temporary databases and do not change the app's catalog.
+
+
+## Daily Muse
+
+The NFT gallery and ART BAZZAR include a daily artwork reveal, a short creative
+prompt, and a browser-local discovery notebook. Picks rotate at midnight in
+Africa/Lagos and come only from published items with images. No login or payment
+is required to reveal a work; saving it uses the existing account watchlist.
+The public discovery endpoint returns only the artwork and public creator fields.
+The notebook remembers up to 366 discovery days in the current browser. Repeated
+reveals across the two galleries count as one day. Missing days never remove
+previous pages. Browser storage can be cleared, and no notebook data is sent to
+the server or used for tester points, mint access, or financial rewards.

@@ -231,3 +231,11 @@ textarea {
   .gallery-page *, .gallery-page *::before, .gallery-page *::after { animation: none !important; transition: none !important; }
   .gallery-card:hover, .gallery-feature:hover, .gallery-button:hover { transform: none; }
 }
+
+/* Daily Muse opens gently, respecting the visitor's motion preference. */
+@keyframes artiq-muse-reveal {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.muse-reveal { animation: artiq-muse-reveal 350ms ease-out; }
+@media (prefers-reduced-motion: reduce) { .muse-reveal { animation: none; } }

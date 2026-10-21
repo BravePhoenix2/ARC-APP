@@ -1,5 +1,6 @@
 "use client";
 
+import DailyMuse from "@/components/DailyMuse";
 import Link from "next/link";
 import Image from "next/image";
 import { Settings2, X } from "lucide-react";
@@ -246,6 +247,8 @@ function MarketplaceShell() {
         <Link href={mode === "nft" ? "/nfts/create" : "/apply?type=WEB2_ART"} className="gallery-button mt-5 inline-flex items-center px-5 py-3 text-sm font-semibold text-white">Submit your {mode === "nft" ? "NFT collection" : "art"} <span aria-hidden="true">↗</span></Link>
         <div className="mt-5"><TesterCount /></div>
       </section>
+
+      <div className="px-6 sm:px-10 lg:px-16 xl:px-20"><DailyMuse mode={mode === "nft" ? "NFT" : "WEB2_ART"} /></div>
 
       <div className="grid gap-8 px-6 py-8 sm:px-10 lg:grid-cols-[240px_1fr] lg:gap-10 lg:px-16 lg:py-12 xl:px-20">
         <aside className="gallery-filter space-y-8 lg:sticky lg:top-24 lg:self-start">

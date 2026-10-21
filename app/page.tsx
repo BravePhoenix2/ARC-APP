@@ -1,3 +1,4 @@
+import DailyMuse from "@/components/DailyMuse";
 import Image from "next/image";
 import { arcChain } from "@/lib/arcConfig";
 import Atmosphere from "@/components/Atmosphere";
@@ -151,6 +152,8 @@ export default function Home() {
           </div>
         </div>
       </div>
+
+      <div className="px-6 sm:px-10 lg:px-16 xl:px-20"><DailyMuse /></div>
 
       <section id="works" className="border-t border-[var(--border-soft)] px-6 py-16 sm:px-10 sm:py-20 lg:px-16 lg:py-24 xl:px-20">
         <div>
