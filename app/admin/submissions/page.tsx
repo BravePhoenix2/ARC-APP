@@ -341,6 +341,7 @@ export default function SubmissionReviewPage() {
           </section>
         ) : (
           <section className="mt-10" aria-label="Submission review queue">
+            {session.error && <div role="status" className="mb-5 rounded-xl border border-[var(--border-soft)] bg-[var(--chip-bg)] p-4 text-sm leading-6"><p>{session.error} Your verified session is still active. Your review stays open.</p><button type="button" disabled={session.isSyncing} onClick={() => void session.refresh()} className="mt-2 font-semibold text-[#b55fbe] disabled:opacity-60">{session.isSyncing ? "Retrying…" : "Retry session refresh"}</button></div>}
             <p className="mb-5 break-all text-xs text-[var(--muted-text)]">Reviewing as <strong className="text-[var(--page-text)]">{session.user?.email}</strong></p>
             <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[var(--border-soft)] pb-5">
               <div role="group" aria-label="Filter submissions by status" className="flex max-w-full gap-1 rounded-full border border-[var(--border-soft)] bg-[var(--chip-bg)] p-1">

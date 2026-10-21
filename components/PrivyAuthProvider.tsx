@@ -73,6 +73,8 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
   const { disconnectAsync } = useDisconnect();
   const queryClient = useQueryClient();
   const [verified, setVerified] = useState<VerifiedSession | null>(null);
+  const verifiedRef = useRef(verified);
+  verifiedRef.current = verified;
   const [isSyncing, setIsSyncing] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -95,8 +97,8 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
     pending.current = null;
   }, []);
 
-  // Only identity-bearing account fields change the security binding. Wallet
-  // reconnects and SDK metadata refreshes must not reset an email session.
+  // Privy's DID identifies the signed-in person. Linked-wallet updates refresh
+  // server proofs without discarding an already verified email session.
   const linkedAccounts = sdkUser?.linkedAccounts.flatMap((account) => {
     if (account.type === "email") return [`email:${account.address.trim().toLowerCase()}`];
     if (account.type === "wallet" && account.chainType === "ethereum") return [`wallet:${account.address.toLowerCase()}`];
@@ -106,7 +108,7 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
     id: sdkUser.id,
     accounts: Array.from(new Set(linkedAccounts)),
   }) : "";
-  const binding = ready && sdkAuthenticated ? identity : "";
+  const binding = ready && sdkAuthenticated && sdkUser ? sdkUser.id : "";
   const selectedWallet = address && linkedAccounts.includes(`wallet:${address.toLowerCase()}`) ? address : undefined;
   const current = useRef({ binding, ready, sdkAuthenticated, hasVerified: Boolean(verified), hasPendingChoice: pendingAccounts.length > 0 });
   current.current = { binding, ready, sdkAuthenticated, hasVerified: Boolean(verified), hasPendingChoice: pendingAccounts.length > 0 };
@@ -146,6 +148,7 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
     setError(null);
     const isCurrent = () => mounted.current && !controller.signal.aborted && version === generation.current && current.current.binding === requestedBinding && !loggingOut.current && !suspended.current;
     const request = (async () => {
+      let invalidSession = false;
       try {
         // A previous unauthenticated render may still be clearing a cookie.
         // Let that response finish before a fresh sign-in writes its cookie.
@@ -153,7 +156,10 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
         if (!isCurrent()) return false;
         const accessToken = await tokenGetter.current();
         if (!isCurrent()) return false;
-        if (!accessToken) throw new Error("Your sign-in has expired. Sign out and sign in again.");
+        if (!accessToken) {
+          invalidSession = true;
+          throw new Error("Your sign-in has expired. Sign out and sign in again.");
+        }
         let identityToken = await getIdentityToken().catch(() => null);
         if (!isCurrent()) return false;
         if (!identityToken) {
@@ -186,9 +192,15 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
           setError("Choose the Artiq account you want to continue with.");
           return false;
         }
-        if (!response.ok) throw new Error(typeof body?.error === "string" ? body.error : "Could not verify your sign-in. Please try again.");
+        if (!response.ok) {
+          invalidSession = response.status < 500 && response.status !== 429;
+          throw new Error(typeof body?.error === "string" ? body.error : "Could not verify your sign-in. Please try again.");
+        }
         const expiresAt = typeof body?.expiresAt === "string" ? Date.parse(body.expiresAt) : NaN;
-        if (!isAccount(body?.user) || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) throw new Error("Could not verify your sign-in. Please try again.");
+        if (!isAccount(body?.user) || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+          invalidSession = true;
+          throw new Error("Could not verify your sign-in. Please try again.");
+        }
         const accountId = `${requestedBinding}:${body.user.id}`;
         if (lastAccount.current !== accountId) clearPrivateQueries(queryClient);
         const changed = lastAccount.current !== accountId;
@@ -200,7 +212,10 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
         return true;
       } catch (cause) {
         if (!isCurrent()) return false;
-        clearSession();
+        const previous = verifiedRef.current;
+        // A failed network/provider refresh does not revoke a previously
+        // verified, unexpired session. Private APIs still check its cookie.
+        if (invalidSession || !previous || previous.binding !== requestedBinding || previous.expiresAt <= Date.now()) clearSession();
         setError(cause instanceof Error ? cause.message : "Could not verify your sign-in. Please try again.");
         return false;
       } finally {
@@ -245,6 +260,10 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
     }
   }, [binding, clearSession, ready, revokeServerSession, sync]);
 
+  useEffect(() => {
+    if (binding && !pending.current && !current.current.hasPendingChoice) void sync();
+  }, [binding, identity, sync]);
+
   // A token can arrive after the login callback. Resume verification rather
   // than leaving a successfully signed-in user at a second Sign in button.
   const hasIdentityToken = Boolean(observedIdentityToken);
@@ -265,11 +284,15 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
 
   useEffect(() => {
     if (!verified) return;
+    // Renew before expiry so the review queue and unsaved notes stay mounted.
+    // The separate expiry timer still locks the UI if renewal cannot succeed.
+    const remaining = verified.expiresAt - Date.now();
+    const renewal = window.setTimeout(() => { void sync(); }, Math.max(1_000, remaining > 60_000 ? remaining - 60_000 : remaining / 2));
     const timer = window.setTimeout(() => {
       clearSession();
       void sync();
     }, Math.max(0, verified.expiresAt - Date.now()));
-    return () => window.clearTimeout(timer);
+    return () => { window.clearTimeout(renewal); window.clearTimeout(timer); };
   }, [clearSession, sync, verified]);
 
   const login = useCallback((options?: PrivyLoginOptions) => {
