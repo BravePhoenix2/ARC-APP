@@ -12,6 +12,8 @@ import ArticLogo from "@/components/ArticLogo";
 import ThemeToggle from "@/components/ThemeToggle";
 import ConnectWalletButton from "@/components/ConnectWalletButton";
 import TesterCount from "@/components/TesterCount";
+import WatchlistButton from "@/components/WatchlistButton";
+import { browseItems, priceRangeError } from "@/lib/marketplaceBrowse";
 import { NFT_KIND_INFO, type NftKind } from "@/lib/nftTypes";
 
 type Mode = "nft" | "art";
@@ -33,7 +35,7 @@ type MarketplaceItem = {
 };
 
 const STATUS_FILTERS = ["Upcoming", "Live", "Listed", "Sold"] as const;
-const SORT_OPTIONS = ["Price: low to high", "Price: high to low", "Newest", "Ending soon"] as const;
+const SORT_OPTIONS = ["Price: low to high", "Price: high to low", "Newest", "Mint starting soon"] as const;
 const RARITY_FILTERS = ["Common", "Rare", "Epic", "Legendary"] as const;
 const ART_CATEGORIES = ["Painting", "Artistic rug", "Artistic cosmetic", "Other"] as const;
 
@@ -65,7 +67,7 @@ function ItemCard({ item }: { item: MarketplaceItem }) {
   const badge = isNft && item.status ? NFT_STATUS_STYLE[item.status] : null;
 
   return (
-    <Link prefetch={false} href={isNft ? `/nfts/${item.id}` : `/art/${item.id}`} className="gallery-card block cursor-pointer overflow-hidden focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#b55fbe]">
+    <div className="relative"><div className="absolute right-3 top-3 z-20"><WatchlistButton itemId={item.id} compact /></div><Link prefetch={false} href={isNft ? `/nfts/${item.id}` : `/art/${item.id}`} className="gallery-card block cursor-pointer overflow-hidden focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#b55fbe]">
       <div className="gallery-card-media relative aspect-square bg-[var(--chip-bg)]">
         {item.imageUrl ? (
           <Image src={item.imageUrl} alt={item.title} fill unoptimized sizes="(min-width: 1280px) 22vw, (min-width: 640px) 30vw, 45vw" className="object-cover" />
@@ -105,7 +107,7 @@ function ItemCard({ item }: { item: MarketplaceItem }) {
         </p>
         <span className="mt-3 inline-flex rounded-full border border-[#b55fbe]/30 px-3 py-2 text-xs font-semibold text-[#b55fbe]">{isNft ? "View collection & mint" : "View artwork & checkout"} ↗</span>
       </div>
-    </Link>
+    </Link></div>
   );
 }
 
@@ -117,6 +119,13 @@ function MarketplaceShell() {
   const mode: Mode = searchParams.get("mode") === "art" ? "art" : "nft";
   const savedSearch = searchParams.get("q") ?? "";
   const [search, setSearch] = useState(savedSearch);
+  const [minPrice, setMinPrice] = useState("");
+  const [maxPrice, setMaxPrice] = useState("");
+  const [statuses, setStatuses] = useState<string[]>([]);
+  const [facets, setFacets] = useState<string[]>([]);
+  const [sort, setSort] = useState("Newest");
+  function resetFilters() { setMinPrice(""); setMaxPrice(""); setStatuses([]); setFacets([]); setSort("Newest"); }
+  function toggle(value: string, values: string[], update: (values: string[]) => void) { update(values.includes(value) ? values.filter((entry) => entry !== value) : [...values, value]); }
 
   useEffect(() => {
     setSearch(savedSearch);
@@ -142,6 +151,7 @@ function MarketplaceShell() {
   }
 
   function setMode(next: Mode) {
+    resetFilters();
     updateSearchUrl(search, next);
   }
 
@@ -157,12 +167,9 @@ function MarketplaceShell() {
   });
 
   const allItems = data ?? [];
-  const searchTerms = search.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  const items = allItems.filter((item) => {
-    const searchableText = [item.title, item.description, item.creator.username, item.creator.walletAddress]
-      .filter(Boolean).join(" ").toLowerCase();
-    return searchTerms.every((term) => searchableText.includes(term));
-  });
+  const searchTerms = search.trim().split(/\s+/).filter(Boolean);
+  const rangeError = priceRangeError(minPrice, maxPrice);
+  const items = browseItems(allItems, { search, min: minPrice, max: maxPrice, statuses, facets, sort });
 
   return (
     <main className="gallery-page min-h-screen w-full text-[var(--page-text)]">
@@ -228,7 +235,7 @@ function MarketplaceShell() {
             <ConnectWalletButton />
           </div>
         </div>
-        <nav aria-label="Explore Artiq" className="flex flex-wrap items-center justify-center gap-x-7 gap-y-2 border-t border-[var(--border-soft)] px-5 py-3 text-[11px] font-semibold"><Link href="/nfts">NFT collections</Link><Link href="/nfts/create">Creator studio</Link><Link href="/auctions">Auctions</Link><Link href="/leaderboard">Leaderboard</Link><Link href="/apply?type=WEB2_ART">Submit original art</Link></nav>
+        <nav aria-label="Explore Artiq" className="flex flex-wrap items-center justify-center gap-x-7 gap-y-2 border-t border-[var(--border-soft)] px-5 py-3 text-[11px] font-semibold"><Link href="/nfts">NFT collections</Link><Link href="/nfts/create">Creator studio</Link><Link href="/auctions">Auctions</Link><Link href="/leaderboard">Leaderboard</Link><Link href="/watchlist">Watchlist</Link><Link href="/apply?type=WEB2_ART">Submit original art</Link></nav>
       </header>
 
       {arcChain.testnet && <div className="border-b border-[var(--border-soft)] bg-[#b55fbe]/10 px-6 py-2 text-center text-xs leading-5 text-[var(--muted-text)]">Arc Testnet pilot · Test USDC only, no real money. <a href="https://faucet.circle.com" target="_blank" rel="noreferrer" className="font-semibold underline underline-offset-2">Get test USDC ↗</a></div>}
@@ -245,9 +252,9 @@ function MarketplaceShell() {
           <div>
             <h2 className="font-mono text-xs uppercase tracking-[0.15em] text-[var(--faint-text)]">Status</h2>
             <div className="mt-3 space-y-2">
-              {STATUS_FILTERS.map((status) => (
+              {(mode === "nft" ? STATUS_FILTERS : ["Available", "Sold"]).map((status) => (
                 <label key={status} className="flex items-center gap-2 text-sm text-[var(--muted-text)]">
-                  <input type="checkbox" className="h-4 w-4 rounded border-[var(--border-soft)] accent-[#EF476F]" />
+                  <input type="checkbox" checked={statuses.includes(status)} onChange={() => toggle(status, statuses, setStatuses)} className="h-4 w-4 rounded border-[var(--border-soft)] accent-[#EF476F]" />
                   {status}
                 </label>
               ))}
@@ -259,13 +266,13 @@ function MarketplaceShell() {
             <div className="mt-3 flex items-center gap-2">
               <input
                 type="number"
-                placeholder="Min"
+                placeholder="Min" aria-label="Minimum price in USDC" min="0" step="0.000001" value={minPrice} onChange={(event) => setMinPrice(event.target.value)}
                 className="w-full rounded-lg border border-[var(--border-soft)] bg-[var(--chip-bg)] px-3 py-2 text-sm text-[var(--page-text)] placeholder:text-[var(--faint-text)] focus:outline-none"
               />
               <span className="text-[var(--faint-text)]">–</span>
               <input
                 type="number"
-                placeholder="Max"
+                placeholder="Max" aria-label="Maximum price in USDC" min="0" step="0.000001" value={maxPrice} onChange={(event) => setMaxPrice(event.target.value)}
                 className="w-full rounded-lg border border-[var(--border-soft)] bg-[var(--chip-bg)] px-3 py-2 text-sm text-[var(--page-text)] placeholder:text-[var(--faint-text)] focus:outline-none"
               />
             </div>
@@ -278,7 +285,7 @@ function MarketplaceShell() {
             <div className="mt-3 space-y-2">
               {(mode === "nft" ? RARITY_FILTERS : ART_CATEGORIES).map((item) => (
                 <label key={item} className="flex items-center gap-2 text-sm text-[var(--muted-text)]">
-                  <input type="checkbox" className="h-4 w-4 rounded border-[var(--border-soft)] accent-[#EF476F]" />
+                  <input type="checkbox" checked={facets.includes(item)} onChange={() => toggle(item, facets, setFacets)} className="h-4 w-4 rounded border-[var(--border-soft)] accent-[#EF476F]" />
                   {item}
                 </label>
               ))}
@@ -287,11 +294,13 @@ function MarketplaceShell() {
 
           <div>
             <h2 className="font-mono text-xs uppercase tracking-[0.15em] text-[var(--faint-text)]">Sort by</h2>
-            <select className="mt-3 w-full rounded-lg border border-[var(--border-soft)] bg-[var(--chip-bg)] px-3 py-2 text-sm text-[var(--page-text)] focus:outline-none">
-              {SORT_OPTIONS.map((option) => (
+            <select aria-label="Sort marketplace items" value={sort} onChange={(event) => setSort(event.target.value)} className="mt-3 w-full rounded-lg border border-[var(--border-soft)] bg-[var(--chip-bg)] px-3 py-2 text-sm text-[var(--page-text)] focus:outline-none">
+              {SORT_OPTIONS.filter((option) => mode === "nft" || option !== "Mint starting soon").map((option) => (
                 <option key={option}>{option}</option>
               ))}
             </select>
+            {rangeError && <p role="alert" className="mt-3 text-xs text-rose-500">{rangeError}</p>}
+            <button type="button" onClick={resetFilters} className="mt-4 text-xs font-semibold text-[#b55fbe]">Clear filters</button>
           </div>
         </aside>
 
@@ -318,19 +327,15 @@ function MarketplaceShell() {
               : items.map((item) => <ItemCard key={item.id} item={item} />)}
           </div>
 
-          {!isLoading && !isError && items.length === 0 && searchTerms.length > 0 && (
+          {!isLoading && !isError && items.length === 0 && (
             <div className="mt-10 rounded-xl border border-[var(--border-soft)] p-6">
               <h2 className="text-lg font-semibold">No matching {mode === "nft" ? "collections" : "art pieces"}</h2>
-              <p className="mt-2 text-sm text-[var(--muted-text)]">Try another title, description, or creator.</p>
-              <button type="button" onClick={clearSearch} className="mt-4 text-sm font-semibold text-[#EF476F]">Clear search</button>
+              <p className="mt-2 text-sm text-[var(--muted-text)]">Try a broader price range, fewer filters, or another search.</p>
+              <button type="button" onClick={() => { clearSearch(); resetFilters(); }} className="mt-4 text-sm font-semibold text-[#EF476F]">Clear search & filters</button>
             </div>
           )}
 
-          {!isLoading && !isError && items.length === 0 && searchTerms.length === 0 && (
-            <p className="mt-10 text-sm text-[var(--faint-text)]">
-              New {mode === "nft" ? "collections" : "art pieces"} are on their way. Check back soon.
-            </p>
-          )}
+
         </div>
       </div>
     </main>

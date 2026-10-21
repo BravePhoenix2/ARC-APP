@@ -8,7 +8,7 @@ import { useAccount, useDisconnect } from "wagmi";
 import { PrivySessionContext, type PrivyAccount, type PrivyAccountChoice, type PrivyAuthenticationState, type PrivyLoginOptions } from "@/hooks/usePrivySession";
 import { PRIVY_SESSION_CHANGED, PRIVY_SETUP_MESSAGE } from "@/lib/privyClient";
 
-const PRIVATE_QUERY_ROOTS = new Set(["submissions", "admin-submissions", "item-detail", "art-order", "tester-me"]);
+const PRIVATE_QUERY_ROOTS = new Set(["submissions", "admin-submissions", "item-detail", "art-order", "tester-me", "watchlist", "mint-access"]);
 
 function clearPrivateQueries(queryClient: QueryClient) {
   const filter = { predicate: (query: { queryKey: readonly unknown[] }) => PRIVATE_QUERY_ROOTS.has(String(query.queryKey[0])) };

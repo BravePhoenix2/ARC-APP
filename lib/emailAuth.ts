@@ -1,3 +1,4 @@
+import { secureSessionCookie } from "@/lib/sessionCookie";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -59,7 +60,7 @@ export function setEmailSessionCookie(response: NextResponse, token: string): vo
   response.cookies.set(EMAIL_SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: secureSessionCookie(),
     path: "/",
     maxAge: EMAIL_SESSION_SECONDS,
   });
@@ -69,7 +70,7 @@ export function clearEmailSessionCookie(response: NextResponse): void {
   response.cookies.set(EMAIL_SESSION_COOKIE, "", {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: secureSessionCookie(),
     path: "/",
     maxAge: 0,
   });

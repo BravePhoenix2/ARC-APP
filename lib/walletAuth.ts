@@ -1,3 +1,4 @@
+import { localHttpSessionOrigin, secureSessionCookie } from "@/lib/sessionCookie";
 import { createHash, randomBytes } from "node:crypto";
 import type { NextRequest, NextResponse } from "next/server";
 import { getAddress, isAddress } from "viem";
@@ -30,6 +31,8 @@ export function walletRequestOrigin(request: NextRequest): string {
   const configured = parseHttpOrigin(process.env.ARTIQ_APP_ORIGIN || process.env.NEXT_PUBLIC_APP_URL);
   if (browser.origin === actual.origin || browser.origin === configured?.origin) return browser.origin;
   const isLoopback = (url: URL) => ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  if (browser.origin === localHttpSessionOrigin() && isLoopback(actual) &&
+      actual.protocol === browser.protocol && actual.port === browser.port) return browser.origin;
   if (process.env.NODE_ENV !== "production" && isLoopback(actual) && isLoopback(browser) &&
       actual.protocol === browser.protocol && actual.port === browser.port) {
     return browser.origin;
@@ -106,7 +109,7 @@ export function setWalletSessionCookie(response: NextResponse, token: string): v
   response.cookies.set(WALLET_SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: secureSessionCookie(),
     path: "/",
     maxAge: WALLET_SESSION_SECONDS,
   });
@@ -116,7 +119,7 @@ export function clearWalletSessionCookie(response: NextResponse): void {
   response.cookies.set(WALLET_SESSION_COOKIE, "", {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: secureSessionCookie(),
     path: "/",
     maxAge: 0,
   });

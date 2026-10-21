@@ -104,6 +104,42 @@ test("a folder series stays private until review and publishes distinct ordered 
   await db.submission.delete({ where: { id: submission.id } }); await db.item.delete({ where: { id: itemId } });
 });
 
+test("watchlists are private, account-bound and idempotent; creator pages expose published work only", async () => {
+  const list = await import("../../app/api/watchlist/route");
+  const toggle = await import("../../app/api/watchlist/[id]/route");
+  const profile = await import("../../app/api/creators/[id]/route");
+  const creator = await db.user.findUniqueOrThrow({ where: { walletAddress: owner } });
+  await db.user.update({ where: { id: creator.id }, data: { bio: "Public artist biography", email: "private-contact@example.com" } });
+  const item = await db.item.create({ data: { creatorId: creator.id, title: "Watchlist fixture", itemType: "NFT", mintPriceUsdc: 5 } });
+  const params = { params: { id: item.id } };
+  assert.equal((await list.GET(request("/api/watchlist"))).status, 401);
+  assert.equal((await toggle.PUT(request("/api/watchlist/x", "PUT"), params)).status, 401);
+  assert.equal((await toggle.PUT(request("/api/watchlist/x", "PUT", undefined, ownerCookie, "https://evil.example"), params)).status, 403);
+  const mismatch = request("/api/watchlist/x", "PUT", undefined, ownerCookie); mismatch.headers.set("X-Wallet-Address", other);
+  assert.equal((await toggle.PUT(mismatch, params)).status, 401);
+  assert.equal((await toggle.PUT(request("/api/watchlist/missing", "PUT", undefined, ownerCookie), { params: { id: "missing" } })).status, 404);
+  for (let index = 0; index < 2; index++) assert.equal((await toggle.PUT(request("/api/watchlist/x", "PUT", { userId: "spoofed" }, ownerCookie), params)).status, 200);
+  assert.equal(await db.watchlistEntry.count({ where: { itemId: item.id } }), 1);
+  const saved = await list.GET(request("/api/watchlist", "GET", undefined, ownerCookie));
+  assert.equal(saved.headers.get("cache-control"), "private, no-store");
+  const body = await saved.json(); assert.deepEqual(body.ids, [item.id]);
+  assert.ok(!JSON.stringify(body).includes("private-contact@example.com"));
+  assert.deepEqual((await (await list.GET(request(`/api/watchlist?userId=${creator.id}`, "GET", undefined, otherCookie))).json()).ids, []);
+  assert.equal((await toggle.PUT(request("/api/watchlist/x", "PUT", undefined, otherCookie), params)).status, 200);
+  for (let index = 0; index < 2; index++) assert.equal((await toggle.DELETE(request("/api/watchlist/x", "DELETE", undefined, ownerCookie), params)).status, 200);
+  assert.equal(await db.watchlistEntry.count({ where: { itemId: item.id } }), 1, "removal never affects another account");
+  const response = await profile.GET(request(`/api/creators/${creator.id}`), { params: { id: creator.id } });
+  assert.equal(response.status, 200); const publicCreator = (await response.json()).creator;
+  assert.equal(publicCreator.bio, "Public artist biography");
+  assert.ok(publicCreator.items.some((entry: { id: string }) => entry.id === item.id));
+  assert.equal(publicCreator.email, undefined); assert.equal(publicCreator.submissions, undefined);
+  assert.equal(publicCreator.items[0].creator.email, undefined);
+  const unpublished = await db.user.create({ data: { email: "not-public@example.com" } });
+  assert.equal((await profile.GET(request("/creator"), { params: { id: unpublished.id } })).status, 404);
+  // Restore fixtures for the original catalog assertions that follow.
+  await db.watchlistEntry.deleteMany({ where: { itemId: item.id } }); await db.item.delete({ where: { id: item.id } });
+});
+
 test("submission authentication, AI policy, privacy, approval, rejection, and image workflow", async () => {
   assert.equal((await submissions.POST(request("/api/submissions", "POST", application))).status, 401);
   assert.equal((await submissions.POST(request("/api/submissions", "POST", application, ownerCookie, "https://evil.example"))).status, 403);

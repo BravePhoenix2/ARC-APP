@@ -120,7 +120,7 @@ test("public detail and token metadata omit private identity and use the configu
   assert.equal(anonymous.headers.get("cache-control"), "private, no-store");
   const publicBody = await anonymous.json();
   assert.equal(publicBody.isOwner, false);
-  assert.deepEqual(publicBody.item.creator, { walletAddress: owner, username: "Nia" });
+  assert.deepEqual(publicBody.item.creator, { id: ownerUserId, walletAddress: owner, username: "Nia" });
   const ownerBody = await (await detail.GET(request(`/api/items/${item.id}`), { params: { id: item.id } })).json();
   assert.equal(ownerBody.isOwner, true);
   const metadataRequest = request(`/api/items/${item.id}/metadata`, undefined, "anonymous");
@@ -375,4 +375,58 @@ test("confirmed orders are idempotent and delivery stays private to buyer and cr
   assert.deepEqual(await stranger.json(), { order: null });
   const publicItem = await detail.GET(request(`/api/items/${item.id}`, undefined, "anonymous"), params);
   assert.ok(!JSON.stringify(await publicItem.json()).includes(delivery.addressLine1));
+});
+
+test("mint allowlist registration binds to signed wallets, protects the roster and locks assignments", async () => {
+  const access = await import("../../app/api/items/[id]/mint-access/route");
+  const item = await nft(); const context = { params: { id: item.id } }; const path = `/api/items/${item.id}/mint-access`;
+  const config = { ultimateStart: new Date(Date.now() + 3600000).toISOString(), fcfsStart: new Date(Date.now() + 7200000).toISOString(), publicStart: new Date(Date.now() + 10800000).toISOString(), ultimateLimit: 1, fcfsLimit: 1, publicLimit: 2, ultimatePrice: "0", fcfsPrice: "1" };
+  assert.equal((await access.POST(request(path, { action: "configure", config }, "other"), context)).status, 400);
+  assert.equal((await access.POST(request(path, { action: "configure", config }, "anonymous"), context)).status, 401);
+  assert.equal((await access.POST(request(path, { action: "configure", config }, "owner", "https://attacker.example"), context)).status, 403);
+  assert.equal((await access.POST(request(path, { action: "configure", config }), context)).status, 200);
+  assert.equal((await access.POST(request(path, { action: "register", tier: "ULTIMATE", walletAddress: owner }, "other"), context)).status, 200);
+  const plan = await db.mintAccessPlan.findUniqueOrThrow({ where: { itemId: item.id }, include: { entries: true } });
+  assert.equal(plan.entries[0].walletAddress, other);
+  assert.equal(plan.entries[0].tier, "PENDING");
+  assert.equal((await access.GET(request(path + "?manage=1", undefined, "other"), context)).status, 403);
+  const anonymous = await (await access.GET(request(path, undefined, "anonymous"), context)).json();
+  assert.equal(anonymous.entries, undefined); assert.equal(anonymous.entry, null); assert.equal(anonymous.proof, null);
+  assert.equal(JSON.stringify(anonymous).includes(other), false);
+  assert.equal((await access.POST(request(path, { action: "assign", wallets: [other], tier: "ULTIMATE" }, "other"), context)).status, 400);
+  assert.equal((await access.POST(request(path, { action: "freeze" }), context)).status, 400);
+  assert.equal((await access.POST(request(path, { action: "assign", wallets: [other], tier: "ULTIMATE" }), context)).status, 200);
+  assert.equal((await access.POST(request(path, { action: "assign", wallets: ["invalid"], tier: "FCFS" }), context)).status, 400);
+  assert.equal((await mintTime.PATCH(request(`/api/items/${item.id}/mint-time`, { mintStartTime: config.fcfsStart }, "owner", origin, "PATCH"), context)).status, 409);
+  assert.equal((await access.POST(request(path, { action: "freeze" }), context)).status, 200);
+  const own = await (await access.GET(request(path, undefined, "other"), context)).json();
+  assert.equal(own.entry.tier, "ULTIMATE"); assert.deepEqual(own.proof, []); assert.match(own.plan.root, /^0x[0-9a-f]{64}$/);
+  for (const action of ["configure", "assign", "disable", "register"]) assert.equal((await access.POST(request(path, { action, config, wallets: [owner], tier: "FCFS" }), context)).status, 400);
+  const publicDetail = await (await detail.GET(request(`/api/items/${item.id}`, undefined, "anonymous"), context)).json();
+  assert.equal(publicDetail.item.mintAccessPlan, undefined);
+});
+
+test("deployment requires the exact locked allowlist and phase settings on-chain", async () => {
+  const { onchainMintConfig, mintTree } = await import("../../lib/mintAccess");
+  const config = { ultimateStart: new Date(Date.now() + 3600000).toISOString(), fcfsStart: new Date(Date.now() + 7200000).toISOString(), publicStart: new Date(Date.now() + 10800000).toISOString(), ultimateLimit: 1, fcfsLimit: 1, publicLimit: 2, ultimatePrice: "0", fcfsPrice: "1" };
+  const item = await nft({ mintStartTime: new Date(config.ultimateStart) }); const path = `/api/items/${item.id}/deployment`; const context = { params: { id: item.id } };
+  const root = mintTree(item.id, [{ walletAddress: other, tier: "ULTIMATE" }]).root;
+  const plan = await db.mintAccessPlan.create({ data: { itemId: item.id, config, root, frozenAt: new Date() } });
+  const txHash = collectionReceipt(item);
+  settings.set(factory.toLowerCase(), { supportsMintPhases: true });
+  settings.get(contract.toLowerCase())!.phasesEnabled = false;
+  const expected = Object.values(onchainMintConfig(item.id, root, config));
+  settings.get(contract.toLowerCase())!.mintPhases = expected;
+  assert.equal((await deployment.POST(request(path, { txHash }), context)).status, 400);
+  settings.get(contract.toLowerCase())!.phasesEnabled = true;
+  settings.get(contract.toLowerCase())!.mintPhases = [hash(), ...expected.slice(1)];
+  assert.equal((await deployment.POST(request(path, { txHash }), context)).status, 400);
+  settings.get(contract.toLowerCase())!.mintPhases = expected;
+  await db.mintAccessPlan.update({ where: { id: plan.id }, data: { frozenAt: null } });
+  assert.equal((await deployment.POST(request(path, { txHash }), context)).status, 400);
+  await db.mintAccessPlan.update({ where: { id: plan.id }, data: { frozenAt: new Date() } });
+  const response = await deployment.POST(request(path, { txHash }), context);
+  assert.equal(response.status, 200, JSON.stringify(await response.json()));
+  assert.equal((await db.item.findUniqueOrThrow({ where: { id: item.id } })).deploymentFactory?.toLowerCase(), factory);
+  settings.delete(factory.toLowerCase());
 });

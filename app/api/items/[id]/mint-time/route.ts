@@ -28,6 +28,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
   if (session.userId !== item.creatorId) {
     return NextResponse.json({ error: "Only the creator can reschedule the mint time" }, { status: 403 });
   }
+  if (await prisma.mintAccessPlan.findUnique({ where: { itemId: item.id } })) return NextResponse.json({ error: "Update all phase dates together in Mint access settings." }, { status: 409 });
   if (item.contractAddress) {
     return NextResponse.json({ error: "A deployed collection's mint time cannot be changed." }, { status: 409 });
   }
@@ -45,7 +46,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
   }
 
   const result = await prisma.item.updateMany({
-    where: { id: item.id, creatorId: session.userId, contractAddress: null, updatedAt: item.updatedAt, mintStartTime: item.mintStartTime },
+    where: { id: item.id, creatorId: session.userId, contractAddress: null, mintAccessPlan: { is: null }, updatedAt: item.updatedAt, mintStartTime: item.mintStartTime },
     data: { mintStartTime },
   });
   if (result.count !== 1) {

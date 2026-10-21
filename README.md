@@ -2,6 +2,20 @@
 
 Next.js marketplace with Prisma/SQLite and Solidity contracts.
 
+## Discovery and watchlists
+
+Use the bookmark buttons on marketplace cards and detail pages to save work to
+`/watchlist`. Saved items belong to the verified account, remain private, and
+sync across devices. A watchlist can hold up to 500 published items. Saving an
+item does not reserve it or trigger a payment. Sign-in is required to save.
+
+Creator names on detail pages open `/creators/[id]`, showing the creator's public
+bio, wallet and published catalog. Contact emails, pending applications, sessions
+and delivery details are excluded. Marketplace price, status, category/rarity and
+sort controls apply to catalog data; unknown prices are excluded from price ranges
+and sort last. Collection galleries support filename/token search and sorting.
+Detail pages and creator profiles have share buttons with copy-link fallback.
+
 ## Testnet leaderboard and account count
 
 `/leaderboard` ranks verified tester accounts and shows total accounts, accounts
@@ -63,6 +77,38 @@ create an embedded wallet. A selected wallet must sign deployments,
 mints, payments, and claims. A successful receipt is verified against the approved
 settings before the app attaches a collection or art checkout listing.
 
+Creators can configure **Ultimate → FCFS → Public** access in **Mint access** on
+an approved, undeployed collection. Set ordered opening dates, tier prices, and
+phase wallet limits. Collectors request a tier using a linked, signed-in wallet;
+the creator approves requests or imports wallet addresses from text/CSV. Pending
+requests do not grant mint access. The roster is private to the creator; a
+collector sees only their own assignment and proof.
+
+Ultimate wallets have priority during the first window. Both Ultimate and FCFS
+wallets can mint during FCFS, and everyone can mint during public access. Supply
+is first come, first served within each window; Ultimate does not reserve supply
+or guarantee a mint. Phase limits and the original collection wallet cap both
+apply, including across windows. Allowlist prices cannot exceed the approved
+public price. Each collection supports up to 2,000 registered/imported wallets.
+
+Before deployment, review the roster and click **Lock allowlist for deployment**.
+This permanently closes registration and freezes the schedule, tier prices,
+limits, and Merkle root. The factory atomically installs those settings when
+creating the collection. Contracts verify wallet/tier proofs and reject public
+mint calls during allowlist windows. ERC-721, soulbound, membership, and ERC-1155
+collections use the same rules. Public-only collections keep the existing flow.
+
+The previously deployed factory cannot support these new rules. Before replacing
+its configured address, run `npm run studio:pin-factories` with the original
+factory still in `.env.local`; this records the original factory on existing
+collection rows. In `/settings/protocol`, choose **Prepare updated factory and
+auction house**. This retains the current art market and deploys a new factory
+and auction house from your wallet. Save the displayed configuration, rebuild,
+and restart. Existing collections retain their original mint rules. Existing
+auctions/reward pools stay on the original house; the new house starts empty and
+checks mint eligibility through the new factory. Keep the old addresses for
+existing auctions and claims. No deployed collection or live auction is migrated.
+
 The new contracts are restricted to **Arc Testnet** in the app. To activate them:
 
 1. Open `/settings/protocol` and connect a wallet funded with test USDC.
@@ -122,6 +168,14 @@ versions used by the app are explicitly compatible and locked. The Next webpack
 config narrows the connector barrel to the injected entry used by Privy, avoiding
 an unused Tempo connector import, and externalizes Privy’s optional Solana adapters.
 `@stripe/stripe-js` is installed because Privy’s bundled SDK imports it.
+
+For fast local browsing without per-page development compilation, run
+`npm run preview` once, then open http://127.0.0.1:3000. Later, `npm run start:local`
+reuses the existing build. Rebuild after source or public environment changes.
+This command binds only to loopback and explicitly permits HTTP session cookies
+for that local run, including Safari. Normal `npm start` keeps production HTTPS
+cookies. Use `npm run dev` when editing and hot reload is needed; stop the other
+server before switching modes.
 
 The app and Prisma CLI default to `file:./prisma/dev.db` when `DATABASE_URL`
 is absent. Keep `.env.local` private. Blockchain transactions require a wallet,

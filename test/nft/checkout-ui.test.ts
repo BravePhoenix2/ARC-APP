@@ -27,7 +27,8 @@ const tx = { isConnected: false, pending: false, isWrongNetwork: false, address:
   catch (error) { tx.error = (error as Error).message; }
 } };
 const item = { id: "approved", itemType: "NFT", title: "Approved item", creationMethod: "HUMAN", nftKind: "COLLECTIBLE", contractAddress: wallet, mintPriceUsdc: 25, priceUsdc: 25, sold: false, artListingId: "42", artListingSeller: market, creator: { username: "Creator" } };
-const state = { price: BigInt(25), start: BigInt(0), timestamp: BigInt(1), count: BigInt(0), supply: BigInt(10), max: BigInt(2), minted: BigInt(0), owner: market, proceeds: BigInt(0) };
+const state = { phase: 3, phaseCount: BigInt(0), phasePrice: BigInt(25), phaseLimit: BigInt(2), price: BigInt(25), start: BigInt(0), timestamp: BigInt(1), count: BigInt(0), supply: BigInt(10), max: BigInt(2), minted: BigInt(0), owner: market, proceeds: BigInt(0) };
+let mintAccess: any = { plan: null };
 const noop = () => null;
 const deps: Record<string, unknown> = {
   "next/link": { default: ({ children, ...props }: React.PropsWithChildren) => React.createElement("a", props, children), __esModule: true },
@@ -35,6 +36,12 @@ const deps: Record<string, unknown> = {
   "@/components/Atmosphere": { default: noop, __esModule: true },
   "@/components/MarketNav": { default: noop, __esModule: true },
   "@/components/TransactionStatus": { default: noop, __esModule: true },
+  "@/components/WatchlistButton": { default: noop, __esModule: true },
+  "@/components/ShareItemButton": { default: noop, __esModule: true },
+  "@/components/CreatorLink": { default: noop, __esModule: true },
+  "@/components/MintAccessPanel": { default: noop, __esModule: true },
+  "@/hooks/useMintAccess": { useMintAccess: () => ({ data: mintAccess }) },
+  "@/lib/mintAccess": require("../../lib/mintAccess"),
   "@/components/CollectionImageGallery": { default: noop, __esModule: true },
   "@/hooks/useProtocolTransaction": { useProtocolTransaction: () => tx },
   "@/hooks/useArtiqAccount": { useArtiqAccount: () => account },
@@ -57,7 +64,7 @@ beforeEach(() => {
   logins = connections = payments = 0; saved = undefined; lastWrite = undefined; saveFailure = false;
   Object.assign(account, { authenticated: false, identity: "guest", walletAddress: undefined });
   Object.assign(tx, { isConnected: false, error: "" });
-  item.itemType = "NFT";
+  item.itemType = "NFT"; mintAccess = { plan: null }; Object.assign(state, { phase: 3, phaseCount: BigInt(0), phasePrice: BigInt(25), phaseLimit: BigInt(2) });
   globalThis.fetch = async (_url, options) => { saved = JSON.parse(options?.body as string); return saveFailure ? Response.json({ error: "Retry saving; do not pay again." }, { status: 503 }) : Response.json({ order: { id: "order" } }); };
 });
 afterEach(async () => { await act(async () => renderer?.unmount()); renderer = undefined; globalThis.fetch = originalFetch; });
@@ -105,4 +112,23 @@ test("failed order saving retries delivery without charging for a second purchas
   saveFailure = false;
   await act(async () => { await renderer!.root.findByType("form").props.onSubmit({ preventDefault() {} }); });
   assert.equal(payments, 1); assert.equal(saved?.txHash, hash);
+});
+
+
+test("allowlisted mint uses the assigned tier proof and phase price; pending wallets cannot mint early", async () => {
+  Object.assign(account, { authenticated: true, identity: "collector", walletAddress: wallet }); tx.isConnected = true;
+  mintAccess = { plan: { root: hash, frozenAt: new Date().toISOString() }, entry: { tier: "ULTIMATE" }, proof: [] };
+  Object.assign(state, { phase: 1, phasePrice: BigInt(5), phaseLimit: BigInt(1) });
+  await act(async () => { renderer = create(React.createElement(CollectionDetail, { id: item.id })); });
+  await act(async () => renderer!.root.findByType("form").props.onSubmit({ preventDefault() {} }));
+  assert.equal(lastWrite?.functionName, "mintAllowlisted"); assert.deepEqual(lastWrite?.args, [BigInt(1), 1, []]); assert.equal(lastWrite?.value, BigInt(5));
+  lastWrite = undefined; mintAccess.entry.tier = "PENDING";
+  await act(async () => renderer!.update(React.createElement(CollectionDetail, { id: item.id })));
+  await act(async () => renderer!.root.findByType("form").props.onSubmit({ preventDefault() {} }));
+  assert.equal(lastWrite, undefined); assert.match(tx.error, /does not have access/);
+  state.phase = 3;
+  await act(async () => renderer!.update(React.createElement(CollectionDetail, { id: item.id })));
+  await act(async () => renderer!.root.findByType("form").props.onSubmit({ preventDefault() {} }));
+  const publicWrite = lastWrite as Record<string, unknown> | undefined;
+  assert.equal(publicWrite?.functionName, "mint"); assert.equal(publicWrite?.value, state.price);
 });

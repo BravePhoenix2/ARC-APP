@@ -80,6 +80,7 @@ model User {
   uploadedImages UploadedImage[]
   testerProfile TesterProfile?
   artOrders ArtOrder[]
+  watchlist WatchlistEntry[]
 }
 
 // Only verified sign-ins create tester profiles; seeded marketplace users do not count.
@@ -134,6 +135,8 @@ model Item {
   imageCount      Int @default(1)
   collectionImages CollectionImage[]
   contractAddress String?
+  deploymentFactory String?
+  mintAccessPlan MintAccessPlan?
   mintPriceUsdc   Float?
   mintStartTime   DateTime?
   maxSupply       Int?
@@ -153,10 +156,23 @@ model Item {
   activities Activity[]
   submission Submission?
   artOrder ArtOrder?
+  watchers WatchlistEntry[]
 
   @@index([itemType])
   @@index([nftKind])
   @@index([status])
+}
+
+model WatchlistEntry {
+  id        String @id @default(cuid())
+  userId    String
+  user      User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  itemId    String
+  item      Item @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, itemId])
+  @@index([userId, createdAt])
 }
 
 // Delivery details stay private to the buyer and the artwork's creator.
@@ -341,4 +357,26 @@ model PrivySession {
 
   @@index([expiresAt])
   @@index([userId])
+}
+
+// Wallet rosters are private; public Item responses never include this relation.
+model MintAccessPlan {
+  id String @id @default(cuid())
+  itemId String @unique
+  item Item @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  config Json
+  root String?
+  frozenAt DateTime?
+  entries MintAllowlistEntry[]
+}
+
+model MintAllowlistEntry {
+  id String @id @default(cuid())
+  planId String
+  plan MintAccessPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  walletAddress String
+  requestedTier String @default("FCFS")
+  tier String @default("PENDING")
+  createdAt DateTime @default(now())
+  @@unique([planId, walletAddress])
 }

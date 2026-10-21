@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAddress, parseAbi, parseEventLogs, verifyMessage, zeroAddress, type Hash, type TransactionReceipt } from "viem";
+import { getAddress, parseAbi, parseEventLogs, verifyMessage, zeroAddress, type Address, type Hash, type TransactionReceipt } from "viem";
 import { arcChain } from "@/lib/arcConfig";
 import { getCreatorSession } from "@/lib/creatorSession";
 import { deploymentClient } from "@/lib/deploymentVerification";
@@ -44,14 +44,14 @@ async function inferMilestone(receipt: TransactionReceipt): Promise<TesterMilest
   if (!protocol.factory || !receipt.to) return null;
   const collection = await prisma.item.findFirst({
     where: { itemType: "NFT", contractAddress: { in: [receipt.to, receipt.to.toLowerCase(), getAddress(receipt.to)] } },
-    select: { contractAddress: true },
+    select: { contractAddress: true, deploymentFactory: true },
   });
   if (!collection?.contractAddress) return null;
   const logs = ownLogs(collection.contractAddress);
   const mint721 = parseEventLogs({ abi: mint721Abi, eventName: "Minted", logs, strict: true });
   const mint1155 = parseEventLogs({ abi: mint1155Abi, eventName: "Minted", logs, strict: true });
   if (![...mint721, ...mint1155].some(({ args }) => matches(args.to, receipt.from) && args.quantity > BigInt(0))) return null;
-  const creator = await deploymentClient.readContract({ address: protocol.factory, abi: factoryAbi, functionName: "collectionCreator", args: [receipt.to] });
+  const creator = await deploymentClient.readContract({ address: (collection.deploymentFactory || protocol.factory) as Address, abi: factoryAbi, functionName: "collectionCreator", args: [receipt.to] });
   return creator !== zeroAddress ? "MINT_NFT" : null;
 }
 

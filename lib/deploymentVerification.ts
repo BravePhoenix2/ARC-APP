@@ -1,6 +1,8 @@
 import { createPublicClient, http, parseEventLogs, parseAbi, type Address, type Hash } from "viem";
 import { arcChain } from "@/lib/arcConfig";
 import { collectionAbi, factoryAbi, usdcAmount } from "@/lib/protocol";
+import { prisma } from "@/lib/prisma";
+import { onchainMintConfig, type MintPhaseConfig } from "@/lib/mintAccess";
 import { itemMetadataUri } from "@/lib/itemMetadata";
 import type { Item } from "@/lib/generated/prisma/client";
 
@@ -42,5 +44,14 @@ export async function verifiedCollection(item: Item, hash: Hash, factory: Addres
     uri !== itemMetadataUri(item) || royalty[0].toLowerCase() !== creator.toLowerCase() || royalty[1] !== BigInt(item.royaltyBps ?? 0)) {
     throw new DeploymentVerificationError("The deployed mint price, schedule, supply, wallet limit, royalties, owner, or metadata does not match the approved collection.");
   }
+  const plan = await prisma.mintAccessPlan.findUnique({ where: { itemId: item.id } });
+  const supportsPhases = await deploymentClient.readContract({ address: factory, abi: factoryAbi, functionName: "supportsMintPhases" }).catch(() => false);
+  if (plan) {
+    if (!plan.frozenAt || !plan.root || !supportsPhases) throw new DeploymentVerificationError("Lock the allowlist and use a factory supporting mint phases before deploying.");
+    const enabled = await deploymentClient.readContract({ address, abi: collectionAbi, functionName: "phasesEnabled" });
+    const actual = await deploymentClient.readContract({ address, abi: collectionAbi, functionName: "mintPhases" });
+    const expected = onchainMintConfig(item.id, plan.root as `0x${string}`, plan.config as MintPhaseConfig);
+    if (!enabled || Object.values(expected).some((v, i) => String(v).toLowerCase() !== String(actual[i]).toLowerCase())) throw new DeploymentVerificationError("The deployed allowlist or phase settings do not match the locked collection.");
+  } else if (supportsPhases && await deploymentClient.readContract({ address, abi: collectionAbi, functionName: "phasesEnabled" })) throw new DeploymentVerificationError("This collection was approved for public minting without phases.");
   return { address, creator };
 }

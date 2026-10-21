@@ -8,6 +8,9 @@ import { ArrowLeft } from "lucide-react";
 import { keccak256, toHex, zeroAddress, type Hash } from "viem";
 import Atmosphere from "@/components/Atmosphere";
 import MarketNav from "@/components/MarketNav";
+import CreatorLink from "@/components/CreatorLink";
+import WatchlistButton from "@/components/WatchlistButton";
+import ShareItemButton from "@/components/ShareItemButton";
 import TransactionStatus from "@/components/TransactionStatus";
 import { useProtocolTransaction } from "@/hooks/useProtocolTransaction";
 import { useArtiqAccount } from "@/hooks/useArtiqAccount";
@@ -15,7 +18,7 @@ import { arcChain } from "@/lib/arcConfig";
 import { artMarketAbi, displayUsdc, protocol, usdcAmount } from "@/lib/protocol";
 import { emptyArtDelivery, validateArtDelivery, type ArtDelivery } from "@/lib/artDelivery";
 
-type Art = { id: string; itemType: string; title: string; description: string | null; imageUrl: string | null; priceUsdc: number | null; sold: boolean; artListingId: string | null; artListingSeller: string | null; creator: { username: string | null } };
+type Art = { id: string; itemType: string; title: string; description: string | null; imageUrl: string | null; priceUsdc: number | null; sold: boolean; artListingId: string | null; artListingSeller: string | null; creator: { id?: string; username: string | null } };
 type Order = { id: string; txHash: string; delivery: ArtDelivery };
 const button = "gallery-button inline-flex items-center justify-center gap-2 px-5 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40";
 const fields: Array<[keyof ArtDelivery, string, string, boolean, number]> = [
@@ -92,7 +95,7 @@ export default function ArtCheckout({ id }: { id: string }) {
     {artQuery.isLoading ? <p role="status" className="mt-8">Loading artwork…</p> : artQuery.isError || art?.itemType !== "WEB2_ART" ? <div className="gallery-card mt-8 p-8"><h1 className="text-2xl">Artwork unavailable</h1><p className="mt-3 text-sm">{artQuery.error?.message || "Only approved original artwork is shown here."}</p><button type="button" onClick={() => void artQuery.refetch()} className={`${button} mt-4`}>Retry loading artwork</button></div> :
       <div className="mt-7 grid gap-8 lg:grid-cols-2">
         <div className="gallery-card relative aspect-square self-start overflow-hidden">{art.imageUrl && <Image src={art.imageUrl} alt={art.title} fill unoptimized sizes="(min-width:1024px) 50vw,100vw" className="object-cover" />}</div>
-        <div><p className="text-xs font-semibold text-[#b55fbe]">Reviewed Original Art</p><h1 className="mt-5 text-4xl sm:text-5xl">{art.title}</h1><p className="mt-3 text-xs text-[var(--muted-text)]">By {art.creator.username || "Artiq creator"}</p><p className="mt-6 whitespace-pre-wrap text-sm leading-7 text-[var(--muted-text)]">{art.description}</p><p className="mt-6 text-3xl">{listing ? displayUsdc(listing[2]) : art.priceUsdc} <span className="text-sm">USDC</span></p>
+        <div><p className="text-xs font-semibold text-[#b55fbe]">Reviewed Original Art</p><h1 className="mt-5 text-4xl sm:text-5xl">{art.title}</h1><p className="mt-3 text-xs text-[var(--muted-text)]">By <CreatorLink creator={art.creator} /></p><div className="mt-4 flex flex-wrap gap-3"><WatchlistButton itemId={id} /><ShareItemButton title={art.title} /></div><p className="mt-6 whitespace-pre-wrap text-sm leading-7 text-[var(--muted-text)]">{art.description}</p><p className="mt-6 text-3xl">{listing ? displayUsdc(listing[2]) : art.priceUsdc} <span className="text-sm">USDC</span></p>
           <section className="mt-6 rounded-2xl border border-[var(--border-soft)] bg-[var(--glass-bg)] p-5" aria-label="Art checkout">
             <h2 className="text-sm font-semibold">Purchase & delivery</h2><p className="mt-3 text-xs leading-6 text-[var(--muted-text)]">Pay with Arc Testnet USDC. Your delivery details are shared privately with the creator after payment confirmation. Agree shipping costs and availability with the creator before paying. Delivery is arranged by the creator. Test USDC has no monetary value.</p>
             {!market && <p className="mt-4 text-sm leading-6">Payments are awaiting project setup. <Link href="/settings/protocol" className="font-semibold text-[#b55fbe] underline">Set up Arc Testnet payments →</Link></p>}

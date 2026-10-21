@@ -13,9 +13,12 @@ export const protocol = {
 };
 
 export const factoryAbi = parseAbi([
+  "function supportsMintPhases() pure returns (bool)",
   "function supportsImageSeries() pure returns (bool)",
   "function create721(string name_,string symbol_,string metadataURI_,uint256 mintPrice_,uint256 mintStartTime_,uint256 maxSupply_,uint256 maxPerWallet_,uint96 royaltyBps_,bool soulbound_) returns (address)",
+  "function create721WithPhases(string name_,string symbol_,string metadataURI_,uint256 mintPrice_,uint256 mintStartTime_,uint256 maxSupply_,uint256 maxPerWallet_,uint96 royaltyBps_,bool soulbound_,(bytes32 root,bytes32 collectionKey,uint64 ultimateStart,uint64 fcfsStart,uint64 publicStart,uint32 ultimateLimit,uint32 fcfsLimit,uint32 publicLimit,uint256 ultimatePrice,uint256 fcfsPrice) config) returns (address)",
   "function createEdition(string name_,string symbol_,string metadataURI_,uint256 mintPrice_,uint256 mintStartTime_,uint256 maxSupply_,uint256 maxPerWallet_,uint96 royaltyBps_) returns (address)",
+  "function createEditionWithPhases(string name_,string symbol_,string metadataURI_,uint256 mintPrice_,uint256 mintStartTime_,uint256 maxSupply_,uint256 maxPerWallet_,uint96 royaltyBps_,(bytes32 root,bytes32 collectionKey,uint64 ultimateStart,uint64 fcfsStart,uint64 publicStart,uint32 ultimateLimit,uint32 fcfsLimit,uint32 publicLimit,uint256 ultimatePrice,uint256 fcfsPrice) config) returns (address)",
   "function hasMinted(address) view returns (bool)",
   "function collectionCreator(address) view returns (address)",
   "event CollectionCreated(address indexed creator,address indexed collection,uint8 standard,bool soulbound,string name,string symbol)",
@@ -23,6 +26,12 @@ export const factoryAbi = parseAbi([
 
 export const collectionAbi = parseAbi([
   "function mint(uint256 quantity) payable",
+  "function mintAllowlisted(uint256 quantity,uint8 tier,bytes32[] proof) payable",
+  "function phasesEnabled() view returns (bool)",
+  "function currentMintPhase() view returns (uint8)",
+  "function phaseMinted(uint8,address) view returns (uint256)",
+  "function registry() view returns (address)",
+  "function mintPhases() view returns (bytes32 root,bytes32 collectionKey,uint64 ultimateStart,uint64 fcfsStart,uint64 publicStart,uint32 ultimateLimit,uint32 fcfsLimit,uint32 publicLimit,uint256 ultimatePrice,uint256 fcfsPrice)",
   "function mintPrice() view returns (uint256)",
   "function mintStartTime() view returns (uint256)",
   "function maxSupply() view returns (uint256)",

@@ -205,3 +205,17 @@ test("production requires the exact native or configured origin and never trusts
     }
   }
 });
+
+test("compiled local preview accepts only its pinned loopback origin and matching port", () => {
+  const previous = { NODE_ENV: process.env.NODE_ENV, ARTIQ_LOCAL_HTTP_ORIGIN: process.env.ARTIQ_LOCAL_HTTP_ORIGIN, ARTIQ_APP_ORIGIN: process.env.ARTIQ_APP_ORIGIN, NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL };
+  try {
+    Object.assign(process.env, { NODE_ENV: "production" });
+    process.env.ARTIQ_LOCAL_HTTP_ORIGIN = "http://127.0.0.1:3000";
+    delete process.env.ARTIQ_APP_ORIGIN; delete process.env.NEXT_PUBLIC_APP_URL;
+    assert.equal(auth.sameOrigin(request("nonce", {}, undefined, "http://localhost:3000", "http://127.0.0.1:3000")), true);
+    for (const origin of ["http://127.0.0.1:3001", "https://127.0.0.1:3000", "http://evil.localhost:3000"]) assert.equal(auth.sameOrigin(request("nonce", {}, undefined, "http://localhost:3000", origin)), false);
+    assert.equal(auth.sameOrigin(request("nonce", {}, undefined, "http://remote.example:3000", "http://127.0.0.1:3000")), false);
+  } finally {
+    for (const [key, value] of Object.entries(previous)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+  }
+});

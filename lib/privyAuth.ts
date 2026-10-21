@@ -1,3 +1,4 @@
+import { secureSessionCookie } from "@/lib/sessionCookie";
 import { createHash } from "node:crypto";
 import type { NextRequest, NextResponse } from "next/server";
 import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from "jose";
@@ -271,13 +272,13 @@ export async function revokePrivySession(request: NextRequest): Promise<void> {
 
 export function setPrivySessionCookie(response: NextResponse, token: string, expiresAt: Date): void {
   response.cookies.set(PRIVY_SESSION_COOKIE, token, {
-    httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/",
+    httpOnly: true, sameSite: "lax", secure: secureSessionCookie(), path: "/",
     expires: expiresAt, maxAge: Math.max(0, Math.floor((expiresAt.getTime() - Date.now()) / 1_000)),
   });
 }
 
 export function clearPrivySessionCookie(response: NextResponse): void {
   response.cookies.set(PRIVY_SESSION_COOKIE, "", {
-    httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/", maxAge: 0,
+    httpOnly: true, sameSite: "lax", secure: secureSessionCookie(), path: "/", maxAge: 0,
   });
 }

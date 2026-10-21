@@ -2,13 +2,14 @@
 pragma solidity ^0.8.24;
 
 import {ERC1155} from "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
+import {ArticMintPhases} from "./ArticMintPhases.sol";
 import {ERC2981} from "@openzeppelin/contracts/token/common/ERC2981.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {IArticMintRegistry} from "./ArticStudioCollection.sol";
 
 /// @notice A limited ERC-1155 edition of token ID 1, paid in native USDC (18 decimals).
-contract ArticEdition is ERC1155, ERC2981, Ownable, ReentrancyGuard {
+contract ArticEdition is ERC1155, ERC2981, Ownable, ReentrancyGuard, ArticMintPhases {
     uint256 public constant TOKEN_ID = 1;
     string public name;
     string public symbol;
@@ -50,12 +51,26 @@ contract ArticEdition is ERC1155, ERC2981, Ownable, ReentrancyGuard {
         _setDefaultRoyalty(creator_, royaltyBps_);
     }
 
+    function configurePhases(PhaseConfig calldata config) external {
+        if (msg.sender != registry || totalMinted != 0) revert InvalidPhases();
+        _configurePhases(config, maxPerWallet, mintStartTime, mintPrice);
+    }
+
+    function mintAllowlisted(uint256 quantity, uint8 tier, bytes32[] calldata proof) external payable nonReentrant {
+        _mintTokens(quantity, _checkAllowlistPhase(quantity, tier, proof));
+    }
+
     function mint(uint256 quantity) external payable nonReentrant {
+        _checkPublicPhase(quantity);
+        _mintTokens(quantity, mintPrice);
+    }
+
+    function _mintTokens(uint256 quantity, uint256 price) private {
         if (quantity == 0 || quantity > 100) revert InvalidQuantity();
         if (block.timestamp < mintStartTime) revert MintingNotStarted();
         if (totalMinted + quantity > maxSupply) revert ExceedsMaxSupply();
         if (mintedByWallet[msg.sender] + quantity > maxPerWallet) revert ExceedsWalletLimit();
-        if (msg.value != mintPrice * quantity) revert IncorrectPayment();
+        if (msg.value != price * quantity) revert IncorrectPayment();
         totalMinted += quantity;
         mintedByWallet[msg.sender] += quantity;
         if (registry != address(0)) IArticMintRegistry(registry).notifyMint(msg.sender);

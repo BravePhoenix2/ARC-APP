@@ -35,7 +35,7 @@ export async function GET(request: NextRequest) {
 
   const items = await prisma.item.findMany({
     where,
-    include: { creator: { select: { walletAddress: true, username: true } } },
+    include: { creator: { select: { id: true, walletAddress: true, username: true } } },
     orderBy: { createdAt: "desc" },
   });
 

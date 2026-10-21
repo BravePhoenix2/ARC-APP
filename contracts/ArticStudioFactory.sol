@@ -2,10 +2,15 @@
 pragma solidity ^0.8.24;
 
 import {ArticStudioCollection} from "./ArticStudioCollection.sol";
+import {ArticMintPhases} from "./ArticMintPhases.sol";
+import {ArticCollectionDeployer, ArticEditionDeployer} from "./ArticCollectionDeployers.sol";
 import {ArticEdition} from "./ArticEdition.sol";
 
 /// @notice Permissionless creator-owned collections and an authenticated mint-activity registry.
 contract ArticStudioFactory {
+    ArticCollectionDeployer private immutable collectionDeployer = new ArticCollectionDeployer();
+    ArticEditionDeployer private immutable editionDeployer = new ArticEditionDeployer();
+    function supportsMintPhases() external pure returns (bool) { return true; }
     function supportsImageSeries() external pure returns (bool) { return true; }
     struct CollectionInfo {
         address collection;
@@ -29,7 +34,7 @@ contract ArticStudioFactory {
         string calldata name_, string calldata symbol_, string calldata metadataURI_, uint256 mintPrice_,
         uint256 mintStartTime_, uint256 maxSupply_, uint256 maxPerWallet_, uint96 royaltyBps_, bool soulbound_
     ) external returns (address collection) {
-        collection = address(new ArticStudioCollection(name_, symbol_, metadataURI_, mintPrice_, mintStartTime_, maxSupply_, maxPerWallet_, royaltyBps_, soulbound_, msg.sender, address(this)));
+        collection = collectionDeployer.deploy(name_, symbol_, metadataURI_, mintPrice_, mintStartTime_, maxSupply_, maxPerWallet_, royaltyBps_, soulbound_, msg.sender, address(this));
         _register(collection, 1, soulbound_, name_, symbol_);
     }
 
@@ -37,7 +42,25 @@ contract ArticStudioFactory {
         string calldata name_, string calldata symbol_, string calldata metadataURI_, uint256 mintPrice_,
         uint256 mintStartTime_, uint256 maxSupply_, uint256 maxPerWallet_, uint96 royaltyBps_
     ) external returns (address collection) {
-        collection = address(new ArticEdition(name_, symbol_, metadataURI_, mintPrice_, mintStartTime_, maxSupply_, maxPerWallet_, royaltyBps_, msg.sender, address(this)));
+        collection = editionDeployer.deploy(name_, symbol_, metadataURI_, mintPrice_, mintStartTime_, maxSupply_, maxPerWallet_, royaltyBps_, msg.sender, address(this));
+        _register(collection, 2, false, name_, symbol_);
+    }
+
+    function create721WithPhases(
+        string calldata name_, string calldata symbol_, string calldata metadataURI_, uint256 mintPrice_,
+        uint256 mintStartTime_, uint256 maxSupply_, uint256 maxPerWallet_, uint96 royaltyBps_, bool soulbound_, ArticMintPhases.PhaseConfig calldata config
+    ) external returns (address collection) {
+        collection = collectionDeployer.deploy(name_, symbol_, metadataURI_, mintPrice_, mintStartTime_, maxSupply_, maxPerWallet_, royaltyBps_, soulbound_, msg.sender, address(this));
+        ArticStudioCollection(collection).configurePhases(config);
+        _register(collection, 1, soulbound_, name_, symbol_);
+    }
+
+    function createEditionWithPhases(
+        string calldata name_, string calldata symbol_, string calldata metadataURI_, uint256 mintPrice_,
+        uint256 mintStartTime_, uint256 maxSupply_, uint256 maxPerWallet_, uint96 royaltyBps_, ArticMintPhases.PhaseConfig calldata config
+    ) external returns (address collection) {
+        collection = editionDeployer.deploy(name_, symbol_, metadataURI_, mintPrice_, mintStartTime_, maxSupply_, maxPerWallet_, royaltyBps_, msg.sender, address(this));
+        ArticEdition(collection).configurePhases(config);
         _register(collection, 2, false, name_, symbol_);
     }
 
