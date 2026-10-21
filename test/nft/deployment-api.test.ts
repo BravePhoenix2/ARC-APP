@@ -430,3 +430,16 @@ test("deployment requires the exact locked allowlist and phase settings on-chain
   assert.equal((await db.item.findUniqueOrThrow({ where: { id: item.id } })).deploymentFactory?.toLowerCase(), factory);
   settings.delete(factory.toLowerCase());
 });
+
+test("locking rejects oversubscribed Ultimate guarantees and allows a fully backed allocation", async () => {
+  const access = await import("../../app/api/items/[id]/mint-access/route");
+  const item = await nft({ maxSupply: 2, maxPerWallet: 2 }); const context = { params: { id: item.id } }; const path = `/api/items/${item.id}/mint-access`;
+  const config = { ultimateStart: new Date(Date.now() + 3600000).toISOString(), fcfsStart: new Date(Date.now() + 7200000).toISOString(), publicStart: new Date(Date.now() + 10800000).toISOString(), ultimateLimit: 2, fcfsLimit: 1, publicLimit: 1, ultimatePrice: "0", fcfsPrice: "1" };
+  assert.equal((await access.POST(request(path, { action: "configure", config }), context)).status, 200);
+  assert.equal((await access.POST(request(path, { action: "assign", wallets: [owner, other], tier: "ULTIMATE" }), context)).status, 200);
+  const rejected = await access.POST(request(path, { action: "freeze" }), context);
+  assert.equal(rejected.status, 400); assert.match((await rejected.json()).error, /require 4 tokens/);
+  assert.equal((await db.mintAccessPlan.findUniqueOrThrow({ where: { itemId: item.id } })).frozenAt, null);
+  assert.equal((await access.POST(request(path, { action: "assign", wallets: [other], tier: "FCFS" }), context)).status, 200);
+  assert.equal((await access.POST(request(path, { action: "freeze" }), context)).status, 200);
+});

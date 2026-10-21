@@ -59,7 +59,7 @@ test("malformed NFT settings are rejected instead of becoming unvalidated metada
   ]) assert.throws(() => parseSubmission({ ...application, ...fields }), SubmissionValidationError, JSON.stringify(fields));
 });
 
-test("NFT settings do not leak into original Art and original Art must retain a positive price", () => {
+test("NFT settings do not leak into ART BAZZAR and ART BAZZAR must retain a positive price", () => {
   const art = {
     ...application, itemType: "WEB2_ART", imageUrl: "/api/uploads/abcdefghijklmnopqrstuvwx",
     category: "PAINTING", creationMethod: "HUMAN", humanMadeDeclaration: true,

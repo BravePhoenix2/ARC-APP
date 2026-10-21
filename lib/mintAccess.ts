@@ -29,3 +29,10 @@ export function hashPair(a: Hex, b: Hex): Hex { return keccak256(concatHex(a < b
 export function onchainMintConfig(id: string, root: Hex, c: MintPhaseConfig) {
   return { root, collectionKey: collectionKey(id), ultimateStart: BigInt(Math.floor(Date.parse(c.ultimateStart) / 1000)), fcfsStart: BigInt(Math.floor(Date.parse(c.fcfsStart) / 1000)), publicStart: BigInt(Math.floor(Date.parse(c.publicStart) / 1000)), ultimateLimit: c.ultimateLimit, fcfsLimit: c.fcfsLimit, publicLimit: c.publicLimit, ultimatePrice: usdcAmount(c.ultimatePrice, true), fcfsPrice: usdcAmount(c.fcfsPrice, true) };
 }
+
+/** Each selected Ultimate wallet must be able to claim its entire allocation before FCFS. */
+export function guaranteedUltimateAllocation(entries: { tier: string }[], config: MintPhaseConfig, supply: number): number {
+  const reserved = entries.filter((entry) => entry.tier === "ULTIMATE").length * config.ultimateLimit;
+  if (!Number.isSafeInteger(reserved) || reserved > supply) throw new Error(`Ultimate allocations require ${reserved} tokens, but the collection only has ${supply}. Reduce the Ultimate wallet count or allocation before locking.`);
+  return reserved;
+}

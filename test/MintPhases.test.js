@@ -46,3 +46,24 @@ describe("Phased mint access", function () {
     }
   });
 });
+
+describe("Guaranteed Ultimate allocations", function () {
+  it("protects the entire Ultimate supply from other tiers until every selected wallet can claim", async function () {
+    const [, first, second, outsider] = await ethers.getSigners();
+    const factory = await ethers.deployContract("ArticStudioFactory");
+    const start = await time.latest() + 100; const key = ethers.id("guaranteed");
+    const a = leaf(key, first.address, 1); const b = leaf(key, second.address, 1);
+    const config = { root: pair(a, b), collectionKey: key, ultimateStart: start, fcfsStart: start + 100, publicStart: start + 200, ultimateLimit: 2, fcfsLimit: 1, publicLimit: 1, ultimatePrice: 0, fcfsPrice: 1 };
+    const receipt = await (await factory.create721WithPhases("Guaranteed", "GTD", "ipfs://gtd", 2, start, 4, 2, 0, false, config)).wait();
+    const address = receipt.logs.map(l => { try { return factory.interface.parseLog(l); } catch { return null; } }).find(l => l?.name === "CollectionCreated").args.collection;
+    const nft = await ethers.getContractAt("ArticStudioCollection", address);
+    await time.increaseTo(start);
+    await expect(nft.connect(outsider).mint(4, { value: 8 })).to.be.revertedWithCustomError(nft, "PhaseNotOpen");
+    await expect(nft.connect(outsider).mintAllowlisted(2, 2, [a])).to.be.revertedWithCustomError(nft, "NotAllowlisted");
+    await nft.connect(first).mintAllowlisted(2, 1, [b]);
+    await expect(nft.connect(first).mintAllowlisted(1, 1, [b])).to.be.revertedWithCustomError(nft, "PhaseLimitExceeded");
+    await nft.connect(second).mintAllowlisted(2, 1, [a]);
+    expect(await nft.totalMinted()).to.equal(4);
+    expect(await nft.mintedByWallet(second.address)).to.equal(2);
+  });
+});

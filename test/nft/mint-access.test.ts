@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { collectionKey, hashPair, mintLeaf, mintTree, validateMintConfig } from "../../lib/mintAccess";
+import { guaranteedUltimateAllocation, collectionKey, hashPair, mintLeaf, mintTree, validateMintConfig } from "../../lib/mintAccess";
 import { encodeAbiParameters, keccak256 } from "viem";
 const wallets = ["1", "2", "3"].map((c) => `0x${c.repeat(40)}`);
 const entries = wallets.map((walletAddress, i) => ({ walletAddress, tier: i === 0 ? "ULTIMATE" : "FCFS" }));
@@ -25,4 +25,12 @@ test("phase settings enforce ordered future windows, approved prices and global 
   assert.throws(() => validateMintConfig({ ...config, fcfsPrice: "3" }, 3, 2));
   assert.throws(() => validateMintConfig({ ...config, fcfsStart: config.ultimateStart }, 3, 2));
   assert.throws(() => validateMintConfig({ ...config, ultimateStart: "invalid" }, 3, 2));
+});
+
+
+test("Ultimate guarantees cannot be oversubscribed when locking a roster", () => {
+  const config = { ultimateLimit: 2 } as Parameters<typeof guaranteedUltimateAllocation>[1];
+  assert.equal(guaranteedUltimateAllocation([{ tier: "ULTIMATE" }, { tier: "ULTIMATE" }, { tier: "FCFS" }, { tier: "PENDING" }], config, 4), 4);
+  assert.throws(() => guaranteedUltimateAllocation([{ tier: "ULTIMATE" }, { tier: "ULTIMATE" }, { tier: "ULTIMATE" }], config, 4), /require 6 tokens/);
+  assert.equal(guaranteedUltimateAllocation([{ tier: "FCFS" }], config, 4), 0);
 });

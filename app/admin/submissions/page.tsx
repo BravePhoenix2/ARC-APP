@@ -98,7 +98,7 @@ function CreationDetails({ submission }: { submission: Submission }) {
   return (
     <section className="mt-6 rounded-xl border border-[var(--border-soft)] bg-[var(--chip-bg)] p-4 sm:p-5" aria-labelledby={`creation-details-${submission.id}`}>
       <h3 id={`creation-details-${submission.id}`} className="text-base">Creation details</h3>
-      <p className="mt-2 text-xs leading-5 text-[var(--muted-text)]">{isNft ? "AI-generated and AI-assisted works are allowed in NFTs." : "Original art must be human-made. Generative AI artwork is not eligible for this category."}</p>
+      <p className="mt-2 text-xs leading-5 text-[var(--muted-text)]">{isNft ? "AI-generated and AI-assisted works are allowed in NFTs." : "ART BAZZAR artwork must be human-made. Generative AI artwork is not eligible for this category."}</p>
       <dl className="mt-4 space-y-4 text-sm">
         {isNft && <>
           <div><dt className="text-xs text-[var(--faint-text)]">NFT type</dt><dd className="mt-1 font-semibold">{NFT_KIND_INFO[submission.nftKind ?? "COLLECTIBLE"].label} · {NFT_KIND_INFO[submission.nftKind ?? "COLLECTIBLE"].standard}</dd></div>
@@ -191,7 +191,7 @@ function ReviewCard({ submission, onReview }: {
           ) : (
             <div className="art-placeholder absolute inset-0"><span className="art-placeholder-shape" aria-hidden="true" /><span className="text-xs">Preview unavailable</span></div>
           )}
-          <span className="absolute left-4 top-4 rounded-full border border-[var(--border-soft)] bg-[var(--glass-bg)] px-3 py-1.5 text-xs font-semibold backdrop-blur-md">{isNft ? "NFT collection" : "Original art"}</span>
+          <span className="absolute left-4 top-4 rounded-full border border-[var(--border-soft)] bg-[var(--glass-bg)] px-3 py-1.5 text-xs font-semibold backdrop-blur-md">{isNft ? "NFT collection" : "ART BAZZAR"}</span>
           {submission.imageUrl && !imageFailed && <a href={submission.imageUrl} target="_blank" rel="noreferrer" className="absolute bottom-4 right-4 inline-flex items-center gap-2 rounded-full border border-[var(--border-soft)] bg-[var(--glass-bg)] px-3 py-2 text-xs font-semibold backdrop-blur-md">View full image <ArrowUpRight size={14} aria-hidden="true" /></a>}
         </div>
         <div className="min-w-0 p-5 sm:p-7">
@@ -310,7 +310,7 @@ export default function SubmissionReviewPage() {
           <div>
             <p className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.2em] text-[var(--faint-text)]"><ShieldCheck size={14} aria-hidden="true" /> The curator’s desk</p>
             <h1 className="mt-3 text-4xl font-semibold sm:text-5xl">Art worth <span className="hero-word">sharing.</span></h1>
-            <p className="mt-4 max-w-xl text-sm leading-6 text-[var(--muted-text)]">Review creator applications. Approved NFTs and original art are published in the Artiq marketplace.</p>
+            <p className="mt-4 max-w-xl text-sm leading-6 text-[var(--muted-text)]">Review creator applications. Approved NFTs and ART BAZZAR artwork are published in the Artiq marketplace.</p>
           </div>
           <span className="rounded-full border border-[var(--border-soft)] bg-[var(--chip-bg)] px-3 py-2 text-xs font-semibold">{arcChain.name}{arcChain.testnet ? " · Test USDC" : ""}</span>
         </div>

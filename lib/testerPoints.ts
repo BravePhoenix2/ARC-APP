@@ -4,7 +4,7 @@ export const TESTER_POINT_RULES = [
   { kind: "APPROVED_CREATOR", label: "Become an approved creator", points: 25, description: "Have your first art or NFT application reviewed and approved." },
   { kind: "DEPLOY_COLLECTION", label: "Deploy a collection", points: 20, description: "Create your first collection through the Artiq factory on Arc Testnet." },
   { kind: "MINT_NFT", label: "Mint an NFT", points: 30, description: "Complete your first mint from an approved Artiq collection." },
-  { kind: "BUY_ART", label: "Buy original art", points: 40, description: "Complete your first purchase through Artiq Art checkout." },
+  { kind: "BUY_ART", label: "Buy from ART BAZZAR", points: 40, description: "Complete your first purchase through Artiq Art checkout." },
   { kind: "PLACE_BID", label: "Place an auction bid", points: 15, description: "Place your first confirmed bid in an Artiq auction." },
   { kind: "JOIN_REWARD", label: "Join a reward round", points: 10, description: "Join your first eligible Artiq reward round." },
   { kind: "CLAIM_REWARD", label: "Claim a testnet reward", points: 15, description: "Claim your first reward after the round ends." },

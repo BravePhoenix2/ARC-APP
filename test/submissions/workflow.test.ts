@@ -210,8 +210,8 @@ test("submission authentication, AI policy, privacy, approval, rejection, and im
   };
   for (const [label, body] of [
     ["missing human-made declaration", { ...artApplication, humanMadeDeclaration: undefined }],
-    ["AI-generated original Art", { ...artApplication, creationMethod: "AI_GENERATED" }],
-    ["AI-assisted original Art", { ...artApplication, creationMethod: "AI_ASSISTED" }],
+    ["AI-generated ART BAZZAR", { ...artApplication, creationMethod: "AI_GENERATED" }],
+    ["AI-assisted ART BAZZAR", { ...artApplication, creationMethod: "AI_ASSISTED" }],
     ["insufficient creation process", { ...artApplication, creationProcess: "Painted by hand." }],
     ["external Art image URL", { ...artApplication, imageUrl: "https://example.com/art.png" }],
   ] as const) {

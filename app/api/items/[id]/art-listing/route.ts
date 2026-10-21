@@ -17,7 +17,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   const item = await prisma.item.findUnique({ where: { id: params.id } });
   if (!item) return NextResponse.json({ error: "Item not found." }, { status: 404, headers });
   if (item.creatorId !== session.userId) return NextResponse.json({ error: "Only this artwork's creator can link its listing." }, { status: 403, headers });
-  if (item.itemType !== "WEB2_ART") return NextResponse.json({ error: "This endpoint is for original Art listings." }, { status: 400, headers });
+  if (item.itemType !== "WEB2_ART") return NextResponse.json({ error: "This endpoint is for ART BAZZAR listings." }, { status: 400, headers });
   if (!protocol.isTestnet || !protocol.artMarket) return NextResponse.json({ error: "Art checkout is not configured for Arc Testnet yet." }, { status: 503, headers });
   let body;
   try { body = await limitedJson(request, 4096); } catch { return NextResponse.json({ error: "Invalid listing request." }, { status: 400, headers }); }

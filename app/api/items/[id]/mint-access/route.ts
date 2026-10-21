@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { sameOrigin } from "@/lib/walletAuth";
 import { getCreatorSession } from "@/lib/creatorSession";
 import { limitedJson } from "@/lib/requestBody";
-import { mintTree, tierNumber, validateMintConfig } from "@/lib/mintAccess";
+import { guaranteedUltimateAllocation, mintTree, tierNumber, validateMintConfig } from "@/lib/mintAccess";
 export const dynamic = "force-dynamic";
 const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: { "Cache-Control": "private, no-store" } });
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
@@ -65,6 +65,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       } else if (input.action === "freeze") {
         if (!plan) throw new Error("Save phase settings first.");
         validateMintConfig(plan.config, item.maxPerWallet ?? item.maxSupply ?? 1, item.mintPriceUsdc ?? 0);
+        guaranteedUltimateAllocation(plan.entries, plan.config as import("@/lib/mintAccess").MintPhaseConfig, item.maxSupply ?? 0);
         const { root } = mintTree(item.id, plan.entries);
         await tx.mintAccessPlan.update({ where: { id: plan.id }, data: { root, frozenAt: new Date() } });
       } else throw new Error("Unknown mint access action.");

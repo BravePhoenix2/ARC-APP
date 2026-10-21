@@ -68,7 +68,7 @@ database, then run `npm run db:generate` and `npm run db:push` after this update
 `/nfts/create` supports ERC-721 collectibles, ERC-1155 editions (one token ID with
 multiple copies), locked ERC-5192 soulbound NFTs, and transferable ERC-721
 membership passes. Membership benefits are described by the creator; expiry,
-subscriptions, and access enforcement are not automatic. Original Art still
+subscriptions, and access enforcement are not automatic. ART BAZZAR still
 requires human authorship review. AI-generated and assisted NFTs remain allowed.
 
 Applications retain the review step. After approval, the creator can deploy from
@@ -84,11 +84,14 @@ the creator approves requests or imports wallet addresses from text/CSV. Pending
 requests do not grant mint access. The roster is private to the creator; a
 collector sees only their own assignment and proof.
 
-Ultimate wallets have priority during the first window. Both Ultimate and FCFS
-wallets can mint during FCFS, and everyone can mint during public access. Supply
-is first come, first served within each window; Ultimate does not reserve supply
-or guarantee a mint. Phase limits and the original collection wallet cap both
-apply, including across windows. Allowlist prices cannot exceed the approved
+Each selected Ultimate wallet is guaranteed its full Ultimate allocation during
+the Ultimate window. Locking rejects a roster whose Ultimate wallet count times
+the Ultimate allocation exceeds collection supply. Public minting is blocked and
+FCFS wallets cannot mint during this window, so those allocations remain available.
+Unclaimed Ultimate tokens are released when FCFS opens. Both Ultimate and FCFS
+wallets can then mint subject to remaining supply; everyone can mint during public
+access. Phase limits and the original collection wallet cap both apply, including
+across windows. Allowlist prices cannot exceed the approved
 public price. Each collection supports up to 2,000 registered/imported wallets.
 
 Before deployment, review the roster and click **Lock allowlist for deployment**.
@@ -295,7 +298,7 @@ Use `npm start` after a successful build to serve the production build.
 
 Visit `/apply` and use **Sign in** to continue with email or a wallet through
 Privy. A verified Artiq account can submit an NFT collection
-or original art for review. Original art requires a
+or ART BAZZAR for review. ART BAZZAR requires a
 PNG/JPEG/WebP upload (up to 5 MB), a declaration that no generative AI was used,
 and at least 30 characters explaining the creation process. NFTs may use uploaded
 images or HTTPS image URLs and may declare human-made, AI-assisted, or AI-generated

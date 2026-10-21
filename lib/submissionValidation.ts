@@ -82,12 +82,12 @@ export function parseSubmission(body: unknown): SubmissionInput {
   let royaltyBps: number | null = null;
   let attributes: NftAttribute[] | undefined;
   if (b.itemType === "WEB2_ART") {
-    if (b.creationMethod && b.creationMethod !== "HUMAN") throw new SubmissionValidationError("AI-generated and AI-assisted work belongs in NFTs, not original Art.");
+    if (b.creationMethod && b.creationMethod !== "HUMAN") throw new SubmissionValidationError("AI-generated and AI-assisted work belongs in NFTs, not ART BAZZAR.");
     if (!humanMadeDeclaration) throw new SubmissionValidationError("Confirm that your original artwork was made without generative AI.");
     creationMethod = "HUMAN";
     creationProcess = requiredText("creationProcess", 2000, "Creation process");
     if (creationProcess.length < 30) throw new SubmissionValidationError("Describe your materials and creation process in at least 30 characters.");
-    if (!/^\/api\/uploads\/[a-z0-9]{20,40}$/.test(imageUrl)) throw new SubmissionValidationError("Upload the original Art image so it can be screened. Image links are allowed for NFTs.");
+    if (!/^\/api\/uploads\/[a-z0-9]{20,40}$/.test(imageUrl)) throw new SubmissionValidationError("Upload the ART BAZZAR image so it can be screened. Image links are allowed for NFTs.");
     if (!categories.includes(b.category as typeof categories[number])) throw new SubmissionValidationError("Choose an art category.");
     category = b.category as typeof categories[number];
   } else {

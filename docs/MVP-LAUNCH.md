@@ -26,7 +26,7 @@ Auctions, offers, social feeds, notification delivery, advanced rarity tools, mu
 - Seed items lack images; use real catalog assets for release.
 - Creator applications at `/apply` require a signed wallet session. Uploads and applications remain private until review; approval publishes an item atomically. Reviewers use `/admin/submissions` and the server-only `ARTIQ_ADMIN_WALLETS` allowlist (currently unconfigured at the user's request).
 - Public item creation is disabled to prevent bypassing review. Status and mint-time mutations require verified creator ownership (status also permits reviewers).
-- Original art requires an uploaded image, human-made declaration, creation details, server metadata screening, and a documented reviewer assessment before publication. AI-generated and AI-assisted NFTs remain allowed. Metadata checks cannot establish authorship. Optional Sightengine pixel analysis requires an owned account, server credentials, and explicit activation; it is disabled by default.
+- ART BAZZAR requires an uploaded image, human-made declaration, creation details, server metadata screening, and a documented reviewer assessment before publication. AI-generated and AI-assisted NFTs remain allowed. Metadata checks cannot establish authorship. Optional Sightengine pixel analysis requires an owned account, server credentials, and explicit activation; it is disabled by default.
 - Local database is SQLite. Hosting must preserve it or use a production database migration.
 - Contract deployment defaults and native-USDC precision comments/tests need review against the selected release network.
 
