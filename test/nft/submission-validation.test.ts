@@ -18,6 +18,13 @@ test("legacy NFT applications remain valid and default to collectibles", () => {
   assert.deepEqual(input.attributes, []);
 });
 
+test("image series require owned-upload URLs, ordered covers and one image per token", () => {
+  const images = [{ imageUrl: "/api/uploads/abcdefghijklmnopqrstuvwx", filename: "001.png" }, { imageUrl: "/api/uploads/zyxwvutsrqponmlkjihgfedc", filename: "002.png" }];
+  const body = { ...application, imageUrl: images[0].imageUrl, maxSupply: 2, images };
+  assert.deepEqual(parseSubmission(body).images, images);
+  for (const change of [{ maxSupply: 3 }, { nftKind: "EDITION" }, { metadataUri: "ipfs://custom/" }, { contractAddress: `0x${"1".repeat(40)}` }, { imageUrl: images[1].imageUrl }, { images: [images[0], images[0]] }, { images: [{ imageUrl: "https://example.com/1.png", filename: "1.png" }] }, { images: [{ ...images[0], filename: "../1.png" }] }, { images: Array(101).fill(images[0]) }]) assert.throws(() => parseSubmission({ ...body, ...change }), SubmissionValidationError);
+});
+
 test("all four NFT kinds normalize metadata, symbols, supply limits, and traits", () => {
   for (const nftKind of NFT_KINDS) {
     const input = parseSubmission({ ...application, nftKind, priceUsdc: "0", symbol: " night ", maxPerWallet: "2", royaltyBps: nftKind === "SOULBOUND" ? "0" : "750", metadataUri: " ipfs://bafyexample/metadata.json ", attributes: [{ trait_type: " Season ", value: " Winter " }, { trait_type: "Year", value: 2026 }] });

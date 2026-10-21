@@ -79,6 +79,7 @@ model User {
   privySessions PrivySession[]
   uploadedImages UploadedImage[]
   testerProfile TesterProfile?
+  artOrders ArtOrder[]
 }
 
 // Only verified sign-ins create tester profiles; seeded marketplace users do not count.
@@ -130,6 +131,8 @@ model Item {
   maxPerWallet    Int?
   royaltyBps      Int?
   attributes      Json?
+  imageCount      Int @default(1)
+  collectionImages CollectionImage[]
   contractAddress String?
   mintPriceUsdc   Float?
   mintStartTime   DateTime?
@@ -149,10 +152,29 @@ model Item {
   listings   Listing[]
   activities Activity[]
   submission Submission?
+  artOrder ArtOrder?
 
   @@index([itemType])
   @@index([nftKind])
   @@index([status])
+}
+
+// Delivery details stay private to the buyer and the artwork's creator.
+model ArtOrder {
+  id            String   @id @default(cuid())
+  itemId        String   @unique
+  item          Item     @relation(fields: [itemId], references: [id])
+  buyerId       String
+  buyer         User     @relation(fields: [buyerId], references: [id])
+  buyerWallet   String
+  chainId       Int
+  marketAddress String
+  listingId     String
+  txHash        String   @unique
+  delivery      Json
+  createdAt     DateTime @default(now())
+
+  @@index([buyerId, createdAt])
 }
 
 model Listing {
@@ -206,6 +228,8 @@ model Submission {
   maxPerWallet    Int?
   royaltyBps      Int?
   attributes      Json?
+  imageCount      Int @default(1)
+  collectionImages CollectionImage[]
   contractAddress String?
   maxSupply       Int?
   mintStartTime   DateTime?
@@ -225,6 +249,21 @@ model Submission {
 
   @@index([creatorId, createdAt])
   @@index([status, createdAt])
+}
+
+model CollectionImage {
+  id           String @id @default(cuid())
+  position     Int
+  filename     String
+  imageUrl     String
+  submissionId String?
+  submission   Submission? @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  itemId       String?
+  item         Item? @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@unique([submissionId, position])
+  @@unique([itemId, position])
+  @@index([imageUrl])
 }
 
 model WalletChallenge {
@@ -255,6 +294,7 @@ model UploadedImage {
   owner       User?   @relation(fields: [ownerUserId], references: [id])
   mimeType    String
   data        Bytes
+  byteSize    Int @default(0)
   createdAt   DateTime @default(now())
   screening   Json?
 

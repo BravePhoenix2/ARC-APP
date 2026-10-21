@@ -21,7 +21,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
   if (decision === "REJECTED" && !note) return NextResponse.json({ error: "Give the creator a reason for rejection." }, { status: 400 });
   try {
     const submission = await prisma.$transaction(async (tx) => {
-      const application = await tx.submission.findUnique({ where: { id: params.id } });
+      const application = await tx.submission.findUnique({ where: { id: params.id }, include: { collectionImages: { orderBy: { position: "asc" } } } });
       if (!application) throw new Error("NOT_FOUND");
       if (application.status !== "PENDING") throw new Error("ALREADY_REVIEWED");
       if (decision === "APPROVED" && application.itemType === "WEB2_ART") {
@@ -43,6 +43,8 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
           description: application.description, imageUrl: application.imageUrl,
           ...(application.itemType === "NFT" ? {
             nftKind: application.nftKind ?? "COLLECTIBLE", symbol: application.symbol,
+            imageCount: application.imageCount,
+            collectionImages: { create: application.collectionImages.map(({ position, filename, imageUrl }) => ({ position, filename, imageUrl })) },
             metadataUri: application.metadataUri, maxPerWallet: application.maxPerWallet,
             royaltyBps: application.nftKind === "SOULBOUND" ? 0 : application.royaltyBps,
             ...(application.attributes !== null ? { attributes: application.attributes as Prisma.InputJsonValue } : {}),

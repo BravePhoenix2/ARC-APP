@@ -29,6 +29,8 @@ let artListing: typeof import("../../app/api/items/[id]/art-listing/route");
 let detail: typeof import("../../app/api/items/[id]/route");
 let metadata: typeof import("../../app/api/items/[id]/metadata/route");
 let mintTime: typeof import("../../app/api/items/[id]/mint-time/route");
+let orderRoute: typeof import("../../app/api/items/[id]/order/route");
+let rpcChainId = 5042002;
 let ownerUserId: string;
 let ownerCookie: string;
 let otherCookie: string;
@@ -44,7 +46,7 @@ const listingEvent = parseAbi(["event ArtListed(uint256 indexed listingId,addres
 function hash(): Hash { return `0x${randomBytes(32).toString("hex")}`; }
 async function cookie(walletAddress: string) {
   const token = randomBytes(32).toString("hex");
-  await db.walletSession.create({ data: { walletAddress, tokenHash: createHash("sha256").update(token).digest("hex"), expiresAt: new Date(Date.now() + 60_000) } });
+  await db.walletSession.create({ data: { walletAddress, tokenHash: createHash("sha256").update(token).digest("hex"), expiresAt: new Date(Date.now() + 600_000) } });
   return `artiq_wallet_session=${token}`;
 }
 function request(path: string, body?: unknown, authentication = "owner", browserOrigin = origin, method = body === undefined ? "GET" : "POST") {
@@ -85,12 +87,14 @@ before(async () => {
   ownerCookie = await cookie(owner); otherCookie = await cookie(other);
   emailUserId = (await db.user.create({ data: { email: "email.creator@example.com", emailVerifiedAt: new Date() } })).id;
   const token = randomBytes(32).toString("hex");
-  await db.emailSession.create({ data: { userId: emailUserId, tokenHash: createHash("sha256").update(token).digest("hex"), expiresAt: new Date(Date.now() + 60_000) } });
+  await db.emailSession.create({ data: { userId: emailUserId, tokenHash: createHash("sha256").update(token).digest("hex"), expiresAt: new Date(Date.now() + 600_000) } });
   emailCookie = `artiq_email_session=${token}`;
   const { deploymentClient } = await import("../../lib/deploymentVerification");
   const originalReceipt = deploymentClient.getTransactionReceipt;
   const originalRead = deploymentClient.readContract;
+  const originalChain = deploymentClient.getChainId;
   Object.assign(deploymentClient, {
+    getChainId: async () => rpcChainId,
     getTransactionReceipt: async ({ hash: txHash }: { hash: Hash }) => { reads++; const result = receipts.get(txHash); if (!result) throw new Error("Receipt not found"); return result; },
     readContract: async ({ address, functionName, args }: { address: Address; functionName: string; args?: unknown[] }) => {
       reads++;
@@ -100,12 +104,13 @@ before(async () => {
       return result;
     },
   });
-  restore = () => Object.assign(deploymentClient, { getTransactionReceipt: originalReceipt, readContract: originalRead });
+  restore = () => Object.assign(deploymentClient, { getTransactionReceipt: originalReceipt, readContract: originalRead, getChainId: originalChain });
   [deployment, artListing, detail, metadata, mintTime] = await Promise.all([
     import("../../app/api/items/[id]/deployment/route"), import("../../app/api/items/[id]/art-listing/route"),
     import("../../app/api/items/[id]/route"), import("../../app/api/items/[id]/metadata/route"),
     import("../../app/api/items/[id]/mint-time/route"),
   ]);
+  orderRoute = await import("../../app/api/items/[id]/order/route");
 });
 after(async () => { restore?.(); await db?.$disconnect(); rmSync(directory, { recursive: true, force: true }); });
 
@@ -301,4 +306,73 @@ test("Art listing links require approved artwork, native USDC price, seller owne
   assert.equal(current.artListingId, "1");
   assert.equal(current.artListingSeller?.toLowerCase(), owner.toLowerCase());
   assert.equal(current.sold, false, "linking a listing does not fabricate a purchase");
+});
+
+const delivery = { recipient: "Test Collector", phone: "+234 800 123 4567", addressLine1: "12 Example Street", addressLine2: "", city: "Lagos", region: "Lagos", postalCode: "100001", country: "Nigeria", instructions: "Call on arrival" };
+const purchaseEvent = parseAbi(["event ArtPurchased(uint256 indexed listingId,address indexed buyer,uint256 price)"]);
+async function purchasedArt() {
+  const item = await db.item.create({ data: { creatorId: ownerUserId, itemType: "WEB2_ART", title: "Delivery test", priceUsdc: 25, artListingId: "42", artListingSeller: owner, quantityAvailable: 1 } });
+  const txHash = hash();
+  const price = parseUnits("25", 18);
+  receipts.set(txHash, { status: "success", to: market, from: other, logs: [{ address: market, topics: encodeEventTopics({ abi: purchaseEvent, eventName: "ArtPurchased", args: { listingId: BigInt(42), buyer: other } }), data: encodeAbiParameters([{ type: "uint256" }], [price]) }] });
+  settings.set(market.toLowerCase(), { listings: [owner, keccak256(toHex(item.id)), price, other, false] });
+  return { item, txHash, params: { params: { id: item.id } } };
+}
+
+test("delivery orders require a bound buyer, valid address and same-origin request before RPC", async () => {
+  const { item, txHash, params } = await purchasedArt();
+  const path = `/api/items/${item.id}/order`;
+  const payload = { txHash, delivery };
+  const before = reads;
+  assert.equal((await orderRoute.POST(request(path, payload, "anonymous"), params)).status, 401);
+  assert.equal((await orderRoute.POST(request(path, payload, "other", "https://attacker.example"), params)).status, 403);
+  assert.equal((await orderRoute.POST(request(path, payload, "email"), params)).status, 403);
+  assert.equal((await orderRoute.POST(request(path, payload, "owner"), params)).status, 403);
+  assert.equal((await orderRoute.POST(request(path, { ...payload, delivery: { ...delivery, addressLine1: "" } }, "other"), params)).status, 400);
+  assert.equal((await orderRoute.POST(request(path, { ...payload, delivery: { ...delivery, phone: "not-a-phone" } }, "other"), params)).status, 400);
+  assert.equal(reads, before);
+  assert.equal(await db.artOrder.count({ where: { itemId: item.id } }), 0);
+});
+
+test("purchase verification rejects forged, reverted, foreign-chain and unrelated listing receipts", async () => {
+  const { item, txHash, params } = await purchasedArt();
+  const path = `/api/items/${item.id}/order`;
+  const payload = { txHash, delivery };
+  const receipt = receipts.get(txHash)!;
+  const original = { ...receipt };
+  for (const [change, status] of [[{ status: "reverted" }, 400], [{ to: factory }, 400], [{ from: owner }, 403], [{ logs: [] }, 400]] as const) {
+    Object.assign(receipt, original, change);
+    assert.equal((await orderRoute.POST(request(path, payload, "other"), params)).status, status);
+  }
+  Object.assign(receipt, original);
+  rpcChainId = 1;
+  try { assert.equal((await orderRoute.POST(request(path, payload, "other"), params)).status, 400); }
+  finally { rpcChainId = 5042002; }
+  const listing = settings.get(market.toLowerCase())!.listings as unknown[];
+  listing[1] = keccak256(toHex("different-artwork"));
+  assert.equal((await orderRoute.POST(request(path, payload, "other"), params)).status, 400);
+  assert.equal(await db.artOrder.count({ where: { itemId: item.id } }), 0);
+  assert.equal((await db.item.findUniqueOrThrow({ where: { id: item.id } })).sold, false);
+});
+
+test("confirmed orders are idempotent and delivery stays private to buyer and creator", async () => {
+  const { item, txHash, params } = await purchasedArt();
+  const path = `/api/items/${item.id}/order`;
+  const response = await orderRoute.POST(request(path, { txHash, delivery }, "other"), params);
+  assert.equal(response.status, 200);
+  const saved = (await response.json()).order;
+  assert.deepEqual(saved.delivery, delivery);
+  assert.equal((await db.item.findUniqueOrThrow({ where: { id: item.id } })).sold, true);
+  assert.equal((await orderRoute.POST(request(path, { txHash, delivery: { ...delivery, city: "Changed" } }, "other"), params)).status, 200);
+  assert.equal(await db.artOrder.count({ where: { itemId: item.id } }), 1);
+  for (const login of ["owner", "other"]) {
+    const result = await orderRoute.GET(request(path, undefined, login), params);
+    assert.equal(result.status, 200); assert.deepEqual((await result.json()).order.delivery, delivery);
+    assert.equal(result.headers.get("cache-control"), "private, no-store");
+  }
+  assert.equal((await orderRoute.GET(request(path, undefined, "anonymous"), params)).status, 401);
+  const stranger = await orderRoute.GET(request(path, undefined, "email"), params);
+  assert.deepEqual(await stranger.json(), { order: null });
+  const publicItem = await detail.GET(request(`/api/items/${item.id}`, undefined, "anonymous"), params);
+  assert.ok(!JSON.stringify(await publicItem.json()).includes(delivery.addressLine1));
 });

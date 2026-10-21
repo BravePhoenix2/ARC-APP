@@ -9,8 +9,8 @@ export function canonicalAppOrigin(): string {
   return url.origin;
 }
 
-export function itemMetadataUri(item: { id: string; metadataUri: string | null }): string {
-  return item.metadataUri || `${canonicalAppOrigin()}/api/items/${encodeURIComponent(item.id)}/metadata`;
+export function itemMetadataUri(item: { id: string; metadataUri: string | null; imageCount?: number }): string {
+  return item.metadataUri || `${canonicalAppOrigin()}/api/items/${encodeURIComponent(item.id)}/metadata${(item.imageCount ?? 1) > 1 ? "/" : ""}`;
 }
 
 export function publicImageUrl(imageUrl: string | null): string | undefined {

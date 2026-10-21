@@ -8,7 +8,7 @@ const headers = { "Cache-Control": "private, no-store" };
 
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   const [item, session] = await Promise.all([
-    prisma.item.findUnique({ where: { id: params.id }, include: { creator: { select: { walletAddress: true, username: true } } } }),
+    prisma.item.findUnique({ where: { id: params.id }, include: { creator: { select: { walletAddress: true, username: true } }, collectionImages: { orderBy: { position: "asc" } } } }),
     getCreatorSession(request, false),
   ]);
   if (!item) return NextResponse.json({ error: "Item not found." }, { status: 404, headers });

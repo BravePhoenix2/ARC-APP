@@ -10,11 +10,13 @@ export const deploymentClient = createPublicClient({ chain: arcChain, transport:
 const verificationAbi = parseAbi([
   "function royaltyInfo(uint256 tokenId,uint256 salePrice) view returns (address receiver,uint256 royaltyAmount)",
   "function collectionCreator(address) view returns (address)",
+  "function supportsImageSeries() pure returns (bool)",
 ]);
 
 export class DeploymentVerificationError extends Error {}
 
 export async function verifiedCollection(item: Item, hash: Hash, factory: Address): Promise<{ address: Address; creator: Address }> {
+  if (item.imageCount > 1 && !await deploymentClient.readContract({ address: factory, abi: verificationAbi, functionName: "supportsImageSeries" })) throw new DeploymentVerificationError("The configured factory does not support image series.");
   const receipt = await deploymentClient.getTransactionReceipt({ hash });
   if (receipt.status !== "success" || receipt.to?.toLowerCase() !== factory.toLowerCase()) throw new DeploymentVerificationError("The transaction must successfully create a collection through the configured Artiq factory.");
   const logs = parseEventLogs({ abi: factoryAbi, eventName: "CollectionCreated", logs: receipt.logs.filter((log) => log.address.toLowerCase() === factory.toLowerCase()), strict: true });

@@ -65,7 +65,7 @@ function ItemCard({ item }: { item: MarketplaceItem }) {
   const badge = isNft && item.status ? NFT_STATUS_STYLE[item.status] : null;
 
   return (
-    <Link href={isNft ? `/nfts/${item.id}` : `/art/${item.id}`} className="gallery-card block overflow-hidden focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#b55fbe]">
+    <Link prefetch={false} href={isNft ? `/nfts/${item.id}` : `/art/${item.id}`} className="gallery-card block cursor-pointer overflow-hidden focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#b55fbe]">
       <div className="gallery-card-media relative aspect-square bg-[var(--chip-bg)]">
         {item.imageUrl ? (
           <Image src={item.imageUrl} alt={item.title} fill unoptimized sizes="(min-width: 1280px) 22vw, (min-width: 640px) 30vw, 45vw" className="object-cover" />
@@ -103,6 +103,7 @@ function ItemCard({ item }: { item: MarketplaceItem }) {
               ? `${item.priceUsdc} USDC`
               : "Price — USDC"}
         </p>
+        <span className="mt-3 inline-flex rounded-full border border-[#b55fbe]/30 px-3 py-2 text-xs font-semibold text-[#b55fbe]">{isNft ? "View collection & mint" : "View artwork & checkout"} ↗</span>
       </div>
     </Link>
   );

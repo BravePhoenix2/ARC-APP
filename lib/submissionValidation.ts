@@ -1,5 +1,6 @@
 import { isAddress } from "viem";
 import { isNftKind, type NftAttribute, type NftKind } from "./nftTypes";
+import { parseCollectionImages, type CollectionImageInput } from "./collectionImages";
 
 const categories = ["PAINTING", "RUG", "COSMETIC", "OTHER"] as const;
 export type SubmissionInput = {
@@ -23,6 +24,7 @@ export type SubmissionInput = {
   maxPerWallet: number | null;
   royaltyBps: number | null;
   attributes?: NftAttribute[];
+  images: CollectionImageInput[];
 };
 
 export class SubmissionValidationError extends Error {}
@@ -30,6 +32,8 @@ export class SubmissionValidationError extends Error {}
 export function parseSubmission(body: unknown): SubmissionInput {
   if (!body || typeof body !== "object" || Array.isArray(body)) throw new SubmissionValidationError("Invalid application.");
   const b = body as Record<string, unknown>;
+  let images: CollectionImageInput[];
+  try { images = parseCollectionImages(b.images); } catch (error) { throw new SubmissionValidationError((error as Error).message); }
   function requiredText(key: string, max: number, label: string) {
     const value = b[key];
     if (typeof value !== "string" || !value.trim() || value.trim().length > max) {
@@ -38,6 +42,7 @@ export function parseSubmission(body: unknown): SubmissionInput {
     return value.trim();
   }
   if (b.itemType !== "NFT" && b.itemType !== "WEB2_ART") throw new SubmissionValidationError("Choose NFT or Art.");
+  if (b.itemType !== "NFT" && images.length) throw new SubmissionValidationError("Image series are available for NFT collections only.");
   const creatorName = requiredText("creatorName", 80, "Creator name");
   const title = requiredText("title", 120, "Title");
   const description = requiredText("description", 4000, "Description");
@@ -88,11 +93,15 @@ export function parseSubmission(body: unknown): SubmissionInput {
   } else {
     if (b.nftKind != null && !isNftKind(b.nftKind)) throw new SubmissionValidationError("Choose a valid NFT type.");
     nftKind = isNftKind(b.nftKind) ? b.nftKind : "COLLECTIBLE";
+    if (images.length > 1 && nftKind === "EDITION") throw new SubmissionValidationError("Editions share one image. Choose Collectible for an image series.");
+    if (images.length && images[0].imageUrl !== imageUrl) throw new SubmissionValidationError("The first series image must be the collection cover.");
+    if (images.length > 1 && (b.metadataUri || b.contractAddress)) throw new SubmissionValidationError("Image series use app-generated metadata and a new collection deployment.");
     const supply = typeof b.maxSupply === "string" && /^\d+$/.test(b.maxSupply) ? Number(b.maxSupply) : b.maxSupply;
     if (typeof supply !== "number" || !Number.isSafeInteger(supply) || supply < 1 || supply > 1_000_000) {
       throw new SubmissionValidationError("Supply must be a whole number between 1 and 1,000,000.");
     }
     maxSupply = supply;
+    if (images.length > 1 && maxSupply !== images.length) throw new SubmissionValidationError("For an image series, supply must equal the number of images.");
     if (b.symbol != null && b.symbol !== "") {
       if (typeof b.symbol !== "string" || !/^[A-Z][A-Z0-9]{2,9}$/.test(b.symbol.trim().toUpperCase())) throw new SubmissionValidationError("Use 3–10 letters or numbers for the symbol, starting with a letter.");
       symbol = b.symbol.trim().toUpperCase();
@@ -136,5 +145,5 @@ export function parseSubmission(body: unknown): SubmissionInput {
       if (Number.isNaN(mintStartTime.getTime())) throw new SubmissionValidationError("Enter a valid mint start time.");
     }
   }
-  return { itemType: b.itemType, creationMethod, humanMadeDeclaration, creationProcess, creatorName, contactEmail, title, description, imageUrl, priceUsdc: Number(price), category, contractAddress, maxSupply, mintStartTime, nftKind, symbol, metadataUri, maxPerWallet, royaltyBps, ...(attributes ? { attributes } : {}) };
+  return { itemType: b.itemType, creationMethod, humanMadeDeclaration, creationProcess, creatorName, contactEmail, title, description, imageUrl, priceUsdc: Number(price), category, contractAddress, maxSupply, mintStartTime, nftKind, symbol, metadataUri, maxPerWallet, royaltyBps, images, ...(attributes ? { attributes } : {}) };
 }

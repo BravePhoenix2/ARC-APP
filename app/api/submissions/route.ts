@@ -26,7 +26,12 @@ export async function POST(request: NextRequest) {
   const session = await getCreatorSession(request);
   if (!session) return NextResponse.json({ error: "Sign in with email or your wallet before submitting." }, { status: 401 });
   try {
-    const input = parseSubmission(await limitedJson(request));
+    const input = parseSubmission(await limitedJson(request, 65_536));
+    const { images, ...details } = input;
+    if (images.length) {
+      const owned = await prisma.uploadedImage.count({ where: { id: { in: images.map((image) => image.imageUrl.split("/").pop()!) }, OR: [{ ownerUserId: session.userId }, ...(session.walletAddress ? [{ ownerWallet: session.walletAddress }] : [])] } });
+      if (owned !== images.length) return NextResponse.json({ error: "Every series image must be uploaded by your account." }, { status: 400 });
+    }
     // Check the queue before spending an optional detector operation. The
     // transaction repeats this check to handle concurrent submissions.
     const pending = await prisma.submission.count({ where: { creatorId: session.userId, status: "PENDING" } });
@@ -45,7 +50,7 @@ export async function POST(request: NextRequest) {
     const submission = await prisma.$transaction(async (tx) => {
       const pending = await tx.submission.count({ where: { creatorId: session.userId, status: "PENDING" } });
       if (pending >= 20) throw new Error("PENDING_LIMIT");
-      return tx.submission.create({ data: { ...input, ...(screening ? { screening } : {}), creatorId: session.userId } });
+      return tx.submission.create({ data: { ...details, imageCount: images.length || 1, ...(images.length ? { collectionImages: { create: images.map((image, index) => ({ ...image, position: index + 1 })) } } : {}), ...(screening ? { screening } : {}), creatorId: session.userId } });
     });
     return NextResponse.json({ submission }, { status: 201, headers: privateHeaders });
   } catch (error) {

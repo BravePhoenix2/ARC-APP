@@ -34,6 +34,22 @@ wallet-session, or authenticated submission evidence and is safe to repeat.
 
 ## NFT studio, auctions, and collector rewards
 
+NFT creators can select **Folder / series** in the creator form to upload a
+folder or multiple PNG, JPEG, or WebP images: up to 100 images, 5 MB per image,
+and 100 MB per selection. Files start in filename order; creators can move or
+remove them before submission. The first image is the cover and each image maps
+to one ERC-721 token, so supply equals the image count. Uploads are sequential,
+completed files survive a failure, and selecting the folder again skips completed
+filenames. Filenames must be unique across subfolders. ZIP archives are excluded.
+The account upload budget is 200 NFT images and 200 MB per hour.
+
+Reviewers inspect the entire series before approval. Approved collections show
+the gallery and expose numbered token metadata. Pending uploads remain private.
+Image series use generated metadata and require a new collection deployed through
+the updated studio factory; existing deployed contracts cannot be upgraded in
+place. ERC-1155 editions continue to share a single image. Back up the local
+database, then run `npm run db:generate` and `npm run db:push` after this update.
+
 `/nfts` lists reviewed collections with search, format filters, and price sorting.
 `/nfts/create` supports ERC-721 collectibles, ERC-1155 editions (one token ID with
 multiple copies), locked ERC-5192 soulbound NFTs, and transferable ERC-721
@@ -71,7 +87,13 @@ payments, paid reward entry, random draws, or eligibility inferred from an email
 address or an unverified historical database row. Free factory mints also qualify;
 one place per wallet does not establish one place per person.
 
-Art checkout records a test payment and credits the seller for withdrawal. It
+Art checkout collects a delivery address and records a test payment, crediting
+the seller for withdrawal. After the server verifies the Arc Testnet purchase,
+it stores a private order and marks the artwork sold. The buyer and creator can
+view delivery details on the artwork page; public item APIs never include them.
+If saving fails after payment, retry with the confirmed transaction hash without
+paying again. The first saved address is retained on duplicate submissions.
+Agree shipping costs and destinations with the creator before paying. Checkout
 does not escrow physical delivery or grant usage rights automatically. Art-market
 listing creation is permissionless on-chain; the Artiq UI only attaches receipts
 to approved artwork owned by the signed-in creator. Test USDC has no monetary

@@ -6,6 +6,7 @@ import {ArticEdition} from "./ArticEdition.sol";
 
 /// @notice Permissionless creator-owned collections and an authenticated mint-activity registry.
 contract ArticStudioFactory {
+    function supportsImageSeries() external pure returns (bool) { return true; }
     struct CollectionInfo {
         address collection;
         address creator;

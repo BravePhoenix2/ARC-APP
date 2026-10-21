@@ -67,6 +67,43 @@ before(async () => {
 });
 after(async () => { await db?.$disconnect(); rmSync(directory, { recursive: true, force: true }); });
 
+test("a folder series stays private until review and publishes distinct ordered token images", async () => {
+  const images = [];
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=", "base64");
+  for (let index = 1; index <= 3; index++) {
+    const form = new FormData(); form.set("file", new File([png], `${index}.png`, { type: "image/png" })); form.set("itemType", "NFT");
+    const uploaded = await uploads.POST(new NextRequest(`${origin}/api/uploads`, { method: "POST", headers: { Origin: origin, Cookie: ownerCookie, "X-Wallet-Address": owner }, body: form }));
+    assert.equal(uploaded.status, 201);
+    images.push({ imageUrl: (await uploaded.json()).url as string, filename: `${index}.png` });
+  }
+  const body = { ...application, maxSupply: 3, images, imageUrl: images[0].imageUrl };
+  assert.equal((await submissions.POST(request("/api/submissions", "POST", body, otherCookie))).status, 400);
+  const created = await submissions.POST(request("/api/submissions", "POST", body, ownerCookie));
+  assert.equal(created.status, 201); const { submission } = await created.json();
+  assert.equal(submission.imageCount, 3);
+  const finalImageId = images[2].imageUrl.split("/").pop()!;
+  assert.equal((await imageRoute.GET(request(images[2].imageUrl), { params: { id: finalImageId } })).status, 404);
+  const queue = await adminQueue.GET(request("/api/admin/submissions", "GET", undefined, reviewerCookie));
+  const queued = (await queue.json()).submissions.find((entry: { id: string }) => entry.id === submission.id);
+  assert.deepEqual(queued.collectionImages.map((image: { filename: string }) => image.filename), ["1.png", "2.png", "3.png"]);
+  const result = await review.PATCH(request("/api/admin/submissions/review", "PATCH", { decision: "APPROVED" }, reviewerCookie), { params: { id: submission.id } });
+  assert.equal(result.status, 200); const itemId = (await result.json()).submission.itemId;
+  const published = await imageRoute.GET(request(images[2].imageUrl), { params: { id: finalImageId } });
+  assert.equal(published.status, 200); assert.match(published.headers.get("cache-control")!, /public/);
+  const { itemMetadataUri } = await import("../../lib/itemMetadata");
+  assert.match(itemMetadataUri(await db.item.findUniqueOrThrow({ where: { id: itemId } })), /\/metadata\/$/);
+  const tokenMetadata = await import("../../app/api/items/[id]/metadata/[tokenId]/route");
+  for (let index = 1; index <= 3; index++) {
+    const metadata = await tokenMetadata.GET(request(`/api/items/${itemId}/metadata/${index}`), { params: { id: itemId, tokenId: String(index) } });
+    assert.equal(metadata.status, 200); const json = await metadata.json();
+    assert.equal(new URL(json.image).pathname, images[index - 1].imageUrl); assert.equal(json.name, `${application.title} #${index}`);
+  }
+  for (const tokenId of ["0", "4", "-1", "foo"]) assert.equal((await tokenMetadata.GET(request("/metadata"), { params: { id: itemId, tokenId } })).status, 404);
+  // Remove this fixture so later legacy count assertions keep their original scope.
+  await db.collectionImage.deleteMany({ where: { OR: [{ itemId }, { submissionId: submission.id }] } });
+  await db.submission.delete({ where: { id: submission.id } }); await db.item.delete({ where: { id: itemId } });
+});
+
 test("submission authentication, AI policy, privacy, approval, rejection, and image workflow", async () => {
   assert.equal((await submissions.POST(request("/api/submissions", "POST", application))).status, 401);
   assert.equal((await submissions.POST(request("/api/submissions", "POST", application, ownerCookie, "https://evil.example"))).status, 403);

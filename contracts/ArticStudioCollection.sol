@@ -5,6 +5,7 @@ import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {ERC2981} from "@openzeppelin/contracts/token/common/ERC2981.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 
 interface IArticMintRegistry {
     function notifyMint(address minter) external;
@@ -83,6 +84,8 @@ contract ArticStudioCollection is ERC721, ERC2981, Ownable, ReentrancyGuard {
 
     function tokenURI(uint256 tokenId) public view override returns (string memory) {
         _requireOwned(tokenId);
+        bytes memory uri = bytes(metadataURI);
+        if (uri.length > 0 && uri[uri.length - 1] == bytes1("/")) return string.concat(metadataURI, Strings.toString(tokenId));
         return metadataURI;
     }
 

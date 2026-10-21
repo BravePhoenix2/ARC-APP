@@ -13,7 +13,7 @@ async function deployStudio() {
 
 async function createCollection(factory, creator, options = {}) {
   const start = options.start ?? (await time.latest()) + 30;
-  const args = ["Test Collection", "TEST", "ipfs://metadata.json", options.price ?? PRICE, start,
+  const args = ["Test Collection", "TEST", options.metadataURI ?? "ipfs://metadata.json", options.price ?? PRICE, start,
     options.supply ?? 10, options.perWallet ?? 3, options.royalty ?? 500];
   const tx = options.edition
     ? await factory.connect(creator).createEdition(...args)
@@ -26,6 +26,16 @@ async function createCollection(factory, creator, options = {}) {
 }
 
 describe("NFT Studio", function () {
+  it("assigns a different metadata URI to each token in a numbered image series", async function () {
+    const { factory, creator, minter } = await loadFixture(deployStudio);
+    expect(await factory.supportsImageSeries()).to.equal(true);
+    const { collection, start } = await createCollection(factory, creator, { metadataURI: "https://artiq.example/api/items/series/metadata/", supply: 3 });
+    await expect(collection.tokenURI(1)).to.be.revertedWithCustomError(collection, "ERC721NonexistentToken");
+    await time.increaseTo(start);
+    await collection.connect(minter).mint(3, { value: PRICE * 3n });
+    for (let id = 1; id <= 3; id++) expect(await collection.tokenURI(id)).to.equal(`https://artiq.example/api/items/series/metadata/${id}`);
+    expect(await collection.metadataURI()).to.equal("https://artiq.example/api/items/series/metadata/");
+  });
   it("creates creator-owned ERC-721 and ERC-1155 collections and indexes their standard", async function () {
     const { factory, creator } = await loadFixture(deployStudio);
     const { collection: nft, event } = await createCollection(factory, creator);

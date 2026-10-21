@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
   const status = request.nextUrl.searchParams.get("status") ?? "PENDING";
   if (status !== "PENDING" && status !== "APPROVED" && status !== "REJECTED") return NextResponse.json({ error: "Invalid review status." }, { status: 400 });
   const submissions = await prisma.submission.findMany({
-    where: { status }, include: { creator: { select: { walletAddress: true, email: true } } },
+    where: { status }, include: { creator: { select: { walletAddress: true, email: true } }, collectionImages: { orderBy: { position: "asc" } } },
     orderBy: { createdAt: "asc" }, take: 100,
   });
   return NextResponse.json({ submissions }, { headers: { "Cache-Control": "private, no-store" } });

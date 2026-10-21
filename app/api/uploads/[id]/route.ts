@@ -6,7 +6,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
   if (!/^[a-z0-9]{20,40}$/.test(params.id)) return new Response("Not found", { status: 404 });
   const image = await prisma.uploadedImage.findUnique({ where: { id: params.id } });
   if (!image) return new Response("Not found", { status: 404 });
-  const published = await prisma.item.findFirst({ where: { imageUrl: `/api/uploads/${params.id}` }, select: { id: true } });
+  const published = await prisma.item.findFirst({ where: { OR: [{ imageUrl: `/api/uploads/${params.id}` }, { collectionImages: { some: { imageUrl: `/api/uploads/${params.id}` } } }] }, select: { id: true } });
   if (!published) {
     const session = await getCreatorSession(request, false);
     if (!session || (!session.isAdmin && session.userId !== image.ownerUserId && !(session.walletAddress && session.walletAddress === image.ownerWallet))) return new Response("Not found", { status: 404 });

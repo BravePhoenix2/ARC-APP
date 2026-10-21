@@ -13,6 +13,7 @@ export const protocol = {
 };
 
 export const factoryAbi = parseAbi([
+  "function supportsImageSeries() pure returns (bool)",
   "function create721(string name_,string symbol_,string metadataURI_,uint256 mintPrice_,uint256 mintStartTime_,uint256 maxSupply_,uint256 maxPerWallet_,uint96 royaltyBps_,bool soulbound_) returns (address)",
   "function createEdition(string name_,string symbol_,string metadataURI_,uint256 mintPrice_,uint256 mintStartTime_,uint256 maxSupply_,uint256 maxPerWallet_,uint96 royaltyBps_) returns (address)",
   "function hasMinted(address) view returns (bool)",
@@ -68,6 +69,7 @@ export const artMarketAbi = parseAbi([
   "function pendingReturns(address) view returns (uint256)",
   "function withdraw(address receiver)",
   "event ArtListed(uint256 indexed listingId,address indexed seller,bytes32 indexed artId,uint256 price)",
+  "event ArtPurchased(uint256 indexed listingId,address indexed buyer,uint256 price)",
 ]);
 
 // Native USDC uses 18 decimals. The optional ERC-20 interface's 6 decimals

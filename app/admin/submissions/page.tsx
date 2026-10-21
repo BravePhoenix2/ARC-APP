@@ -9,6 +9,7 @@ import ArticLogo from "@/components/ArticLogo";
 import Atmosphere from "@/components/Atmosphere";
 import ConnectWalletButton from "@/components/ConnectWalletButton";
 import ThemeToggle from "@/components/ThemeToggle";
+import CollectionImageGallery, { type GalleryImage } from "@/components/CollectionImageGallery";
 import { usePrivySession } from "@/hooks/usePrivySession";
 import { arcChain } from "@/lib/arcConfig";
 import { NFT_KIND_INFO, type NftKind, type NftAttribute } from "@/lib/nftTypes";
@@ -30,6 +31,7 @@ type ImageScreening = {
 };
 
 type Submission = {
+  collectionImages?: GalleryImage[];
   id: string;
   title: string;
   description: string;
@@ -212,6 +214,7 @@ function ReviewCard({ submission, onReview }: {
             {isNft && submission.contractAddress && <div className="col-span-2 min-w-0"><dt className="text-xs text-[var(--faint-text)]">Collection contract</dt><dd className="mt-1 break-all font-mono text-xs leading-5">{submission.contractAddress}</dd></div>}
           </dl>
           <CreationDetails submission={submission} />
+          {isNft && <CollectionImageGallery images={submission.collectionImages} />}
           {submission.status === "PENDING" ? (
             <div className="mt-6 border-t border-[var(--border-soft)] pt-5">
               {!isNft && !artRequirementsMet && <p className="mb-5 rounded-xl border border-[#EF476F]/25 bg-[#EF476F]/5 p-4 text-sm leading-6 text-[var(--page-text)]">This application cannot be approved. Ask the creator to resubmit with a human-made declaration, at least 30 characters describing the creation process, and an uploaded artwork image with a screening report. You can reject this application with that feedback.</p>}
