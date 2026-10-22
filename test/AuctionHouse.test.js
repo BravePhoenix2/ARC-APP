@@ -13,7 +13,7 @@ async function deployPlatform() {
   const [collectionAddress] = await factory.getCollectionsByCreator(creator.address);
   const nft = await ethers.getContractAt("ArticStudioCollection", collectionAddress);
   await nft.connect(seller).mint(2);
-  return { factory, art, auction, nft, creator, seller, bidder, other, sponsor, ineligible };
+  return { factory, art, auction, nft, creator, seller, bidder, other, sponsor, ineligible, treasury };
 }
 
 async function createAuction(context, options = {}) {
@@ -116,6 +116,143 @@ describe("ArticAuctionHouse auctions", function () {
     await auction.connect(seller).claimNFT(1, seller.address);
     expect(await nft.ownerOf(1)).to.equal(seller.address);
     expect(await auction.pendingReturns(seller.address)).to.equal(0);
+  });
+});
+
+describe("ArticAuctionHouse digital and physical asset auctions", function () {
+  it("creates both asset types alongside NFTs without changing existing auction fields", async function () {
+    const ctx = await loadFixture(deployPlatform);
+    const { auction, seller, nft } = ctx;
+    expect(await auction.supportsAssetAuctions()).to.equal(true);
+    const ends = await createAuction(ctx);
+    expect((await auction.auctions(1)).length).to.equal(9);
+    expect((await auction.auctions(1)).nft).to.equal(await nft.getAddress());
+    expect((await auction.auctionAssets(1)).assetKey).to.equal(ethers.ZeroHash);
+    expect((await auction.auctionAssets(1)).assetKind).to.equal(0);
+
+    for (const kind of [1, 2]) {
+      const assetKey = ethers.id(`asset-kind-${kind}`);
+      const id = kind + 1;
+      await expect(auction.connect(seller).createAssetAuction(assetKey, kind, USDC(1), ends))
+        .to.emit(auction, "AssetAuctionCreated").withArgs(id, seller.address, assetKey, kind, USDC(1), ends);
+      const asset = await auction.auctionAssets(id);
+      const listing = await auction.auctions(id);
+      expect(asset.assetKey).to.equal(assetKey);
+      expect(asset.assetKind).to.equal(kind);
+      expect(await auction.assetAuctionIds(seller.address, assetKey)).to.equal(id);
+      expect(listing.length).to.equal(9);
+      expect(listing.seller).to.equal(seller.address);
+      expect(listing.nft).to.equal(ethers.ZeroAddress);
+      expect(listing.tokenId).to.equal(0);
+      expect(listing.reservePrice).to.equal(USDC(1));
+      expect(listing.endsAt).to.equal(ends);
+      expect(listing.settled).to.equal(false);
+      expect(await auction.minimumBid(id)).to.equal(USDC(1));
+    }
+    expect(await auction.nextAuctionId()).to.equal(4);
+  });
+
+  it("keeps one recoverable auction per seller and asset key while isolating other sellers", async function () {
+    const { auction, seller, other } = await loadFixture(deployPlatform);
+    const assetKey = ethers.id("recoverable-asset");
+    const ends = (await time.latest()) + 120;
+    await auction.connect(seller).createAssetAuction(assetKey, 1, USDC(1), ends);
+    await expect(auction.connect(seller).createAssetAuction(assetKey, 1, USDC(1), ends))
+      .to.be.revertedWithCustomError(auction, "AssetAlreadyAuctioned").withArgs(1);
+    await auction.connect(other).createAssetAuction(assetKey, 2, USDC(2), ends);
+    expect(await auction.assetAuctionIds(seller.address, assetKey)).to.equal(1);
+    expect(await auction.assetAuctionIds(other.address, assetKey)).to.equal(2);
+    await auction.connect(seller).cancelAuction(1);
+    await expect(auction.connect(seller).createAssetAuction(assetKey, 1, USDC(1), ends))
+      .to.be.revertedWithCustomError(auction, "AssetAlreadyAuctioned").withArgs(1);
+    expect(await auction.nextAuctionId()).to.equal(3);
+  });
+
+  it("rejects missing identifiers, unsupported kinds, zero reserves and invalid deadlines", async function () {
+    const { auction, seller } = await loadFixture(deployPlatform);
+    const assetKey = ethers.id("valid-asset");
+    const now = await time.latest();
+    for (const args of [
+      [ethers.ZeroHash, 1, USDC(1), now + 120],
+      [assetKey, 0, USDC(1), now + 120],
+      [assetKey, 3, USDC(1), now + 120],
+      [assetKey, 255, USDC(1), now + 120],
+      [assetKey, 1, 0, now + 120],
+      [assetKey, 1, USDC(1), now + 59],
+      [assetKey, 2, USDC(1), now + 30 * 24 * 60 * 60 + 120],
+    ]) {
+      await expect(auction.connect(seller).createAssetAuction(...args)).to.be.revertedWithCustomError(auction, "InvalidConfiguration");
+    }
+    expect(await auction.nextAuctionId()).to.equal(1);
+    const starts = (await time.latest()) + 10;
+    await time.setNextBlockTimestamp(starts);
+    await auction.connect(seller).createAssetAuction(assetKey, 1, USDC(1), starts + 60);
+    await time.setNextBlockTimestamp(starts + 1);
+    await auction.connect(seller).createAssetAuction(ethers.id("last-allowed-end"), 2, USDC(1), starts + 1 + 30 * 24 * 60 * 60);
+  });
+
+  it("accepts repeated bids until the final second and rejects bids at the exact deadline", async function () {
+    const { auction, seller, bidder, other } = await loadFixture(deployPlatform);
+    const ends = (await time.latest()) + 120;
+    await auction.connect(seller).createAssetAuction(ethers.id("timed-digital"), 1, USDC(1), ends);
+    await expect(auction.connect(seller).bid(1, { value: USDC(1) })).to.be.revertedWithCustomError(auction, "SellerCannotBid");
+    await expect(auction.connect(bidder).bid(1, { value: USDC(1) - 1n })).to.be.revertedWithCustomError(auction, "BidTooLow");
+    await auction.connect(bidder).bid(1, { value: USDC(1) });
+    expect(await auction.minimumBid(1)).to.equal(USDC("1.05"));
+    await expect(auction.connect(other).bid(1, { value: USDC("1.05") - 1n })).to.be.revertedWithCustomError(auction, "BidTooLow");
+    await expect(auction.settle(1)).to.be.revertedWithCustomError(auction, "AuctionStillOpen");
+    await time.setNextBlockTimestamp(ends - 1);
+    await auction.connect(other).bid(1, { value: USDC("1.05") });
+    await time.setNextBlockTimestamp(ends);
+    await expect(auction.connect(bidder).bid(1, { value: USDC(2) })).to.be.revertedWithCustomError(auction, "AuctionUnavailable");
+    expect((await auction.auctions(1)).highestBidder).to.equal(other.address);
+    expect(await auction.pendingReturns(bidder.address)).to.equal(USDC(1));
+    await auction.settle(1);
+    await expect(auction.connect(bidder).bid(1, { value: USDC(2) })).to.be.revertedWithCustomError(auction, "AuctionUnavailable");
+  });
+
+  for (const [kind, label] of [[1, "digital"], [2, "physical"]]) {
+    it(`settles ${label} sales at the deadline and conserves refunds, proceeds and platform fees`, async function () {
+      const { auction, seller, bidder, other, creator, treasury } = await loadFixture(deployPlatform);
+      const ends = (await time.latest()) + 120;
+      await auction.connect(seller).createAssetAuction(ethers.id(`${label}-sale`), kind, USDC(1), ends);
+      await auction.connect(bidder).bid(1, { value: USDC(1) });
+      await auction.connect(other).bid(1, { value: USDC(2) });
+      await expect(auction.connect(seller).cancelAuction(1)).to.be.revertedWithCustomError(auction, "AuctionHasBids");
+      await time.setNextBlockTimestamp(ends);
+      await expect(auction.connect(creator).settle(1)).to.emit(auction, "AuctionSettled").withArgs(1, other.address, USDC(2));
+      expect(await time.latest()).to.equal(ends);
+      expect(await auction.pendingReturns(bidder.address)).to.equal(USDC(1));
+      expect(await auction.pendingReturns(seller.address)).to.equal(USDC("1.95"));
+      expect(await auction.pendingReturns(creator.address)).to.equal(0);
+      expect(await auction.pendingPlatformFees()).to.equal(USDC("0.05"));
+      expect(await ethers.provider.getBalance(await auction.getAddress())).to.equal(USDC(3));
+      await expect(auction.connect(other).claimNFT(1, other.address)).to.be.revertedWithCustomError(auction, "AuctionUnavailable");
+      await expect(auction.connect(seller).claimNFT(1, seller.address)).to.be.revertedWithCustomError(auction, "AuctionUnavailable");
+      expect((await auction.auctions(1)).nftClaimed).to.equal(false);
+      await expect(auction.settle(1)).to.be.revertedWithCustomError(auction, "AuctionUnavailable");
+      await expect(auction.connect(bidder).withdraw(bidder.address)).to.changeEtherBalances([auction, bidder], [-USDC(1), USDC(1)]);
+      await expect(auction.connect(seller).withdraw(seller.address)).to.changeEtherBalances([auction, seller], [-USDC("1.95"), USDC("1.95")]);
+      await expect(auction.connect(treasury).withdrawPlatformFees(treasury.address)).to.changeEtherBalances([auction, treasury], [-USDC("0.05"), USDC("0.05")]);
+      expect(await ethers.provider.getBalance(await auction.getAddress())).to.equal(0);
+    });
+  }
+
+  it("cancels or settles unsold assets without inventing an NFT claim or charging a fee", async function () {
+    const { auction, seller, bidder } = await loadFixture(deployPlatform);
+    const ends = (await time.latest()) + 120;
+    await auction.connect(seller).createAssetAuction(ethers.id("cancelled-digital"), 1, USDC(1), ends);
+    await expect(auction.connect(bidder).cancelAuction(1)).to.be.revertedWithCustomError(auction, "NotSeller");
+    await expect(auction.connect(seller).cancelAuction(1)).to.emit(auction, "AuctionCancelled").withArgs(1);
+    await expect(auction.connect(bidder).bid(1, { value: USDC(1) })).to.be.revertedWithCustomError(auction, "AuctionUnavailable");
+    await expect(auction.connect(seller).claimNFT(1, seller.address)).to.be.revertedWithCustomError(auction, "AuctionUnavailable");
+    await auction.connect(seller).createAssetAuction(ethers.id("unsold-physical"), 2, USDC(1), ends);
+    await time.increaseTo(ends);
+    await auction.settle(2);
+    await expect(auction.connect(seller).claimNFT(2, seller.address)).to.be.revertedWithCustomError(auction, "AuctionUnavailable");
+    expect(await auction.pendingReturns(seller.address)).to.equal(0);
+    expect(await auction.pendingPlatformFees()).to.equal(0);
+    expect(await ethers.provider.getBalance(await auction.getAddress())).to.equal(0);
   });
 });
 

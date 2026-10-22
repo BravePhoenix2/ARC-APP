@@ -75,6 +75,11 @@ export const collectionAbi = parseAbi([
 ]);
 
 export const auctionAbi = parseAbi([
+  "function supportsAssetAuctions() pure returns (bool)",
+  "function createAssetAuction(bytes32 assetKey,uint8 assetKind,uint256 reservePrice,uint64 endsAt) returns (uint256 auctionId)",
+  "function auctionAssets(uint256) view returns (bytes32 assetKey,uint8 assetKind)",
+  "function assetAuctionIds(address seller,bytes32 assetKey) view returns (uint256)",
+  "event AssetAuctionCreated(uint256 indexed auctionId,address indexed seller,bytes32 indexed assetKey,uint8 assetKind,uint256 reservePrice,uint64 endsAt)",
   "function nextAuctionId() view returns (uint256)",
   "function auctions(uint256) view returns (address seller,address nft,uint256 tokenId,uint256 reservePrice,address highestBidder,uint256 highestBid,uint64 endsAt,bool settled,bool nftClaimed)",
   "function createAuction(address nft,uint256 tokenId,uint256 reservePrice,uint64 endsAt) returns (uint256)",

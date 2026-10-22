@@ -5,7 +5,7 @@ Next.js marketplace with Prisma/SQLite and Solidity contracts.
 ## Marketplace revenue
 
 New studio deployments collect a commission from paid NFT mints, original-art
-purchases, and settled NFT auctions. Fees are included in the sale price: at
+purchases, and settled asset and NFT auctions. Fees are included in the sale price: at
 2.5%, a 100 USDC sale credits 2.50 to the platform and 97.50 to the seller before
 any auction creator royalty. Gas is separate. Creator royalties belong to the
 creator and are separate from platform revenue. Free mints, outbid refunds,
@@ -13,7 +13,7 @@ cancelled/unsold auctions, and reward pools carry no platform commission.
 
 `/settings/protocol` offers two presets and custom rates up to 10%:
 
-| Preset | Primary NFT mints | Art sales and NFT auctions |
+| Preset | Primary NFT mints | Art sales and all auctions |
 | --- | --- | --- |
 | Standard | 2.5% | 2.5% |
 | OpenSea-style | 10% | 1% |
@@ -63,6 +63,66 @@ their market address when their creation receipt is verified. Old auction houses
 are retained in `NEXT_PUBLIC_LEGACY_AUCTION_HOUSE_ADDRESSES` (comma-separated) and
 remain selectable on `/auctions` for NFT claims, refunds, seller withdrawals, and
 reward claims. No NFT, balance, or live auction is migrated between contracts.
+
+## Digital and physical asset auctions
+
+Open **Auctions** (`/auctions`) to browse or list digital downloads and physical
+assets. Signed-in users with a linked wallet can upload a cover photo, describe
+what is included, set a starting price, specify delivery terms, and choose a
+closing time between one minute and 30 days away. Physical listings should state
+shipping destinations, costs, and delivery times. Digital listings require an
+HTTPS download link that stays private until the auction has a settled winner.
+
+Bids use native test USDC and are held by the auction contract. The first bid
+must meet the starting price; each later bid must increase the highest bid by
+at least 5%. The countdown follows chain time and bids refresh during the
+auction. Bids cannot be withdrawn while leading; outbid wallets can withdraw
+their entire previous bid. Sellers cannot bid on their own listings or cancel
+after the first bid. The contract rejects bids at or after the closing time.
+
+When the timer ends, the highest bidder wins. Anyone can finalize the auction
+with **Settle auction**, which makes seller proceeds and the platform commission
+withdrawable. A timer does not send a wallet transaction automatically. Listings
+with no bids end without a winner or platform fee. For digital and physical
+assets, seller payment releases at settlement; delivery is arranged separately
+and is not held in physical-delivery escrow. No NFT or proof of physical
+ownership is created for these listings.
+
+After settlement, only the winning verified wallet can retrieve a digital
+download link or submit a physical delivery address. The seller and winner can
+view saved physical delivery details; public listing APIs never return them.
+Delivery addresses are saved once so retrying cannot overwrite the original.
+Public listing metadata is committed on-chain, and bids are enabled only after
+the app verifies that the seller, asset, price, and deadline match that listing.
+
+Creation has two steps: save a private draft, then confirm its creation in the
+wallet. The listing appears publicly after the server verifies its receipt.
+**My auctions** includes unfinished drafts. A saved transaction hash lets the
+seller retry publication after a refresh or temporary API failure without
+creating another auction. The contract also rejects duplicate creation for the
+same seller and asset key. Download links and shipping details are never put in
+browser recovery storage.
+
+The original NFT auctions and community rewards remain under **NFT auctions &
+community rewards** on the same page. Asset listings keep their original auction
+house, including after a later upgrade. Previous houses remain selectable for
+older NFT claims, refunds, and rewards.
+
+For an existing installation, back up the database, then run:
+
+```sh
+npm run db:generate
+npm run db:push
+npm run studio:pin-factories
+```
+
+This adds the `AssetAuction` table without replacing existing records. Existing
+deployed auction houses cannot gain new methods in place. In `/settings/protocol`,
+choose **Deploy contracts with asset auctions**, copy the confirmed configuration,
+then rebuild and restart. The exported bytecode includes digital/physical support;
+the setup verifies this capability before offering configuration to copy. Current
+and previous auction-house addresses remain in the generated configuration.
+All these payments still use Arc Testnet USDC with no monetary value.
 
 ## Discovery and watchlists
 
@@ -167,7 +227,7 @@ The previously deployed factory cannot support these new rules. Before replacing
 its configured address, run `npm run studio:pin-factories` with the original
 factory still in `.env.local`; this records the original factory on existing
 collection rows and original art-market addresses on existing checkout listings.
-In `/settings/protocol`, choose **Deploy contracts with platform fees** to deploy
+In `/settings/protocol`, choose **Deploy contracts with asset auctions** to deploy
 a new factory, art market, and auction house from your wallet. Copy the complete configuration
 only after all three transactions confirm, then rebuild and restart. Pending transaction
 hashes and confirmed steps are saved in the browser so retries resume safely. Existing collections retain their original mint rules. Existing

@@ -12,7 +12,7 @@ const factory = `0x${"2".repeat(40)}` as const;
 const auction = `0x${"3".repeat(40)}` as const;
 const factoryHash = `0x${"a".repeat(64)}` as const;
 const auctionHash = `0x${"b".repeat(64)}` as const;
-const storageKey = "artiq:studio-testnet-deployment:fees-v1";
+const storageKey = "artiq:studio-testnet-deployment:asset-auctions-v1";
 const artHash = `0x${"c".repeat(64)}` as const;
 const fees = { feeRecipient: market, mintFeeBps: 250, marketplaceFeeBps: 250 };
 const originalRecipient = process.env.NEXT_PUBLIC_PLATFORM_FEE_RECIPIENT;
@@ -24,11 +24,13 @@ let walletFailure: boolean;
 let receiptFailure: boolean;
 let auctionFailure: boolean;
 let connects: number;
+let supportsAssets: boolean;
 const storageDescriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
 const account = { authenticated: true, login: () => { connects++; }, connectWallet: () => { connects++; } };
 const tx = { address: market, isConnected: true, isWrongNetwork: false, chainId: 5042002, switchToArc: async () => {}, refetchBalance: async () => {}, client: {
   getCode: async () => "0x6000",
   readContract: async ({ address, functionName }: { address: string; functionName: string }) => {
+    if (functionName === "supportsAssetAuctions") return supportsAssets;
     const bytecode = address === factory ? "0x01" : address === market ? "0x02" : "0x03";
     const args = writes.find((write) => write.bytecode === bytecode)?.args as unknown[] | undefined;
     return functionName === "feeRecipient" ? (args?.at(-2) ?? market) : (args?.at(-1) ?? BigInt(250));
@@ -64,6 +66,7 @@ async function deploy() { const button = renderer!.root.findAllByType("button").
 beforeEach(() => {
   process.env.NEXT_PUBLIC_PLATFORM_FEE_RECIPIENT = market;
   stored = new Map(); writes = []; waited = []; connects = 0; walletFailure = receiptFailure = auctionFailure = false;
+  supportsAssets = true;
   account.authenticated = true; tx.isConnected = true;
   Object.defineProperty(globalThis, "localStorage", { configurable: true, value: { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => stored.set(key, value), removeItem: (key: string) => stored.delete(key) } });
 });
@@ -156,4 +159,14 @@ test("resumed deployment retains frozen fee terms and ignores the old zero-fee d
   const saved = JSON.parse(stored.get(storageKey)!);
   assert.deepEqual(saved.fees, fees);
   assert.equal(renderer!.root.findAllByType("fieldset")[0].props.disabled, true);
+});
+
+test("an auction house without asset support cannot become complete configuration", async () => {
+  supportsAssets = false;
+  await mount(); await deploy();
+  assert.equal(exportBlocks().length, 0);
+  assert.match(text(), /does not support digital and physical/);
+  assert.equal(writes.length, 3);
+  await deploy();
+  assert.equal(writes.length, 3, "retry verifies the submitted house instead of deploying a duplicate");
 });

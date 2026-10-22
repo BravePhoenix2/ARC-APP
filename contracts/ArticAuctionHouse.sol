@@ -16,7 +16,7 @@ interface IERC5192Probe {
     function locked(uint256 tokenId) external view returns (bool);
 }
 
-/// @notice Escrowed ERC-721 English auctions and separately funded community reward rounds.
+/// @notice Timed ERC-721 and other asset auctions, plus separately funded community reward rounds.
 /// All monetary amounts are Arc native USDC with 18 decimals. No reward depends on bidding.
 contract ArticAuctionHouse is IERC721Receiver, ArticPlatformFees {
     struct Auction {
@@ -29,6 +29,10 @@ contract ArticAuctionHouse is IERC721Receiver, ArticPlatformFees {
         uint64 endsAt;
         bool settled;
         bool nftClaimed;
+    }
+    struct AuctionAsset {
+        bytes32 assetKey;
+        uint8 assetKind;
     }
     struct RewardRound {
         address sponsor;
@@ -45,6 +49,8 @@ contract ArticAuctionHouse is IERC721Receiver, ArticPlatformFees {
     uint256 public nextAuctionId = 1;
     uint256 public nextRewardRoundId = 1;
     mapping(uint256 => Auction) public auctions;
+    mapping(uint256 => AuctionAsset) public auctionAssets;
+    mapping(address => mapping(bytes32 => uint256)) public assetAuctionIds;
     mapping(uint256 => RewardRound) public rewardRounds;
     mapping(uint256 => mapping(address => bool)) public hasJoinedReward;
     mapping(uint256 => mapping(address => bool)) public rewardClaimed;
@@ -54,6 +60,7 @@ contract ArticAuctionHouse is IERC721Receiver, ArticPlatformFees {
     uint256 private _expectedTokenId;
 
     event AuctionCreated(uint256 indexed auctionId, address indexed seller, address indexed nft, uint256 tokenId, uint256 reservePrice, uint64 endsAt);
+    event AssetAuctionCreated(uint256 indexed auctionId, address indexed seller, bytes32 indexed assetKey, uint8 assetKind, uint256 reservePrice, uint64 endsAt);
     event BidPlaced(uint256 indexed auctionId, address indexed bidder, uint256 amount);
     event AuctionSettled(uint256 indexed auctionId, address indexed winner, uint256 amount);
     event AuctionCancelled(uint256 indexed auctionId);
@@ -73,6 +80,7 @@ contract ArticAuctionHouse is IERC721Receiver, ArticPlatformFees {
     error AuctionHasBids();
     error NotSeller();
     error SellerCannotBid();
+    error AssetAlreadyAuctioned(uint256 auctionId);
     error BidTooLow(uint256 minimum);
     error NotNFTRecipient();
     error UnexpectedNFT();
@@ -118,6 +126,24 @@ contract ArticAuctionHouse is IERC721Receiver, ArticPlatformFees {
         emit AuctionCreated(auctionId, msg.sender, nft, tokenId, reservePrice, endsAt);
     }
 
+    function supportsAssetAuctions() external pure returns (bool) {
+        return true;
+    }
+
+    /// @notice Creates a digital (1) or physical (2) asset auction with escrowed bids.
+    /// The asset key identifies off-chain listing details. Delivery and ownership are not
+    /// verified or escrowed here; settlement releases the winning bid less platform fees.
+    function createAssetAuction(bytes32 assetKey, uint8 assetKind, uint256 reservePrice, uint64 endsAt) external nonReentrant returns (uint256 auctionId) {
+        if (assetKey == bytes32(0) || (assetKind != 1 && assetKind != 2) || reservePrice == 0
+            || endsAt < block.timestamp + 60 || endsAt > block.timestamp + 30 days) revert InvalidConfiguration();
+        if (assetAuctionIds[msg.sender][assetKey] != 0) revert AssetAlreadyAuctioned(assetAuctionIds[msg.sender][assetKey]);
+        auctionId = nextAuctionId++;
+        assetAuctionIds[msg.sender][assetKey] = auctionId;
+        auctions[auctionId] = Auction(msg.sender, address(0), 0, reservePrice, address(0), 0, endsAt, false, false);
+        auctionAssets[auctionId] = AuctionAsset(assetKey, assetKind);
+        emit AssetAuctionCreated(auctionId, msg.sender, assetKey, assetKind, reservePrice, endsAt);
+    }
+
     function minimumBid(uint256 auctionId) public view returns (uint256) {
         Auction storage auction = auctions[auctionId];
         if (auction.highestBid == 0) return auction.reservePrice;
@@ -137,7 +163,7 @@ contract ArticAuctionHouse is IERC721Receiver, ArticPlatformFees {
         emit BidPlaced(auctionId, msg.sender, msg.value);
     }
 
-    /// @notice Anyone can settle after the deadline; payments and NFT retrieval are independent.
+    /// @notice Anyone can settle after the deadline; payments and asset delivery are independent.
     function settle(uint256 auctionId) external nonReentrant {
         Auction storage auction = auctions[auctionId];
         if (auction.seller == address(0) || auction.settled) revert AuctionUnavailable();
@@ -148,13 +174,15 @@ contract ArticAuctionHouse is IERC721Receiver, ArticPlatformFees {
             _accruePlatformFee(fee);
             uint256 sellerGross = auction.highestBid - fee;
             uint256 royalty;
-            // A third-party NFT must not be able to block settlement with a reverting royalty hook.
-            try IERC2981(auction.nft).royaltyInfo{gas: 30_000}(auction.tokenId, auction.highestBid) returns (address recipient, uint256 amount) {
-                if (recipient != address(0)) {
-                    royalty = amount > sellerGross ? sellerGross : amount;
-                    pendingReturns[recipient] += royalty;
-                }
-            } catch {}
+            if (auction.nft != address(0)) {
+                // A third-party NFT must not be able to block settlement with a reverting royalty hook.
+                try IERC2981(auction.nft).royaltyInfo{gas: 30_000}(auction.tokenId, auction.highestBid) returns (address recipient, uint256 amount) {
+                    if (recipient != address(0)) {
+                        royalty = amount > sellerGross ? sellerGross : amount;
+                        pendingReturns[recipient] += royalty;
+                    }
+                } catch {}
+            }
             pendingReturns[auction.seller] += sellerGross - royalty;
         }
         emit AuctionSettled(auctionId, auction.highestBidder, auction.highestBid);
@@ -171,7 +199,7 @@ contract ArticAuctionHouse is IERC721Receiver, ArticPlatformFees {
 
     function claimNFT(uint256 auctionId, address receiver) external nonReentrant {
         Auction storage auction = auctions[auctionId];
-        if (auction.seller == address(0) || !auction.settled || auction.nftClaimed) revert AuctionUnavailable();
+        if (auction.seller == address(0) || auction.nft == address(0) || !auction.settled || auction.nftClaimed) revert AuctionUnavailable();
         address recipient = auction.highestBidder == address(0) ? auction.seller : auction.highestBidder;
         if (msg.sender != recipient) revert NotNFTRecipient();
         if (receiver == address(0)) revert InvalidConfiguration();

@@ -30,6 +30,7 @@ const deps: Record<string, unknown> = {
   "next/link": { default: ({ children, ...props }: React.PropsWithChildren) => React.createElement("a", props, children), __esModule: true },
   "@/components/Atmosphere": { default: noop, __esModule: true },
   "@/components/MarketNav": { default: noop, __esModule: true },
+  "@/components/AssetAuctionMarket": { default: noop, __esModule: true },
   "@/components/ReviewerOnly": { default: noop, __esModule: true },
   "@/components/TransactionStatus": { default: noop, __esModule: true },
   "@/components/PlatformFeeBreakdown": require("../../components/PlatformFeeBreakdown"),

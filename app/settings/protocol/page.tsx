@@ -12,12 +12,12 @@ import PlatformRevenue from "@/components/PlatformRevenue";
 import { useProtocolTransaction } from "@/hooks/useProtocolTransaction";
 import { useArtiqAccount } from "@/hooks/useArtiqAccount";
 import { arcChain } from "@/lib/arcConfig";
-import { platformFeeAbi, protocol, transactionError } from "@/lib/protocol";
+import { auctionAbi, platformFeeAbi, protocol, transactionError } from "@/lib/protocol";
 import { feePresets, percentToBps, readFeeTerms } from "@/lib/monetization";
 import { deploymentConfiguration, deploymentKeys, readDeploymentDraft, type StudioDeployment } from "@/lib/studioDeployment";
 
 const button = "gallery-button inline-flex items-center justify-center gap-2 px-5 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40";
-const storageKey = "artiq:studio-testnet-deployment:fees-v1";
+const storageKey = "artiq:studio-testnet-deployment:asset-auctions-v1";
 const labels = { factory: "NFT studio factory", artMarket: "Art checkout", auctions: "Auction and rewards house" };
 const initialDraft = (): StudioDeployment => ({});
 
@@ -87,6 +87,7 @@ export default function ProtocolSetupPage() {
             tx.client!.readContract({ address, abi: platformFeeAbi, functionName: "platformFeeBps" }),
           ]);
           if (recipient.toLowerCase() !== fees.feeRecipient.toLowerCase() || Number(bps) !== (key === "factory" ? fees.mintFeeBps : fees.marketplaceFeeBps)) throw new Error(`The ${labels[key]} fee terms do not match this deployment. Check the saved draft.`);
+          if (key === "auctions" && await tx.client!.readContract({ address, abi: auctionAbi, functionName: "supportsAssetAuctions" }) !== true) throw new Error("This auction house does not support digital and physical asset auctions. Deploy the updated contracts.");
         };
         if (next[key]) {
           const code = await tx.client.getCode({ address: next[key]! });
@@ -120,13 +121,13 @@ export default function ProtocolSetupPage() {
     } catch (cause) { setError(transactionError(cause)); }
     finally { setPending(false); guard.current = false; }
   }
-  const actionLabel = !tx.isConnected ? account.authenticated ? "Connect wallet to deploy" : "Sign in to deploy" : tx.isWrongNetwork ? "Switch to Arc Testnet" : deployed.pending ? "Resume pending deployment" : started ? "Continue deployment" : "Deploy contracts with platform fees";
+  const actionLabel = !tx.isConnected ? account.authenticated ? "Connect wallet to deploy" : "Sign in to deploy" : tx.isWrongNetwork ? "Switch to Arc Testnet" : deployed.pending ? "Resume pending deployment" : started ? "Continue deployment" : "Deploy contracts with asset auctions";
   return <main className="gallery-page min-h-screen"><Atmosphere /><MarketNav />
     <div className="relative mx-auto max-w-4xl px-4 py-12 sm:px-8">
       <Link href="/settings" className="text-xs font-semibold text-[var(--muted-text)]">← Settings</Link>
       <p className="mt-8 text-[10px] font-semibold uppercase tracking-[.18em] text-[#b55fbe]">Project owner · Arc Testnet</p>
       <h1 className="mt-4 text-4xl">Set up marketplace revenue.</h1>
-      <p className="mt-5 max-w-2xl text-sm leading-7 text-[var(--muted-text)]">Choose your commission and fee wallet, then deploy the studio, art checkout, and auction contracts. Fees are included in the displayed price and deducted from proceeds. Each deployment needs a wallet confirmation.</p>
+      <p className="mt-5 max-w-2xl text-sm leading-7 text-[var(--muted-text)]">Choose your commission and fee wallet, then deploy the studio, art checkout, and auction contracts. The updated auction house supports timed digital and physical asset listings as well as NFTs. Fees are included in the displayed price and deducted from proceeds.</p>
       <section className="gallery-card mt-8 p-6 sm:p-8">
         <div className="flex items-center gap-3"><ShieldCheck size={23} className="text-[#b55fbe]" /><h2 className="text-xl">{configured ? "Current project addresses" : "Testnet setup required"}</h2></div>
         <div className="mt-6 space-y-4">{deploymentKeys.map((key) => <div key={key} className="rounded-xl border border-[var(--border-soft)] p-4"><p className="text-xs font-semibold">{labels[key]}</p>{protocol[key] ? <a href={`${arcChain.blockExplorers?.default.url}/address/${protocol[key]}`} target="_blank" rel="noreferrer" className="mt-2 flex items-center gap-2 break-all font-mono text-[11px] text-[#b55fbe]">{protocol[key]}<ExternalLink size={12} className="shrink-0" /></a> : <p className="mt-2 text-xs text-[var(--muted-text)]">Not configured</p>}</div>)}</div>
