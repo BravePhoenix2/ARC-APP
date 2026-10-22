@@ -9,7 +9,9 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 
 interface IArticMintRegistry {
-    function notifyMint(address minter) external;
+    function notifyMint(address minter) external payable;
+    function feeRecipient() external view returns (address);
+    function platformFeeBps() external view returns (uint256);
 }
 
 /// @notice A fixed-metadata collection with optional permanent ERC-5192 soulbinding.
@@ -21,6 +23,8 @@ contract ArticStudioCollection is ERC721, ERC2981, Ownable, ReentrancyGuard, Art
     uint256 public immutable maxPerWallet;
     bool public immutable soulbound;
     address public immutable registry;
+    address public immutable feeRecipient;
+    uint256 public immutable platformFeeBps;
     string public metadataURI;
     uint256 public totalMinted;
     mapping(address => uint256) public mintedByWallet;
@@ -54,6 +58,11 @@ contract ArticStudioCollection is ERC721, ERC2981, Ownable, ReentrancyGuard, Art
         maxPerWallet = maxPerWallet_;
         soulbound = soulbound_;
         registry = registry_;
+        if (registry_ != address(0)) {
+            feeRecipient = IArticMintRegistry(registry_).feeRecipient();
+            platformFeeBps = IArticMintRegistry(registry_).platformFeeBps();
+            if (feeRecipient == address(0) || platformFeeBps > 1_000) revert InvalidConfiguration();
+        }
         _setDefaultRoyalty(creator_, royaltyBps_);
     }
 
@@ -80,7 +89,10 @@ contract ArticStudioCollection is ERC721, ERC2981, Ownable, ReentrancyGuard, Art
         uint256 firstTokenId = totalMinted + 1;
         totalMinted += quantity;
         mintedByWallet[msg.sender] += quantity;
-        if (registry != address(0)) IArticMintRegistry(registry).notifyMint(msg.sender);
+        if (registry != address(0)) {
+            uint256 fee = (msg.value * platformFeeBps) / 10_000;
+            IArticMintRegistry(registry).notifyMint{value: fee}(msg.sender);
+        }
         for (uint256 i; i < quantity; ++i) {
             _safeMint(msg.sender, firstTokenId + i);
             if (soulbound) emit Locked(firstTokenId + i);

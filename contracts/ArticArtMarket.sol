@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {ArticPlatformFees} from "./ArticPlatformFees.sol";
 
 /// @notice Fixed-price original-art payments and on-chain purchase receipts.
 /// An art ID identifies the application listing; this is not physical-delivery escrow.
-contract ArticArtMarket is ReentrancyGuard {
+contract ArticArtMarket is ArticPlatformFees {
     struct Listing {
         address seller;
         bytes32 artId;
@@ -30,6 +30,8 @@ contract ArticArtMarket is ReentrancyGuard {
     error NothingToWithdraw();
     error PayoutFailed();
 
+    constructor(address feeRecipient_, uint256 platformFeeBps_) ArticPlatformFees(feeRecipient_, platformFeeBps_) {}
+
     function createListing(bytes32 artId, uint256 price) external returns (uint256 listingId) {
         if (artId == bytes32(0) || price == 0) revert InvalidListing();
         listingId = nextListingId++;
@@ -44,7 +46,9 @@ contract ArticArtMarket is ReentrancyGuard {
         if (msg.value != listing.price) revert IncorrectPayment();
         listing.buyer = msg.sender;
         hasPurchasedArt[msg.sender] = true;
-        pendingReturns[listing.seller] += msg.value;
+        uint256 fee = _platformFee(msg.value);
+        _accruePlatformFee(fee);
+        pendingReturns[listing.seller] += msg.value - fee;
         emit ArtPurchased(listingId, msg.sender, msg.value);
     }
 

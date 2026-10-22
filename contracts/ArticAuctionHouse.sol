@@ -5,7 +5,7 @@ import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 import {IERC2981} from "@openzeppelin/contracts/interfaces/IERC2981.sol";
-import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {ArticPlatformFees} from "./ArticPlatformFees.sol";
 
 interface IArticEligibility {
     function hasMinted(address account) external view returns (bool);
@@ -18,7 +18,7 @@ interface IERC5192Probe {
 
 /// @notice Escrowed ERC-721 English auctions and separately funded community reward rounds.
 /// All monetary amounts are Arc native USDC with 18 decimals. No reward depends on bidding.
-contract ArticAuctionHouse is IERC721Receiver, ReentrancyGuard {
+contract ArticAuctionHouse is IERC721Receiver, ArticPlatformFees {
     struct Auction {
         address seller;
         address nft;
@@ -85,7 +85,7 @@ contract ArticAuctionHouse is IERC721Receiver, ReentrancyGuard {
     error NotEligible();
     error CannotClaimReward();
 
-    constructor(address studioFactory_, address artMarket_) {
+    constructor(address studioFactory_, address artMarket_, address feeRecipient_, uint256 platformFeeBps_) ArticPlatformFees(feeRecipient_, platformFeeBps_) {
         if (studioFactory_.code.length == 0 || artMarket_.code.length == 0) revert InvalidConfiguration();
         studioFactory = studioFactory_;
         artMarket = artMarket_;
@@ -144,15 +144,18 @@ contract ArticAuctionHouse is IERC721Receiver, ReentrancyGuard {
         if (block.timestamp < auction.endsAt) revert AuctionStillOpen();
         auction.settled = true;
         if (auction.highestBid > 0) {
+            uint256 fee = _platformFee(auction.highestBid);
+            _accruePlatformFee(fee);
+            uint256 sellerGross = auction.highestBid - fee;
             uint256 royalty;
             // A third-party NFT must not be able to block settlement with a reverting royalty hook.
             try IERC2981(auction.nft).royaltyInfo{gas: 30_000}(auction.tokenId, auction.highestBid) returns (address recipient, uint256 amount) {
-                if (recipient != address(0) && amount <= auction.highestBid) {
-                    royalty = amount;
-                    pendingReturns[recipient] += amount;
+                if (recipient != address(0)) {
+                    royalty = amount > sellerGross ? sellerGross : amount;
+                    pendingReturns[recipient] += royalty;
                 }
             } catch {}
-            pendingReturns[auction.seller] += auction.highestBid - royalty;
+            pendingReturns[auction.seller] += sellerGross - royalty;
         }
         emit AuctionSettled(auctionId, auction.highestBidder, auction.highestBid);
     }

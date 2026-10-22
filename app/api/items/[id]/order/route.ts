@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { getCreatorSession } from "@/lib/creatorSession";
 import { sameOrigin } from "@/lib/walletAuth";
 import { limitedJson } from "@/lib/requestBody";
-import { artMarketAbi, protocol, usdcAmount } from "@/lib/protocol";
+import { artMarketAbi, artMarketForItem, protocol, usdcAmount } from "@/lib/protocol";
 import { deploymentClient } from "@/lib/deploymentVerification";
 import { validateArtDelivery } from "@/lib/artDelivery";
 
@@ -37,24 +37,25 @@ async function handlePOST(request: NextRequest, { params }: { params: { id: stri
   const item = await prisma.item.findUnique({ where: { id: params.id } });
   if (!item || item.itemType !== "WEB2_ART") return json({ error: "Artwork not found." }, 404);
   if (item.creatorId === session.userId) return json({ error: "You cannot purchase your own artwork." }, 403);
-  if (!protocol.isTestnet || !protocol.artMarket || !item.artListingId || !item.artListingSeller) return json({ error: "This artwork's checkout is not active yet." }, 409);
+  const market = artMarketForItem(item);
+  if (!protocol.isTestnet || !market || !item.artListingId || !item.artListingSeller) return json({ error: "This artwork's checkout is not active yet." }, 409);
   const txHash = body.txHash.toLowerCase() as Hash;
   try {
     const [chainId, receipt, listing] = await Promise.all([
       deploymentClient.getChainId(),
       deploymentClient.getTransactionReceipt({ hash: txHash }),
-      deploymentClient.readContract({ address: protocol.artMarket, abi: artMarketAbi, functionName: "listings", args: [BigInt(item.artListingId)] }),
+      deploymentClient.readContract({ address: market, abi: artMarketAbi, functionName: "listings", args: [BigInt(item.artListingId)] }),
     ]);
-    if (chainId !== 5042002 || receipt.status !== "success" || receipt.to?.toLowerCase() !== protocol.artMarket.toLowerCase()) return json({ error: "A successful Arc Testnet art purchase is required." }, 400);
+    if (chainId !== 5042002 || receipt.status !== "success" || receipt.to?.toLowerCase() !== market.toLowerCase()) return json({ error: "A successful Arc Testnet art purchase is required." }, 400);
     const buyer = receipt.from.toLowerCase();
     if (buyer !== session.walletAddress.toLowerCase()) return json({ error: "This purchase belongs to a different wallet." }, 403);
-    const events = parseEventLogs({ abi: artMarketAbi, eventName: "ArtPurchased", logs: receipt.logs.filter((log) => log.address.toLowerCase() === protocol.artMarket!.toLowerCase()), strict: true });
+    const events = parseEventLogs({ abi: artMarketAbi, eventName: "ArtPurchased", logs: receipt.logs.filter((log) => log.address.toLowerCase() === market.toLowerCase()), strict: true });
     const price = usdcAmount(String(item.priceUsdc));
     if (listing[0].toLowerCase() !== item.artListingSeller.toLowerCase() || listing[1] !== keccak256(toHex(item.id)) || listing[2] !== price || listing[3].toLowerCase() !== buyer || listing[4] ||
         events.filter(({ args }) => String(args.listingId) === item.artListingId && args.buyer.toLowerCase() === buyer && args.price === price).length !== 1) return json({ error: "The receipt does not match this artwork's purchase." }, 400);
     const order = await prisma.$transaction(async (tx) => {
       const saved = await tx.artOrder.upsert({ where: { itemId: item.id }, update: {}, create: {
-        itemId: item.id, buyerId: session.userId, buyerWallet: buyer, chainId, marketAddress: protocol.artMarket!, listingId: item.artListingId!, txHash, delivery,
+        itemId: item.id, buyerId: session.userId, buyerWallet: buyer, chainId, marketAddress: market, listingId: item.artListingId!, txHash, delivery,
       } });
       if (saved.buyerId !== session.userId || saved.txHash !== txHash) throw new Error("ORDER_CONFLICT");
       await tx.item.update({ where: { id: item.id }, data: { sold: true, quantityAvailable: 0 } });

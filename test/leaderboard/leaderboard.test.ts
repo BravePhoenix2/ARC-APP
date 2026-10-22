@@ -24,12 +24,14 @@ const factory = "0x1111111111111111111111111111111111111111" as Address;
 const market = "0x2222222222222222222222222222222222222222" as Address;
 const auctions = "0x3333333333333333333333333333333333333333" as Address;
 const collection = "0x4444444444444444444444444444444444444444" as Address;
+const legacyHouse = "0x5555555555555555555555555555555555555555" as Address;
 process.env.DATABASE_URL = `file:${join(directory, "test.db")}`;
 process.env.ARTIQ_APP_ORIGIN = canonicalOrigin;
 process.env.NEXT_PUBLIC_ARC_CHAIN_ID = String(chainId);
 process.env.NEXT_PUBLIC_STUDIO_FACTORY_ADDRESS = factory;
 process.env.NEXT_PUBLIC_ART_MARKET_ADDRESS = market;
 process.env.NEXT_PUBLIC_AUCTION_HOUSE_ADDRESS = auctions;
+process.env.NEXT_PUBLIC_LEGACY_AUCTION_HOUSE_ADDRESSES = legacyHouse;
 process.env.ARTIQ_ADMIN_WALLETS = reviewer;
 process.env.ARTIQ_ADMIN_EMAILS = "reviewer@example.com";
 delete process.env.NEXT_PUBLIC_PRIVY_APP_ID;
@@ -345,6 +347,27 @@ test("successful verified Arc activities award only their first milestone, never
   assert.equal(await db.testerMilestone.count({ where: { txHash: { not: null } } }), 6);
   const persisted = await db.testerMilestone.findMany({ where: { txHash: { not: null } } });
   assert.ok(persisted.every((milestone) => milestone.chainId === chainId && milestone.txHash === milestone.txHash?.toLowerCase()));
+});
+
+test("previous auction houses and pinned art markets retain verified tester activity after upgrade", async () => {
+  const login = await walletLogin();
+  for (const kind of ["PLACE_BID", "JOIN_REWARD", "CLAIM_REWARD"] as const) {
+    const txHash = activityReceipt(kind, owner, { to: legacyHouse });
+    (receipts.get(txHash)!.logs as Array<{ address: Address }>)[0].address = legacyHouse;
+    const response = await activityRoute.POST(request("/api/tester/activity", { kind, txHash }, login));
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).recorded, true);
+  }
+  const oldMarket = "0x6666666666666666666666666666666666666666" as Address;
+  const txHash = activityReceipt("BUY_ART", owner, { to: oldMarket });
+  (receipts.get(txHash)!.logs as Array<{ address: Address }>)[0].address = oldMarket;
+  const payload = { kind: "BUY_ART", txHash };
+  const unrecognized = await activityRoute.POST(request("/api/tester/activity", payload, login));
+  assert.equal((await unrecognized.json()).recorded, false, "an arbitrary market cannot establish activity");
+  await db.item.create({ data: { creatorId: login.userId, itemType: "WEB2_ART", title: "Original market art", artMarketAddress: oldMarket, artListingId: "1", artListingSeller: other, priceUsdc: 25 } });
+  const recognized = await activityRoute.POST(request("/api/tester/activity", payload, login));
+  assert.equal(recognized.status, 200);
+  assert.equal((await recognized.json()).recorded, true);
 });
 
 test("activity recording rejects foreign origins, unbound sessions, malformed or oversized bodies before RPC", async () => {

@@ -8,9 +8,36 @@ function configuredAddress(value: string | undefined): Address | null {
 export const protocol = {
   factory: configuredAddress(process.env.NEXT_PUBLIC_STUDIO_FACTORY_ADDRESS),
   auctions: configuredAddress(process.env.NEXT_PUBLIC_AUCTION_HOUSE_ADDRESS),
+  legacyAuctions: Array.from(new Set((process.env.NEXT_PUBLIC_LEGACY_AUCTION_HOUSE_ADDRESSES || "").split(",").map((value) => configuredAddress(value.trim())?.toLowerCase()).filter((value): value is Address => !!value))),
   artMarket: configuredAddress(process.env.NEXT_PUBLIC_ART_MARKET_ADDRESS),
   isTestnet: arcChain.id === 5042002,
 };
+
+export function artMarketForItem(item: { artMarketAddress?: string | null }): Address | null {
+  return item.artMarketAddress ? configuredAddress(item.artMarketAddress) : protocol.artMarket;
+}
+
+/** Read the deployed terms: environment defaults are only for new deployments. */
+export const platformFeeAbi = parseAbi([
+  "function feeRecipient() view returns (address)",
+  "function platformFeeBps() view returns (uint256)",
+  "function pendingPlatformFees() view returns (uint256)",
+  "function totalPlatformFees() view returns (uint256)",
+  "function withdrawPlatformFees(address receiver)",
+]);
+
+export function splitPlatformFee(gross: bigint, bps: bigint | number) {
+  if (typeof bps === "number" && !Number.isInteger(bps)) throw new Error("Fee must use whole basis points.");
+  const rate = BigInt(bps);
+  if (gross < BigInt(0) || rate < BigInt(0) || rate > BigInt(1000)) throw new Error("Invalid sale amount or platform fee.");
+  const platformFee = gross * rate / BigInt(10_000);
+  return { gross, platformFee, net: gross - platformFee };
+}
+
+export function formatFeePercent(bps: bigint | number): string {
+  splitPlatformFee(BigInt(0), bps);
+  return `${Number(bps) / 100}%`;
+}
 
 export const factoryAbi = parseAbi([
   "function supportsMintPhases() pure returns (bool)",

@@ -5,9 +5,10 @@ import {ArticStudioCollection} from "./ArticStudioCollection.sol";
 import {ArticMintPhases} from "./ArticMintPhases.sol";
 import {ArticCollectionDeployer, ArticEditionDeployer} from "./ArticCollectionDeployers.sol";
 import {ArticEdition} from "./ArticEdition.sol";
+import {ArticPlatformFees} from "./ArticPlatformFees.sol";
 
 /// @notice Permissionless creator-owned collections and an authenticated mint-activity registry.
-contract ArticStudioFactory {
+contract ArticStudioFactory is ArticPlatformFees {
     ArticCollectionDeployer private immutable collectionDeployer = new ArticCollectionDeployer();
     ArticEditionDeployer private immutable editionDeployer = new ArticEditionDeployer();
     function supportsMintPhases() external pure returns (bool) { return true; }
@@ -29,6 +30,8 @@ contract ArticStudioFactory {
     event MintActivityRecorded(address indexed minter, address indexed collection);
     error NotRegisteredCollection();
     error InvalidMinter();
+
+    constructor(address feeRecipient_, uint256 platformFeeBps_) ArticPlatformFees(feeRecipient_, platformFeeBps_) {}
 
     function create721(
         string calldata name_, string calldata symbol_, string calldata metadataURI_, uint256 mintPrice_,
@@ -71,9 +74,10 @@ contract ArticStudioFactory {
         emit CollectionCreated(msg.sender, collection, standard, soulbound, name_, symbol_);
     }
 
-    function notifyMint(address minter) external {
+    function notifyMint(address minter) external payable {
         if (collectionCreator[msg.sender] == address(0)) revert NotRegisteredCollection();
         if (minter == address(0)) revert InvalidMinter();
+        _accruePlatformFee(msg.value);
         if (!hasMinted[minter]) {
             hasMinted[minter] = true;
             emit MintActivityRecorded(minter, msg.sender);

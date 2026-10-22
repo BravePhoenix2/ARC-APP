@@ -6,7 +6,7 @@ const PRICE = ethers.parseUnits("2", 18);
 
 async function deployStudio() {
   const [creator, minter, other] = await ethers.getSigners();
-  const factory = await ethers.deployContract("ArticStudioFactory");
+  const factory = await ethers.deployContract("ArticStudioFactory", [other.address, 250]);
   await factory.waitForDeployment();
   return { factory, creator, minter, other };
 }
@@ -62,9 +62,12 @@ describe("NFT Studio", function () {
     expect(await collection.ownerOf(1)).to.equal(minter.address);
     expect(await collection.ownerOf(2)).to.equal(minter.address);
     expect(await collection.tokenURI(2)).to.equal("ipfs://metadata.json");
-    expect(await ethers.provider.getBalance(await collection.getAddress())).to.equal(PRICE * 2n);
+    const platformFee = PRICE * 2n * 250n / 10_000n;
+    const creatorProceeds = PRICE * 2n - platformFee;
+    expect(await factory.pendingPlatformFees()).to.equal(platformFee);
+    expect(await ethers.provider.getBalance(await collection.getAddress())).to.equal(creatorProceeds);
     await expect(collection.connect(minter).withdraw(minter.address)).to.be.revertedWithCustomError(collection, "OwnableUnauthorizedAccount");
-    await expect(collection.withdraw(creator.address)).to.changeEtherBalances([collection, creator], [-PRICE * 2n, PRICE * 2n]);
+    await expect(collection.withdraw(creator.address)).to.changeEtherBalances([collection, creator], [-creatorProceeds, creatorProceeds]);
   });
 
   it("enforces supply, wallet and batch limits without granting eligibility on failed mints", async function () {

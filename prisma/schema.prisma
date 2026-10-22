@@ -151,6 +151,8 @@ model Item {
   sold               Boolean       @default(false)
   artListingId       String?
   artListingSeller   String?
+  // Pin each listing to its original market when platform contracts are replaced.
+  artMarketAddress   String?
 
   listings   Listing[]
   activities Activity[]

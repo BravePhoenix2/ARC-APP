@@ -305,6 +305,7 @@ test("Art listing links require approved artwork, native USDC price, seller owne
   const current = await db.item.findUniqueOrThrow({ where: { id: item.id } });
   assert.equal(current.artListingId, "1");
   assert.equal(current.artListingSeller?.toLowerCase(), owner.toLowerCase());
+  assert.equal(current.artMarketAddress?.toLowerCase(), market.toLowerCase());
   assert.equal(current.sold, false, "linking a listing does not fabricate a purchase");
 });
 
@@ -318,6 +319,23 @@ async function purchasedArt() {
   settings.set(market.toLowerCase(), { listings: [owner, keccak256(toHex(item.id)), price, other, false] });
   return { item, txHash, params: { params: { id: item.id } } };
 }
+
+test("pinned art markets preserve old purchases after the configured market changes", async () => {
+  const { item, txHash, params } = await purchasedArt();
+  const previousMarket = `0x${"a".repeat(40)}` as Address;
+  await db.item.update({ where: { id: item.id }, data: { artMarketAddress: previousMarket } });
+  const receipt = receipts.get(txHash)!;
+  const originalLogs = receipt.logs as { address: Address; topics: unknown; data: unknown }[];
+  settings.set(previousMarket, settings.get(market.toLowerCase())!);
+  const path = `/api/items/${item.id}/order`;
+  // A receipt from the globally configured market must not satisfy a pinned listing.
+  assert.equal((await orderRoute.POST(request(path, { txHash, delivery }, "other"), params)).status, 400);
+  receipt.to = previousMarket;
+  receipt.logs = originalLogs.map((log) => ({ ...log, address: previousMarket }));
+  const response = await orderRoute.POST(request(path, { txHash, delivery }, "other"), params);
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).order.marketAddress, previousMarket);
+});
 
 test("delivery orders require a bound buyer, valid address and same-origin request before RPC", async () => {
   const { item, txHash, params } = await purchasedArt();

@@ -5,10 +5,10 @@ const { time, loadFixture } = require("@nomicfoundation/hardhat-network-helpers"
 const USDC = value => ethers.parseUnits(String(value), 18);
 
 async function deployPlatform() {
-  const [creator, seller, bidder, other, sponsor, ineligible] = await ethers.getSigners();
-  const factory = await ethers.deployContract("ArticStudioFactory");
-  const art = await ethers.deployContract("ArticArtMarket");
-  const auction = await ethers.deployContract("ArticAuctionHouse", [await factory.getAddress(), await art.getAddress()]);
+  const [creator, seller, bidder, other, sponsor, ineligible, treasury] = await ethers.getSigners();
+  const factory = await ethers.deployContract("ArticStudioFactory", [treasury.address, 250]);
+  const art = await ethers.deployContract("ArticArtMarket", [treasury.address, 250]);
+  const auction = await ethers.deployContract("ArticAuctionHouse", [await factory.getAddress(), await art.getAddress(), treasury.address, 250]);
   await factory.connect(creator).create721("Auction collection", "AUCT", "ipfs://token.json", 0, 0, 100, 10, 500, false);
   const [collectionAddress] = await factory.getCollectionsByCreator(creator.address);
   const nft = await ethers.getContractAt("ArticStudioCollection", collectionAddress);
@@ -51,7 +51,8 @@ describe("ArticAuctionHouse auctions", function () {
     await expect(auction.connect(other).bid(1, { value: USDC(3) })).to.be.revertedWithCustomError(auction, "AuctionUnavailable");
     await auction.connect(other).settle(1);
     expect(await auction.pendingReturns(creator.address)).to.equal(USDC("0.1"));
-    expect(await auction.pendingReturns(seller.address)).to.equal(USDC("1.9"));
+    expect(await auction.pendingReturns(seller.address)).to.equal(USDC("1.85"));
+    expect(await auction.pendingPlatformFees()).to.equal(USDC("0.05"));
     await expect(auction.connect(seller).claimNFT(1, seller.address)).to.be.revertedWithCustomError(auction, "NotNFTRecipient");
     await auction.connect(bidder).claimNFT(1, other.address);
     expect(await nft.ownerOf(1)).to.equal(other.address);
@@ -99,7 +100,7 @@ describe("ArticAuctionHouse auctions", function () {
     await auction.settle(1);
     await expect(auction.connect(other).claimNFT(1, await factory.getAddress())).to.be.reverted;
     expect((await auction.auctions(1)).nftClaimed).to.equal(false);
-    expect(await auction.pendingReturns(seller.address)).to.equal(USDC("1.9"));
+    expect(await auction.pendingReturns(seller.address)).to.equal(USDC("1.85"));
     await auction.connect(other).claimNFT(1, other.address);
     expect(await nft.ownerOf(1)).to.equal(other.address);
     await auction.connect(bidder).withdraw(bidder.address);
@@ -131,8 +132,9 @@ describe("Artic community rewards and original-art checkout", function () {
     await expect(art.connect(bidder).buyListing(1, { value: USDC(1) })).to.be.revertedWithCustomError(art, "IncorrectPayment");
     await art.connect(bidder).buyListing(1, { value: USDC(2) });
     expect(await auction.isRewardEligible(bidder.address)).to.equal(true);
-    expect(await art.pendingReturns(other.address)).to.equal(USDC(2));
-    await expect(art.connect(other).withdraw(other.address)).to.changeEtherBalances([art, other], [-USDC(2), USDC(2)]);
+    expect(await art.pendingReturns(other.address)).to.equal(USDC("1.95"));
+    expect(await art.pendingPlatformFees()).to.equal(USDC("0.05"));
+    await expect(art.connect(other).withdraw(other.address)).to.changeEtherBalances([art, other], [-USDC("1.95"), USDC("1.95")]);
     await auction.connect(seller).joinRewardRound(1);
     await expect(auction.connect(seller).joinRewardRound(1)).to.be.revertedWithCustomError(auction, "AlreadyJoined");
     await auction.connect(bidder).joinRewardRound(1);

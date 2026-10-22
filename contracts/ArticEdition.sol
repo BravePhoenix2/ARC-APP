@@ -19,6 +19,8 @@ contract ArticEdition is ERC1155, ERC2981, Ownable, ReentrancyGuard, ArticMintPh
     uint256 public immutable maxSupply;
     uint256 public immutable maxPerWallet;
     address public immutable registry;
+    address public immutable feeRecipient;
+    uint256 public immutable platformFeeBps;
     uint256 public totalMinted;
     mapping(address => uint256) public mintedByWallet;
 
@@ -48,6 +50,11 @@ contract ArticEdition is ERC1155, ERC2981, Ownable, ReentrancyGuard, ArticMintPh
         maxSupply = maxSupply_;
         maxPerWallet = maxPerWallet_;
         registry = registry_;
+        if (registry_ != address(0)) {
+            feeRecipient = IArticMintRegistry(registry_).feeRecipient();
+            platformFeeBps = IArticMintRegistry(registry_).platformFeeBps();
+            if (feeRecipient == address(0) || platformFeeBps > 1_000) revert InvalidConfiguration();
+        }
         _setDefaultRoyalty(creator_, royaltyBps_);
     }
 
@@ -73,7 +80,10 @@ contract ArticEdition is ERC1155, ERC2981, Ownable, ReentrancyGuard, ArticMintPh
         if (msg.value != price * quantity) revert IncorrectPayment();
         totalMinted += quantity;
         mintedByWallet[msg.sender] += quantity;
-        if (registry != address(0)) IArticMintRegistry(registry).notifyMint(msg.sender);
+        if (registry != address(0)) {
+            uint256 fee = (msg.value * platformFeeBps) / 10_000;
+            IArticMintRegistry(registry).notifyMint{value: fee}(msg.sender);
+        }
         _mint(msg.sender, TOKEN_ID, quantity, "");
         emit Minted(msg.sender, quantity, msg.value);
     }

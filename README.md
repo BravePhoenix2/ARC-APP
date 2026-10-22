@@ -2,6 +2,68 @@
 
 Next.js marketplace with Prisma/SQLite and Solidity contracts.
 
+## Marketplace revenue
+
+New studio deployments collect a commission from paid NFT mints, original-art
+purchases, and settled NFT auctions. Fees are included in the sale price: at
+2.5%, a 100 USDC sale credits 2.50 to the platform and 97.50 to the seller before
+any auction creator royalty. Gas is separate. Creator royalties belong to the
+creator and are separate from platform revenue. Free mints, outbid refunds,
+cancelled/unsold auctions, and reward pools carry no platform commission.
+
+`/settings/protocol` offers two presets and custom rates up to 10%:
+
+| Preset | Primary NFT mints | Art sales and NFT auctions |
+| --- | --- | --- |
+| Standard | 2.5% | 2.5% |
+| OpenSea-style | 10% | 1% |
+
+The OpenSea-style preset follows the published
+[OpenSea fee schedule](https://support.opensea.io/en/articles/8867091-what-fees-do-i-pay-on-opensea).
+Choose one preset per deployment. The fee wallet and rates are immutable after
+deployment; changing environment defaults does not change deployed terms.
+Checkout reads the actual contract terms and shows the platform deduction before
+payment. Verified older contracts retain their original zero-platform-fee rules.
+If fee terms cannot be verified, checkout waits for a successful retry.
+
+Platform fees accrue in separate pull-payment balances. Mint fees accumulate at
+the studio factory, art fees at the art market, and auction fees at the auction
+house. In `/settings/protocol`, **Platform revenue** shows each configured
+contract's cumulative fees and current withdrawable balance. Connect the fee
+recipient wallet to withdraw. Creator/seller withdrawals cannot consume platform
+fees. Revenue figures come from the chain and exclude royalties, rewards, gas,
+and sale proceeds owed to sellers.
+
+The browser setup uses `NEXT_PUBLIC_PLATFORM_FEE_RECIPIENT` to prefill the public
+treasury address. The CLI uses `FEE_RECIPIENT_ADDRESS`, `MINT_FEE_BPS`, and
+`MARKETPLACE_FEE_BPS` (defaults 250/250; use 1000/100 for the alternative preset).
+No fee wallet private key is required for deployment. Only the recipient can
+later sign a fee withdrawal. Browser deployments save their confirmed steps,
+pending hash, and frozen terms so retries do not deploy duplicates.
+
+This integration remains restricted to **Arc Testnet**. Test USDC has no monetary
+value. Production monetization requires a separate production-chain release and
+production deployments; these changes do not activate real-money payments.
+
+For an existing installation, back up the database, then run the additive upgrade
+once before changing any existing protocol addresses:
+
+```sh
+npx prisma db execute --file prisma/upgrades/20261022_platform_fees.sql
+npm run db:generate
+npm run db:push
+npm run studio:pin-factories
+```
+
+The pin command records both original collection factories and original art
+markets. Deploy all three fee-enabled contracts in `/settings/protocol`, then
+copy the complete configuration, rebuild, and restart. Existing collections and
+art listings keep their original contracts and fee terms. New listings store
+their market address when their creation receipt is verified. Old auction houses
+are retained in `NEXT_PUBLIC_LEGACY_AUCTION_HOUSE_ADDRESSES` (comma-separated) and
+remain selectable on `/auctions` for NFT claims, refunds, seller withdrawals, and
+reward claims. No NFT, balance, or live auction is migrated between contracts.
+
 ## Discovery and watchlists
 
 Use the bookmark buttons on marketplace cards and detail pages to save work to
@@ -104,9 +166,10 @@ collections use the same rules. Public-only collections keep the existing flow.
 The previously deployed factory cannot support these new rules. Before replacing
 its configured address, run `npm run studio:pin-factories` with the original
 factory still in `.env.local`; this records the original factory on existing
-collection rows. In `/settings/protocol`, choose **Deploy updated factory and auction house**. This retains the current art market and deploys a new factory
-and auction house from your wallet. The button starts the wallet deployments directly. Copy the complete configuration
-only after both transactions confirm, then rebuild and restart. Pending transaction
+collection rows and original art-market addresses on existing checkout listings.
+In `/settings/protocol`, choose **Deploy contracts with platform fees** to deploy
+a new factory, art market, and auction house from your wallet. Copy the complete configuration
+only after all three transactions confirm, then rebuild and restart. Pending transaction
 hashes and confirmed steps are saved in the browser so retries resume safely. Existing collections retain their original mint rules. Existing
 auctions/reward pools stay on the original house; the new house starts empty and
 checks mint eligibility through the new factory. Keep the old addresses for

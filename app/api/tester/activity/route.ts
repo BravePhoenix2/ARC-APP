@@ -34,8 +34,20 @@ async function inferMilestone(receipt: TransactionReceipt): Promise<TesterMilest
     const events = parseEventLogs({ abi: artAbi, eventName: "ArtPurchased", logs: ownLogs(protocol.artMarket), strict: true });
     if (events.some(({ args }) => matches(args.buyer, receipt.from) && args.price > BigInt(0))) return "BUY_ART";
   }
-  if (protocol.auctions && matches(receipt.to, protocol.auctions)) {
-    const events = parseEventLogs({ abi: auctionEvents, logs: ownLogs(protocol.auctions), strict: true });
+  if (receipt.to && !matches(receipt.to, protocol.artMarket)) {
+    const events = parseEventLogs({ abi: artAbi, eventName: "ArtPurchased", logs: ownLogs(receipt.to), strict: true });
+    for (const { args } of events) {
+      if (!matches(args.buyer, receipt.from) || args.price <= BigInt(0)) continue;
+      const pinned = await prisma.item.findFirst({ where: {
+        itemType: "WEB2_ART", artListingId: String(args.listingId),
+        artMarketAddress: { in: [receipt.to, receipt.to.toLowerCase(), getAddress(receipt.to)] },
+      }, select: { id: true } });
+      if (pinned) return "BUY_ART";
+    }
+  }
+  const auctionHouse = [protocol.auctions, ...(protocol.legacyAuctions || [])].find((address) => matches(receipt.to, address));
+  if (auctionHouse) {
+    const events = parseEventLogs({ abi: auctionEvents, logs: ownLogs(auctionHouse), strict: true });
     for (const event of events) {
       if (event.eventName === "BidPlaced" && matches(event.args.bidder, receipt.from) && event.args.amount > BigInt(0)) return "PLACE_BID";
       if (event.eventName === "RewardJoined" && matches(event.args.participant, receipt.from) && event.args.position > 0) return "JOIN_REWARD";

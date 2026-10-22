@@ -18,7 +18,7 @@
     "studio:deploy:testnet": "hardhat run scripts/deploy-studio.js --network arcTestnet",
     "test:app": "node --import tsx --test test/auth/*.test.ts test/wallet/*.test.ts test/screening/*.test.ts test/preview/*.test.ts test/submissions/*.test.ts test/nft/*.test.ts test/leaderboard/*.test.ts test/security/*.test.ts",
     "tester:backfill": "node --import tsx scripts/backfill-testers.ts",
-    "test": "hardhat test",
+    "test": "hardhat test test/*.js",
     "db:generate": "prisma generate",
     "db:setup": "prisma generate && npm run db:push && prisma db seed",
     "db:push": "node scripts/init-db.js && prisma db push",
