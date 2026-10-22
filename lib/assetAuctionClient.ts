@@ -1,5 +1,6 @@
 import { zeroAddress, type Address, type Hash } from "viem";
 import { assetAuctionCommitment, type AssetAuctionDTO } from "@/lib/assetAuctions";
+import { arcChain } from "@/lib/arcConfig";
 import { minimumUsdcBid, usdcAmount } from "@/lib/protocol";
 
 export type AssetAuctionState = {
@@ -19,9 +20,11 @@ export function verifiedAssetAuction(
   listing: AssetAuctionDTO,
   auction: readonly [Address, Address, bigint, bigint, Address, bigint, bigint, boolean, boolean],
   asset: readonly [`0x${string}`, number],
+  trustedMarkets: readonly (string | null)[],
 ): AssetAuctionState {
   const commitment = assetAuctionCommitment({ ...listing, endsAt: new Date(listing.endsAt) });
-  if (!listing.auctionId || commitment !== listing.assetKey || auction[0].toLowerCase() !== listing.sellerWallet.toLowerCase()
+  if (listing.chainId !== arcChain.id || !trustedMarkets.some((market) => market?.toLowerCase() === listing.marketAddress.toLowerCase())
+    || !listing.auctionId || commitment !== listing.assetKey || auction[0].toLowerCase() !== listing.sellerWallet.toLowerCase()
     || auction[1] !== zeroAddress || auction[2] !== BigInt(0)
     || auction[3] !== usdcAmount(listing.reservePrice)
     || Number(auction[6]) !== Math.floor(new Date(listing.endsAt).getTime() / 1000)

@@ -253,3 +253,22 @@ test("physical winner delivery is private, validated and idempotent, and no-bid 
   assert.equal(saved.winnerWallet, winner);
   assert.deepEqual(saved.delivery, shipping);
 });
+
+test("saved physical addresses never expose a previous winner's details after verified winner changes", async () => {
+  const auction = await draft("PHYSICAL");
+  const { auctionId } = await publish(auction);
+  await db.assetAuction.update({ where: { id: auction.id }, data: { delivery: shipping, winnerWallet: winner } });
+  const state = states.get(auctionId)!;
+  state[4] = stranger; state[5] = parseUnits("30", 18); state[7] = true;
+  const path = `/api/asset-auctions/${auction.id}/fulfillment`;
+  for (const wallet of [seller, stranger]) {
+    const response = await fulfillment.GET(request(path, undefined, wallet), context(auction.id));
+    assert.equal(response.status, 409);
+    assert.equal(JSON.stringify(await response.json()).includes(shipping.addressLine1), false);
+  }
+  const save = await fulfillment.POST(request(path, { delivery: { ...shipping, recipient: "New Winner" } }, stranger), context(auction.id));
+  assert.equal(save.status, 409);
+  const unchanged = await db.assetAuction.findUniqueOrThrow({ where: { id: auction.id } });
+  assert.deepEqual(unchanged.delivery, shipping);
+  assert.equal(unchanged.winnerWallet, winner);
+});

@@ -22,7 +22,7 @@ const feeAbi = parseAbi([
 ]);
 type Snapshot = { recipient: Address; bps: bigint; total: bigint; pending: bigint; legacy: boolean; unavailable: boolean };
 const snapshots = new Map<Address, Snapshot>();
-const protocol = { factory: factory as Address | null, artMarket: market, auctions, isTestnet: true };
+const protocol = { factory: factory as Address | null, artMarket: market, auctions, legacyAuctions: [] as Address[], isTestnet: true };
 let renderer: ReactTestRenderer | undefined;
 let queryClient: QueryClient;
 let writes: Record<string, unknown>[];
@@ -81,7 +81,7 @@ beforeEach(() => {
   writes = []; reads = []; runs = 0; balanceRefreshes = 0; snapshots.clear();
   for (const address of [factory, market, auctions]) snapshots.set(address, { recipient: treasury, bps: BigInt(250), total: BigInt("9007199254740993123456789012345678"), pending: BigInt("2000000000000000000"), legacy: false, unavailable: false });
   Object.assign(tx, { address: treasury, isConnected: true, chainId: 5042002, isWrongNetwork: false, pending: false, error: "" });
-  protocol.factory = factory; protocol.isTestnet = true;
+  protocol.factory = factory; protocol.isTestnet = true; protocol.legacyAuctions = [];
 });
 afterEach(async () => { await act(async () => renderer?.unmount()); renderer = undefined; queryClient.clear(); });
 
@@ -110,6 +110,19 @@ test("fee recipient withdraws only platform fees to the connected wallet and ref
   assert.equal(writes[0].chainId, 5042002);
   assert.equal(balanceRefreshes, 1);
   assert.equal(withdrawalButtons()[0].props.disabled, true);
+});
+
+test("retained auction houses keep treasury fee withdrawals available after an upgrade", async () => {
+  const previous = `0x${"5".repeat(40)}` as Address;
+  snapshots.set(previous, { recipient: treasury, bps: BigInt(250), total: BigInt("3000000000000000000"), pending: BigInt("1000000000000000000"), legacy: false, unavailable: false });
+  protocol.legacyAuctions = [previous, auctions, previous];
+  await mount();
+  assert.match(pageText(), /Previous auction house fees/);
+  assert.equal(withdrawalButtons().length, 4);
+  await act(async () => withdrawalButtons()[3].props.onClick());
+  await settle();
+  assert.equal(writes[0].address, previous);
+  assert.equal(writes[0].functionName, "withdrawPlatformFees");
 });
 
 test("another wallet never receives an enabled platform withdrawal action", async () => {

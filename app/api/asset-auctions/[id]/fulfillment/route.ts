@@ -38,6 +38,7 @@ async function fulfillment(request: NextRequest, { params }: Context, save: bool
     const isWinner = hasWinner && state.highestBidder.toLowerCase() === session.walletAddress.toLowerCase();
     if (!isSeller && !isWinner) return json({ error: "Private fulfillment is available only to the seller and the settled auction's winner." }, 403);
     if (save && !isWinner) return json({ error: "Wait until the auction ends and is settled before saving delivery details." }, 409);
+    if (auction.kind === "PHYSICAL" && auction.delivery && hasWinner && auction.winnerWallet?.toLowerCase() !== state.highestBidder.toLowerCase()) return json({ error: "The saved delivery address belongs to a different auction winner. Fulfillment must be reviewed before it can be shown." }, 409);
     let current = auction;
     if (save && delivery) {
       await prisma.assetAuction.updateMany({ where: { id: auction.id, winnerWallet: null }, data: { winnerWallet: state.highestBidder.toLowerCase(), delivery } });

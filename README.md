@@ -69,7 +69,7 @@ reward claims. No NFT, balance, or live auction is migrated between contracts.
 Open **Auctions** (`/auctions`) to browse or list digital downloads and physical
 assets. Signed-in users with a linked wallet can upload a cover photo, describe
 what is included, set a starting price, specify delivery terms, and choose a
-closing time between one minute and 30 days away. Physical listings should state
+closing time between two minutes and 30 days away. Physical listings should state
 shipping destinations, costs, and delivery times. Digital listings require an
 HTTPS download link that stays private until the auction has a settled winner.
 
@@ -97,7 +97,7 @@ the app verifies that the seller, asset, price, and deadline match that listing.
 
 Creation has two steps: save a private draft, then confirm its creation in the
 wallet. The listing appears publicly after the server verifies its receipt.
-**My auctions** includes unfinished drafts. A saved transaction hash lets the
+**Your unpublished auctions** includes unfinished drafts. A saved transaction hash lets the
 seller retry publication after a refresh or temporary API failure without
 creating another auction. The contract also rejects duplicate creation for the
 same seller and asset key. Download links and shipping details are never put in

@@ -40,13 +40,14 @@ export default function AuctionsPage() {
   const [bidValues, setBidValues] = useState<Record<string, string>>({});
   const [limit, setLimit] = useState(24);
   const [reserveValue, setReserveValue] = useState("");
+  const [legacyOpen, setLegacyOpen] = useState(false);
   const auctionHouses = [protocol.auctions, ...(protocol.legacyAuctions ?? [])].filter((value, index, values): value is Address => !!value && values.findIndex((entry) => entry?.toLowerCase() === value.toLowerCase()) === index);
   const [address, setAddress] = useState<Address | null>(protocol.auctions || auctionHouses[0] || null);
   const ready = Boolean(address && protocol.isTestnet);
   const fees = usePlatformFees(tx.client, address);
   useEffect(() => { setNow(Math.floor(Date.now() / 1000)); const timer = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000); return () => clearInterval(timer); }, []);
   const market = useQuery({
-    queryKey: ["auction-house", address, tx.address?.toLowerCase(), limit], enabled: ready && !!tx.client,
+    queryKey: ["auction-house", address, tx.address?.toLowerCase(), limit], enabled: ready && legacyOpen && !!tx.client,
     refetchInterval: 12_000,
     queryFn: async () => {
       const client = tx.client!;
@@ -108,7 +109,7 @@ export default function AuctionsPage() {
 
   return <main className="gallery-page min-h-screen"><Atmosphere /><MarketNav /><div className="relative mx-auto max-w-7xl px-4 pb-20 pt-10 sm:px-8 sm:pt-16">
     <AssetAuctionMarket />
-    <details className="mt-12 rounded-[2rem] border border-[var(--border-soft)] bg-[var(--glass-bg)] p-5 sm:p-8">
+    <details onToggle={(event) => setLegacyOpen(event.currentTarget.open)} className="mt-12 rounded-[2rem] border border-[var(--border-soft)] bg-[var(--glass-bg)] p-5 sm:p-8">
     <summary className="cursor-pointer text-xl font-semibold">NFT auctions & community rewards</summary>
     <section className="mt-6"><h2 className="text-2xl">Transferable NFTs and collector rewards.</h2><p className="mt-3 text-sm leading-7 text-[var(--muted-text)]">Auction an NFT held in your wallet, or join a funded community reward round. NFT ownership transfers on-chain after the winning bid settles.</p><div className="mt-5 flex flex-wrap gap-3"><button className={primary} onClick={() => { setTab("rewards"); setForm("reward"); }}><Gift size={16} />Fund a reward round</button><button className={button} onClick={() => { setTab("auctions"); setForm("auction"); }}><Plus size={15} />Create an NFT auction</button></div></section>
 

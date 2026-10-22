@@ -79,11 +79,13 @@ function RevenueSource({ label, address, tx }: { label: string; address: Address
 
 export default function PlatformRevenue() {
   const tx = useProtocolTransaction();
+  const previousHouses = (protocol.legacyAuctions || []).filter((address, index, addresses) => address.toLowerCase() !== protocol.auctions?.toLowerCase() && addresses.findIndex((entry) => entry.toLowerCase() === address.toLowerCase()) === index);
   return <section className="gallery-card mt-8 p-6 sm:p-8" aria-labelledby="platform-revenue-title">
     <p className="text-[10px] font-semibold uppercase tracking-[.18em] text-[#b55fbe]">Arc Testnet</p>
     <h2 id="platform-revenue-title" className="mt-2 text-xl">Platform revenue</h2>
     <p className="mt-3 text-xs leading-6 text-[var(--muted-text)]">Fees recorded by the configured contracts appear below. Test USDC has no monetary value. Withdrawals go to the connected fee recipient wallet.</p>
     <div className="mt-5 space-y-4">{sources.map((source) => <RevenueSource key={source.key} label={source.label} address={protocol[source.key]} tx={tx} />)}</div>
+    {previousHouses.length > 0 && <div className="mt-5 space-y-4">{previousHouses.map((address) => <RevenueSource key={address} label="Previous auction house fees" address={address} tx={tx} />)}</div>}
     {tx.isWrongNetwork && <button type="button" className={`${button} mt-5`} disabled={tx.pending} onClick={() => void tx.switchToArc()}>Switch to Arc Testnet</button>}
     <div className="mt-4"><TransactionStatus pending={tx.pending} error={tx.error} hash={tx.hash} /></div>
   </section>;
