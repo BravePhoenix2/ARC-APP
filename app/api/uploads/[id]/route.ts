@@ -1,8 +1,9 @@
+import { withAbuseProtection } from "@/lib/abuseProtection";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCreatorSession } from "@/lib/creatorSession";
 
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+async function handleGET(request: NextRequest, { params }: { params: { id: string } }) {
   if (!/^[a-z0-9]{20,40}$/.test(params.id)) return new Response("Not found", { status: 404 });
   const image = await prisma.uploadedImage.findUnique({ where: { id: params.id } });
   if (!image) return new Response("Not found", { status: 404 });
@@ -19,3 +20,5 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     "Content-Security-Policy": "default-src 'none'; sandbox",
   } });
 }
+
+export const GET = withAbuseProtection("GET uploads/[id]", "read", handleGET);

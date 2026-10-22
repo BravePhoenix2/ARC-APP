@@ -1,3 +1,4 @@
+import { protectAccount, withAbuseProtection } from "@/lib/abuseProtection";
 import { NextRequest, NextResponse } from "next/server";
 import { getAddress, parseAbi, parseEventLogs, verifyMessage, zeroAddress, type Address, type Hash, type TransactionReceipt } from "viem";
 import { arcChain } from "@/lib/arcConfig";
@@ -55,11 +56,13 @@ async function inferMilestone(receipt: TransactionReceipt): Promise<TesterMilest
   return creator !== zeroAddress ? "MINT_NFT" : null;
 }
 
-export async function POST(request: NextRequest) {
+async function handlePOST(request: NextRequest) {
   if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403, headers });
   try {
     const session = await getCreatorSession(request);
     if (!session) return NextResponse.json({ error: "Sign in to record your tester activity." }, { status: 401, headers });
+  const limited = await protectAccount("transaction", session.userId, "tester/activity", request);
+  if (limited) return limited;
     let body;
     try { body = await limitedJson(request, 4096); } catch { return NextResponse.json({ error: "Provide a valid activity request." }, { status: 400, headers }); }
     if (!body || typeof body !== "object") return NextResponse.json({ error: "Provide a transaction hash." }, { status: 400, headers });
@@ -106,3 +109,5 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "The activity could not be verified on Arc. Wait for confirmation and try again." }, { status: 503, headers });
   }
 }
+
+export const POST = withAbuseProtection("POST tester/activity", "transaction", handlePOST);

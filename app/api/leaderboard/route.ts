@@ -1,3 +1,4 @@
+import { withAbuseProtection } from "@/lib/abuseProtection";
 import { unstable_cache } from "next/cache";
 import { NextRequest, NextResponse } from "next/server";
 import { getTesterLeaderboard } from "@/lib/testerLeaderboard";
@@ -11,7 +12,7 @@ const cachedLeaderboard = process.env.NODE_ENV === "production"
   ? unstable_cache(loadLeaderboard, ["tester-leaderboard-v1"], { revalidate: 30 })
   : loadLeaderboard;
 
-export async function GET(request: NextRequest) {
+async function handleGET(request: NextRequest) {
   const pageValue = request.nextUrl.searchParams.get("page");
   const sizeValue = request.nextUrl.searchParams.get("pageSize");
   if ((pageValue !== null && !/^\d{1,7}$/.test(pageValue)) || (sizeValue !== null && !/^\d{1,3}$/.test(sizeValue))) {
@@ -23,3 +24,5 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "The tester leaderboard is temporarily unavailable. Please try again." }, { status: 503, headers });
   }
 }
+
+export const GET = withAbuseProtection("GET leaderboard", "read", handleGET);

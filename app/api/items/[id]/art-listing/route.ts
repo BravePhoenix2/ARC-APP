@@ -1,3 +1,4 @@
+import { protectAccount, withAbuseProtection } from "@/lib/abuseProtection";
 import { NextRequest, NextResponse } from "next/server";
 import { keccak256, parseEventLogs, toHex, type Hash } from "viem";
 import { prisma } from "@/lib/prisma";
@@ -10,10 +11,12 @@ import { deploymentClient } from "@/lib/deploymentVerification";
 export const dynamic = "force-dynamic";
 const headers = { "Cache-Control": "private, no-store" };
 
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+async function handlePOST(request: NextRequest, { params }: { params: { id: string } }) {
   if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403, headers });
   const session = await getCreatorSession(request);
   if (!session) return NextResponse.json({ error: "Sign in before linking a listing." }, { status: 401, headers });
+  const limited = await protectAccount("transaction", session.userId, "items/[id]/art-listing", request);
+  if (limited) return limited;
   const item = await prisma.item.findUnique({ where: { id: params.id } });
   if (!item) return NextResponse.json({ error: "Item not found." }, { status: 404, headers });
   if (item.creatorId !== session.userId) return NextResponse.json({ error: "Only this artwork's creator can link its listing." }, { status: 403, headers });
@@ -39,3 +42,5 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     return NextResponse.json({ error: "The listing could not be verified on Arc. Wait for confirmation and try again." }, { status: 503, headers });
   }
 }
+
+export const POST = withAbuseProtection("POST items/[id]/art-listing", "transaction", handlePOST);

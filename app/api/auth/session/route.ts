@@ -1,3 +1,4 @@
+import { withAbuseProtection } from "@/lib/abuseProtection";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
@@ -11,7 +12,7 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET(request: NextRequest) {
+async function handleGET(request: NextRequest) {
   const headers = { "Cache-Control": "no-store" };
   try {
     const session = await getWalletSession(request);
@@ -24,7 +25,7 @@ export async function GET(request: NextRequest) {
   }
 }
 
-export async function DELETE(request: NextRequest) {
+async function handleDELETE(request: NextRequest) {
   const headers = { "Cache-Control": "no-store" };
   if (!sameOrigin(request)) {
     return NextResponse.json({ error: "This request must come from Artiq." }, { status: 403, headers });
@@ -41,3 +42,6 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: "Could not sign out. Please try again." }, { status: 503, headers });
   }
 }
+
+export const GET = withAbuseProtection("GET auth/session", "session", handleGET);
+export const DELETE = withAbuseProtection("DELETE auth/session", "session", handleDELETE);

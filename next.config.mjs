@@ -5,6 +5,10 @@ const require = createRequire(import.meta.url);
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // Build shared previews separately so the running app stays available.
+  distDir: process.env.ARTIQ_SHARED_BUILD === "true"
+    ? (process.env.ARTIQ_SHARED_BUILD_SLOT === "b" ? ".next-preview-b" : ".next-preview")
+    : ".next",
   webpack(config) {
     // Privy's wagmi bridge only uses injected. Its broad connector import also
     // pulls an unused Tempo connector that expects a different viem patch.

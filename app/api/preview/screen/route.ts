@@ -1,3 +1,4 @@
+import { withAbuseProtection } from "@/lib/abuseProtection";
 import { NextRequest, NextResponse } from "next/server";
 import { localPreviewRequestAllowed } from "@/lib/localPreview";
 import { limitedBody } from "@/lib/requestBody";
@@ -10,7 +11,7 @@ const privateHeaders = { "Cache-Control": "private, no-store" };
 const recentChecks: number[] = [];
 let inFlight = 0;
 
-export async function POST(request: NextRequest) {
+async function handlePOST(request: NextRequest) {
   // No wallet authentication is bypassed: this local tool only returns a report.
   // It never saves an upload, creates an application, or publishes a listing.
   if (!localPreviewRequestAllowed(request)) return NextResponse.json({ error: "Not found." }, { status: 404, headers: privateHeaders });
@@ -38,3 +39,5 @@ export async function POST(request: NextRequest) {
     --inFlight;
   }
 }
+
+export const POST = withAbuseProtection("POST preview/screen", "screening", handlePOST);

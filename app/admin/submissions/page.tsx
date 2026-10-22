@@ -312,7 +312,7 @@ export default function SubmissionReviewPage() {
             <h1 className="mt-3 text-4xl font-semibold sm:text-5xl">Art worth <span className="hero-word">sharing.</span></h1>
             <p className="mt-4 max-w-xl text-sm leading-6 text-[var(--muted-text)]">Review creator applications. Approved NFTs and ART BAZZAR artwork are published in the Artiq marketplace.</p>
           </div>
-          <span className="rounded-full border border-[var(--border-soft)] bg-[var(--chip-bg)] px-3 py-2 text-xs font-semibold">{arcChain.name}{arcChain.testnet ? " · Test USDC" : ""}</span>
+          <div className="flex flex-wrap items-center gap-3">{authorized && <Link href="/admin/security" className={secondaryButton}><ShieldCheck size={15} aria-hidden="true" /> Request protection</Link>}<span className="rounded-full border border-[var(--border-soft)] bg-[var(--chip-bg)] px-3 py-2 text-xs font-semibold">{arcChain.name}{arcChain.testnet ? " · Test USDC" : ""}</span></div>
         </div>
 
         {session.isLoading ? (

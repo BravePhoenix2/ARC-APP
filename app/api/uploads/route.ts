@@ -1,3 +1,4 @@
+import { protectAccount, withAbuseProtection } from "@/lib/abuseProtection";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { sameOrigin } from "@/lib/walletAuth";
@@ -8,10 +9,12 @@ import { imageMime, maxImageBytes as maxFileSize } from "@/lib/imageUpload";
 
 export const runtime = "nodejs";
 
-export async function POST(request: NextRequest) {
+async function handlePOST(request: NextRequest) {
   if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
   const session = await getCreatorSession(request);
   if (!session) return NextResponse.json({ error: "Sign in before uploading artwork." }, { status: 401 });
+  const limited = await protectAccount("upload", session.userId, "uploads", request);
+  if (limited) return limited;
   try {
     const bytes = await limitedBody(request, maxFileSize + 16_384);
     const form = await new Response(bytes as BodyInit, { headers: { "Content-Type": request.headers.get("content-type") ?? "" } }).formData();
@@ -31,3 +34,5 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Couldn't upload this file. Please choose a valid image and try again." }, { status: 400 });
   }
 }
+
+export const POST = withAbuseProtection("POST uploads", "upload", handlePOST);

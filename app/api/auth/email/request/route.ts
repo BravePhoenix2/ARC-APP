@@ -1,3 +1,4 @@
+import { withAbuseProtection } from "@/lib/abuseProtection";
 import { randomBytes, randomInt } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { EMAIL_CHALLENGE_SECONDS, hashEmailCode, normalizeEmail } from "@/lib/emailAuth";
@@ -17,11 +18,11 @@ class EmailRateLimit extends Error {
   constructor(readonly retryAfter: number) { super("Too many email sign-in requests."); }
 }
 
-export async function GET() {
+async function handleGET() {
   return NextResponse.json({ available: !getPrivyAppId() && isEmailConfigured() }, { headers });
 }
 
-export async function POST(request: NextRequest) {
+async function handlePOST(request: NextRequest) {
   if (!sameOrigin(request)) {
     return NextResponse.json({ error: "This request must come from Artiq." }, { status: 403, headers });
   }
@@ -92,3 +93,6 @@ export async function POST(request: NextRequest) {
     delivery.active -= 1;
   }
 }
+
+export const GET = withAbuseProtection("GET auth/email/request", "session", handleGET);
+export const POST = withAbuseProtection("POST auth/email/request", "email", handlePOST);

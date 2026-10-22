@@ -1,3 +1,4 @@
+import { protectAccount, withAbuseProtection } from "@/lib/abuseProtection";
 import { NextRequest, NextResponse } from "next/server";
 import { isAddress } from "viem";
 import { prisma } from "@/lib/prisma";
@@ -7,7 +8,7 @@ import { limitedJson } from "@/lib/requestBody";
 import { guaranteedUltimateAllocation, mintTree, tierNumber, validateMintConfig } from "@/lib/mintAccess";
 export const dynamic = "force-dynamic";
 const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: { "Cache-Control": "private, no-store" } });
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+async function handleGET(request: NextRequest, { params }: { params: { id: string } }) {
   const item = await prisma.item.findUnique({ where: { id: params.id }, select: { creatorId: true, mintAccessPlan: { include: { entries: true } } } });
   if (!item) return json({ error: "Collection not found." }, 404);
   const session = await getCreatorSession(request);
@@ -21,10 +22,12 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     proof: plan.root && entry && tierNumber(entry.tier) ? mintTree(params.id, plan.entries).proof(entry.walletAddress, entry.tier) : null,
     ...(manage ? { entries: plan.entries.map(({ walletAddress, requestedTier, tier }) => ({ walletAddress, requestedTier, tier })) } : {}) });
 }
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+async function handlePOST(request: NextRequest, { params }: { params: { id: string } }) {
   if (!sameOrigin(request)) return json({ error: "Invalid request origin." }, 403);
   const session = await getCreatorSession(request);
   if (!session) return json({ error: "Sign in first." }, 401);
+  const limited = await protectAccount("transaction", session.userId, "items/[id]/mint-access", request);
+  if (limited) return limited;
   let body;
   try { body = await limitedJson(request, 150_000); } catch { return json({ error: "Invalid request." }, 400); }
   if (!body || typeof body !== "object" || !("action" in body)) return json({ error: "Choose an action." }, 400);
@@ -73,3 +76,6 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     return json({ saved: true });
   } catch (error) { return json({ error: error instanceof Error ? error.message : "Could not update mint access." }, 400); }
 }
+
+export const GET = withAbuseProtection("GET items/[id]/mint-access", "read", handleGET);
+export const POST = withAbuseProtection("POST items/[id]/mint-access", "transaction", handlePOST);

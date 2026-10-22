@@ -35,6 +35,7 @@ const deps: Record<string, unknown> = {
   "next/image": { default: noop, __esModule: true },
   "@/components/Atmosphere": { default: noop, __esModule: true },
   "@/components/MarketNav": { default: noop, __esModule: true },
+  "@/components/ReviewerOnly": { default: noop, __esModule: true },
   "@/components/TransactionStatus": { default: noop, __esModule: true },
   "@/components/WatchlistButton": { default: noop, __esModule: true },
   "@/components/ShareItemButton": { default: noop, __esModule: true },

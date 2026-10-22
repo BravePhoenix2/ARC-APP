@@ -1,10 +1,11 @@
+import { withAbuseProtection } from "@/lib/abuseProtection";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCreatorSession } from "@/lib/creatorSession";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(request: NextRequest) {
+async function handleGET(request: NextRequest) {
   const session = await getCreatorSession(request);
   if (!session) return NextResponse.json({ error: "Sign in to review applications." }, { status: 401 });
   if (!session.isAdmin) return NextResponse.json({ error: "Reviewer access is required." }, { status: 403 });
@@ -16,3 +17,5 @@ export async function GET(request: NextRequest) {
   });
   return NextResponse.json({ submissions }, { headers: { "Cache-Control": "private, no-store" } });
 }
+
+export const GET = withAbuseProtection("GET admin/submissions", "read", handleGET);

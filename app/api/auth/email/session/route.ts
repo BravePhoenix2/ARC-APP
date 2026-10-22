@@ -1,3 +1,4 @@
+import { withAbuseProtection } from "@/lib/abuseProtection";
 import { NextRequest, NextResponse } from "next/server";
 import { clearEmailSessionCookie, getEmailSession, revokeEmailSession } from "@/lib/emailAuth";
 import { sameOrigin } from "@/lib/walletAuth";
@@ -6,7 +7,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 const headers = { "Cache-Control": "no-store" };
 
-export async function GET(request: NextRequest) {
+async function handleGET(request: NextRequest) {
   try {
     const session = await getEmailSession(request);
     if (session) return NextResponse.json({ user: { id: session.userId, email: session.email } }, { headers });
@@ -18,7 +19,7 @@ export async function GET(request: NextRequest) {
   }
 }
 
-export async function DELETE(request: NextRequest) {
+async function handleDELETE(request: NextRequest) {
   if (!sameOrigin(request)) {
     return NextResponse.json({ error: "This request must come from Artiq." }, { status: 403, headers });
   }
@@ -31,3 +32,6 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: "Could not sign out. Please try again." }, { status: 503, headers });
   }
 }
+
+export const GET = withAbuseProtection("GET auth/email/session", "session", handleGET);
+export const DELETE = withAbuseProtection("DELETE auth/email/session", "session", handleDELETE);

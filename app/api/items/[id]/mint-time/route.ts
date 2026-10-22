@@ -1,3 +1,4 @@
+import { protectAccount, withAbuseProtection } from "@/lib/abuseProtection";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { sameOrigin } from "@/lib/walletAuth";
@@ -7,10 +8,12 @@ import { limitedJson } from "@/lib/requestBody";
 // PATCH /api/items/[id]/mint-time
 // Body: { mintStartTime: string (ISO date) }; creator comes from the signed session.
 // A deployed collection's schedule is immutable, including before minting opens.
-export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
+async function handlePATCH(request: NextRequest, { params }: { params: { id: string } }) {
   if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
   const session = await getCreatorSession(request);
   if (!session) return NextResponse.json({ error: "Sign in with email or your wallet." }, { status: 401 });
+  const limited = await protectAccount("transaction", session.userId, "items/[id]/mint-time", request);
+  if (limited) return limited;
   let body;
   try { body = await limitedJson(request, 4096); }
   catch { return NextResponse.json({ error: "Invalid mint schedule request." }, { status: 400 }); }
@@ -56,3 +59,5 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
 
   return NextResponse.json({ item: updated });
 }
+
+export const PATCH = withAbuseProtection("PATCH items/[id]/mint-time", "transaction", handlePATCH);

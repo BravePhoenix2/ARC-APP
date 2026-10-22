@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import ReviewerOnly from "@/components/ReviewerOnly";
 import { useState } from "react";
 import { ArrowLeft, Check, Copy, ExternalLink, Monitor, Moon, Sun, Wallet, Palette, Network } from "lucide-react";
 import ConnectWalletButton from "@/components/ConnectWalletButton";
@@ -73,11 +74,19 @@ export default function SettingsPage() {
             <p className="mt-2 text-sm text-[var(--muted-text)]">Apply to publish your NFT collection or original artwork. Applications are reviewed before appearing in the marketplace.</p>
             <div className="mt-5 flex flex-wrap gap-3">
               <Link href="/apply" className={secondaryButton}>My applications</Link>
-              <Link href="/admin/submissions" className={secondaryButton}>Reviewer dashboard</Link>
               <Link href="/nfts/create" className={secondaryButton}>Create an NFT</Link>
-              <Link href="/settings/protocol" className={secondaryButton}>Testnet project setup</Link>
             </div>
           </section>
+          <ReviewerOnly>
+            <section className={panel} aria-labelledby="reviewer-heading">
+              <h2 id="reviewer-heading" className="text-lg">Reviewer tools</h2>
+              <div className="mt-5 flex flex-wrap gap-3">
+                <Link href="/admin/submissions" className={secondaryButton}>Reviewer dashboard</Link>
+                <Link href="/admin/security" className={secondaryButton}>Request protection</Link>
+                <Link href="/settings/protocol" className={secondaryButton}>Testnet project setup</Link>
+              </div>
+            </section>
+          </ReviewerOnly>
           <section className={panel} aria-labelledby="appearance-heading">
             <div className="flex items-center gap-3"><Palette size={20} className="text-[#b55fbe]" /><h2 id="appearance-heading" className="text-lg">Appearance</h2></div>
             <p className="mt-2 text-sm text-[var(--muted-text)]">Choose your canvas. System follows your device’s theme.</p>

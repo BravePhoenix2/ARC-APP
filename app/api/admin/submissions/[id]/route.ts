@@ -1,3 +1,4 @@
+import { protectAccount, withAbuseProtection } from "@/lib/abuseProtection";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCreatorSession } from "@/lib/creatorSession";
@@ -6,10 +7,12 @@ import { limitedJson } from "@/lib/requestBody";
 import type { Prisma } from "@/lib/generated/prisma/client";
 import { awardTesterMilestone } from "@/lib/testerLeaderboard";
 
-export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
+async function handlePATCH(request: NextRequest, { params }: { params: { id: string } }) {
   if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
   const session = await getCreatorSession(request);
   if (!session) return NextResponse.json({ error: "Sign in to review applications." }, { status: 401 });
+  const limited = await protectAccount("interaction", session.userId, "admin/submissions/[id]", request);
+  if (limited) return limited;
   if (!session.isAdmin) return NextResponse.json({ error: "Reviewer access is required." }, { status: 403 });
   let body;
   try { body = await limitedJson(request); } catch { return NextResponse.json({ error: "Invalid review request." }, { status: 400 }); }
@@ -68,3 +71,5 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     return NextResponse.json({ error: "Couldn't save the review. Please try again." }, { status: 500 });
   }
 }
+
+export const PATCH = withAbuseProtection("PATCH admin/submissions/[id]", "interaction", handlePATCH);

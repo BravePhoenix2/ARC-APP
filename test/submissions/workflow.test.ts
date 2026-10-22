@@ -148,7 +148,7 @@ test("submission authentication, AI policy, privacy, approval, rejection, and im
   assert.equal((await submissions.POST(changedWallet)).status, 401, "cross-tab session changes cannot misattribute applications");
   assert.equal((await submissions.POST(request("/api/submissions", "POST", { ...application, priceUsdc: "-2" }, ownerCookie))).status, 400);
   assert.equal((await submissions.POST(request("/api/submissions", "POST", { ...application, imageUrl: "javascript:alert(1)" }, ownerCookie))).status, 400);
-  assert.equal((await catalog.POST()).status, 405, "legacy creation cannot bypass review");
+  assert.equal((await catalog.POST(request("/api/items", "POST"))).status, 405, "legacy creation cannot bypass review");
 
   const created = await submissions.POST(request("/api/submissions", "POST", { ...application, creatorWalletAddress: other }, ownerCookie));
   assert.equal(created.status, 201);
@@ -354,7 +354,7 @@ test("landing trending drops select four published NFTs and advance at the next 
     }
     await db.item.create({ data: { id: "trending-next", title: "Published this hour", itemType: "NFT", creatorId: creator.id, createdAt: new Date("2030-01-01T12:10:00.000Z") } });
     await db.item.create({ data: { id: "trending-art", title: "Physical art", itemType: "WEB2_ART", creatorId: creator.id, createdAt: new Date("2030-01-01T11:59:00.000Z") } });
-    const response = await GET();
+    const response = await GET(request("/api/trending"));
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("cache-control"), "public, max-age=0, s-maxage=1800");
     const first = await response.json();
@@ -362,14 +362,14 @@ test("landing trending drops select four published NFTs and advance at the next 
     assert.equal(first.nextAt, "2030-01-01T13:00:00.000Z");
     assert.deepEqual(Object.keys(first.items[0]).sort(), ["id", "imageUrl", "status", "title"]);
     Date.now = () => Date.parse("2030-01-01T12:59:59.000Z");
-    assert.deepEqual((await (await GET()).json()).items, first.items);
+    assert.deepEqual((await (await GET(request("/api/trending"))).json()).items, first.items);
     Date.now = () => Date.parse("2030-01-01T13:00:00.000Z");
-    const next = await (await GET()).json();
+    const next = await (await GET(request("/api/trending"))).json();
     assert.deepEqual(next.items.map((item: { id: string }) => item.id), ["trending-next", "trending-4", "trending-3", "trending-2"]);
     assert.equal(next.nextAt, "2030-01-01T14:00:00.000Z");
     await db.item.deleteMany({ where: { creatorId: creator.id } });
     Date.now = () => Date.parse("2000-01-01T00:00:00.000Z");
-    assert.deepEqual((await (await GET()).json()).items, []);
+    assert.deepEqual((await (await GET(request("/api/trending"))).json()).items, []);
   } finally {
     Date.now = originalNow;
     await db.item.deleteMany({ where: { creatorId: creator.id } });

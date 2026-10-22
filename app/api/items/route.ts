@@ -1,3 +1,4 @@
+import { withAbuseProtection } from "@/lib/abuseProtection";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/lib/generated/prisma/client";
@@ -6,7 +7,7 @@ import { publicCatalogSelect } from "@/lib/publicCatalog";
 import { isNftKind } from "@/lib/nftTypes";
 
 // GET /api/items?itemType=NFT|WEB2_ART&status=LIVE&category=PAINTING&creator=0x...
-export async function GET(request: NextRequest) {
+async function handleGET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
   let pagination;
   try { pagination = catalogPagination(params); }
@@ -58,9 +59,12 @@ export async function GET(request: NextRequest) {
 
 // Public creation would bypass creator review. Publishing happens only when
 // an authorized reviewer approves an application in /api/admin/submissions.
-export async function POST() {
+async function handlePOST() {
   return NextResponse.json(
     { error: "Apply through /api/submissions. Items are published after review." },
     { status: 405, headers: { Allow: "GET" } },
   );
 }
+
+export const GET = withAbuseProtection("GET items", "read", handleGET);
+export const POST = withAbuseProtection("POST items", "transaction", handlePOST);

@@ -1,3 +1,4 @@
+import { withAbuseProtection } from "@/lib/abuseProtection";
 import { unstable_cache } from "next/cache";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -17,7 +18,7 @@ const hourlyDrops = process.env.NODE_ENV === "production"
   ? unstable_cache(loadDrops, ["hourly-trending-drops-v1"], { revalidate: 3600 })
   : loadDrops;
 
-export async function GET() {
+async function handleGET() {
   const now = Date.now();
   const cutoff = Math.floor(now / HOUR) * HOUR;
   const nextAt = cutoff + HOUR;
@@ -32,3 +33,5 @@ export async function GET() {
     });
   }
 }
+
+export const GET = withAbuseProtection("GET trending", "read", handleGET);

@@ -1,3 +1,4 @@
+import { protectAccount, withAbuseProtection } from "@/lib/abuseProtection";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { sameOrigin } from "@/lib/walletAuth";
@@ -10,7 +11,7 @@ import { limitedJson } from "@/lib/requestBody";
 export const dynamic = "force-dynamic";
 const privateHeaders = { "Cache-Control": "private, no-store" };
 
-export async function GET(request: NextRequest) {
+async function handleGET(request: NextRequest) {
   const session = await getCreatorSession(request);
   if (!session) return NextResponse.json({ error: "Sign in with email or your wallet." }, { status: 401, headers: privateHeaders });
   const submissions = await prisma.submission.findMany({
@@ -21,10 +22,12 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({ submissions }, { headers: privateHeaders });
 }
 
-export async function POST(request: NextRequest) {
+async function handlePOST(request: NextRequest) {
   if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
   const session = await getCreatorSession(request);
   if (!session) return NextResponse.json({ error: "Sign in with email or your wallet before submitting." }, { status: 401 });
+  const limited = await protectAccount("submission", session.userId, "submissions", request);
+  if (limited) return limited;
   try {
     const input = parseSubmission(await limitedJson(request, 65_536));
     const { images, ...details } = input;
@@ -61,3 +64,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Couldn't save your application. Please try again." }, { status: 500 });
   }
 }
+
+export const GET = withAbuseProtection("GET submissions", "read", handleGET);
+export const POST = withAbuseProtection("POST submissions", "submission", handlePOST);

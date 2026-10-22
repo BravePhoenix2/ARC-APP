@@ -1,3 +1,4 @@
+import { limitedBody } from "@/lib/requestBody";
 import { localHttpSessionOrigin, secureSessionCookie } from "@/lib/sessionCookie";
 import { createHash, randomBytes } from "node:crypto";
 import type { NextRequest, NextResponse } from "next/server";
@@ -127,29 +128,8 @@ export function clearWalletSessionCookie(response: NextResponse): void {
 
 /** Bound reads as well as parsed fields so malformed requests cannot fill memory. */
 export async function readAuthBody(request: NextRequest): Promise<Record<string, unknown> | null> {
-  const limit = 4096;
-  if (Number(request.headers.get("content-length")) > limit || !request.body) return null;
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
   try {
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      size += value.byteLength;
-      if (size > limit) {
-        await reader.cancel();
-        return null;
-      }
-      chunks.push(value);
-    }
-    const body: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-    return body && typeof body === "object" && !Array.isArray(body)
-      ? body as Record<string, unknown>
-      : null;
-  } catch {
-    return null;
-  } finally {
-    reader.releaseLock();
-  }
+    const body: unknown = JSON.parse(new TextDecoder().decode(await limitedBody(request, 4096, { totalMs: 10_000 })));
+    return body && typeof body === "object" && !Array.isArray(body) ? body as Record<string, unknown> : null;
+  } catch { return null; }
 }

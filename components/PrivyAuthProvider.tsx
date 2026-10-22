@@ -8,7 +8,7 @@ import { useAccount, useDisconnect } from "wagmi";
 import { PrivySessionContext, type PrivyAccount, type PrivyAccountChoice, type PrivyAuthenticationState, type PrivyLoginOptions } from "@/hooks/usePrivySession";
 import { PRIVY_SESSION_CHANGED, PRIVY_SETUP_MESSAGE } from "@/lib/privyClient";
 
-const PRIVATE_QUERY_ROOTS = new Set(["submissions", "admin-submissions", "item-detail", "art-order", "tester-me", "watchlist", "mint-access"]);
+const PRIVATE_QUERY_ROOTS = new Set(["submissions", "admin-submissions", "admin-security", "item-detail", "art-order", "tester-me", "watchlist", "mint-access"]);
 
 function clearPrivateQueries(queryClient: QueryClient) {
   const filter = { predicate: (query: { queryKey: readonly unknown[] }) => PRIVATE_QUERY_ROOTS.has(String(query.queryKey[0])) };
@@ -172,6 +172,7 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
     const isCurrent = () => isLatest() && !controller.signal.aborted;
     const request = (async () => {
       let invalidSession = false;
+      let retryAfterMs = 0;
       try {
         // A previous unauthenticated render may still be clearing a cookie.
         // Let that response finish before a fresh sign-in writes its cookie.
@@ -207,6 +208,10 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
           return false;
         }
         if (!response.ok) {
+          if (response.status === 429) {
+            const seconds = Number(response.headers.get("Retry-After"));
+            if (Number.isFinite(seconds) && seconds > 0) retryAfterMs = Math.min(60_000, seconds * 1000);
+          }
           invalidSession = response.status < 500 && response.status !== 429;
           throw new Error(typeof body?.error === "string" ? body.error : "Could not verify your sign-in. Please try again.");
         }
@@ -235,7 +240,7 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
         // Spread recovery traffic after an outage; never retry rejected credentials.
         if (!invalidSession && retryCount.current < 2) {
           const attempt = retryCount.current++;
-          setRetryDelay(2_000 * 2 ** attempt + Math.floor(Math.random() * 1_000));
+          setRetryDelay(Math.max(retryAfterMs, 2_000 * 2 ** attempt + Math.floor(Math.random() * 1_000)));
         }
         return false;
       } finally {

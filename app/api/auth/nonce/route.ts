@@ -1,3 +1,4 @@
+import { withAbuseProtection } from "@/lib/abuseProtection";
 import { randomBytes } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -13,7 +14,7 @@ import {
 
 export const runtime = "nodejs";
 
-export async function POST(request: NextRequest) {
+async function handlePOST(request: NextRequest) {
   const headers = { "Cache-Control": "no-store" };
   if (!sameOrigin(request)) {
     return NextResponse.json({ error: "This request must come from Artiq." }, { status: 403, headers });
@@ -40,3 +41,5 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Wallet sign-in is unavailable. Please try again." }, { status: 503, headers });
   }
 }
+
+export const POST = withAbuseProtection("POST auth/nonce", "challenge", handlePOST);

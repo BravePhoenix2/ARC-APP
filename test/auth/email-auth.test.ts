@@ -391,7 +391,7 @@ test("fails closed when mail is unavailable or delivery fails, and never accepts
   const originalPassword = process.env.GMAIL_SMTP_APP_PASSWORD;
   try {
     delete process.env.GMAIL_SMTP_APP_PASSWORD;
-    assert.equal((await (await requestRoute.GET()).json()).available, false);
+    assert.equal((await (await requestRoute.GET(request("/api/auth/email/request"))).json()).available, false);
     const beforeCount = await db.emailChallenge.count();
     assert.equal((await requestRoute.POST(request("/api/auth/email/request", "POST", { email: "unconfigured@example.com" }))).status, 503);
     assert.equal(await db.emailChallenge.count(), beforeCount);

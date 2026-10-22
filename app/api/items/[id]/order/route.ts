@@ -1,3 +1,4 @@
+import { protectAccount, withAbuseProtection } from "@/lib/abuseProtection";
 import { NextRequest, NextResponse } from "next/server";
 import { keccak256, parseEventLogs, toHex, type Hash } from "viem";
 import { prisma } from "@/lib/prisma";
@@ -12,17 +13,19 @@ export const dynamic = "force-dynamic";
 const headers = { "Cache-Control": "private, no-store" };
 const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers });
 
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+async function handleGET(request: NextRequest, { params }: { params: { id: string } }) {
   const session = await getCreatorSession(request);
   if (!session) return json({ error: "Sign in to view delivery details." }, 401);
   const order = await prisma.artOrder.findFirst({ where: { itemId: params.id, OR: [{ buyerId: session.userId }, { item: { creatorId: session.userId } }] } });
   return json({ order });
 }
 
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+async function handlePOST(request: NextRequest, { params }: { params: { id: string } }) {
   if (!sameOrigin(request)) return json({ error: "Invalid request origin." }, 403);
   const session = await getCreatorSession(request);
   if (!session) return json({ error: "Sign in before saving your delivery address." }, 401);
+  const limited = await protectAccount("transaction", session.userId, "items/[id]/order", request);
+  if (limited) return limited;
   if (!session.walletAddress) return json({ error: "Select a wallet linked to your signed-in account." }, 403);
   let body;
   let delivery;
@@ -63,3 +66,6 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     return json({ error: "Your payment may be confirmed, but the order could not be saved. Keep the transaction hash and retry; do not pay again." }, 503);
   }
 }
+
+export const GET = withAbuseProtection("GET items/[id]/order", "read", handleGET);
+export const POST = withAbuseProtection("POST items/[id]/order", "transaction", handlePOST);

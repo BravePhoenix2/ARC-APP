@@ -1,3 +1,4 @@
+import { withAbuseProtection } from "@/lib/abuseProtection";
 import { NextRequest, NextResponse } from "next/server";
 import {
   EMAIL_MAX_ATTEMPTS, EMAIL_SESSION_COOKIE, EMAIL_SESSION_SECONDS,
@@ -16,7 +17,7 @@ export const runtime = "nodejs";
 const headers = { "Cache-Control": "no-store" };
 const invalidMessage = "This code is incorrect, expired, or already used. Request a new code if needed.";
 
-export async function POST(request: NextRequest) {
+async function handlePOST(request: NextRequest) {
   if (!sameOrigin(request)) {
     return NextResponse.json({ error: "This request must come from Artiq." }, { status: 403, headers });
   }
@@ -80,3 +81,5 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Email sign-in is unavailable. Please try again." }, { status: 503, headers });
   }
 }
+
+export const POST = withAbuseProtection("POST auth/email/verify", "challenge", handlePOST);

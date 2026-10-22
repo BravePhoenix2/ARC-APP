@@ -11,7 +11,7 @@ Implemented:
 Remaining production work:
 
 1. Migrate the SQLite database to a managed database suitable for multiple app instances. This requires a provider/adapter change, data migration, SQL compatibility checks, backup/restore validation, and a bounded connection pool. Merely changing DATABASE_URL is insufficient. Local SQLite and database-backed image blobs remain major constraints.
-2. Move image bytes to object storage with a CDN and thumbnail variants; migrate existing uploads while preserving URLs. Add upload quotas and distributed rate limits to expensive/authentication endpoints.
+2. Move image bytes to object storage with a CDN and thumbnail variants; migrate existing uploads while preserving URLs. Configure the shared quota store described in request-protection.md for multiple instances; existing upload quotas and application request limits remain active.
 3. Move screening and chain verification workloads that exceed request budgets to durable jobs. Define retry limits, idempotency, and monitoring. Audit nonce consumption and purchase/mint races under concurrent writes.
 4. Move search/filter/sort to indexed server queries. Current gallery filters operate on the visible page, as disclosed in the UI. Creator profiles and reviewer/submission lists still need bounded pagination.
 5. Precompute leaderboard scores/ranks and aggregate counters for large populations. Caching reduces repeat scans but cold ranking queries still scan the tester population. Share cache storage across instances, configure CDN behavior, and monitor cache hit rates.
@@ -30,3 +30,11 @@ Privy verification now has a 20-second client deadline covering SDK token reads,
 Missing identity tokens use the existing server-verified Privy profile fallback directly. Concurrent refresh callers share a request. Focus-triggered retries are limited to once per 30 seconds, and scheduled renewal happens once per token expiry with a randomized 60–90 second lead. Logout bounds server revocation at 15 seconds and the complete operation at 30 seconds; a failure keeps the private UI locked and offers retry. Anonymous cookie cleanup skips database transactions.
 
 Regression coverage uses deterministic SDK/network/clock fixtures, including stalled SDK and HTTP operations, late responses, retries, deduplication, unchanged-expiry renewal, and logout timeouts. These checks establish client behavior, not Privy provider throughput or production database capacity.
+
+## Fast shared previews
+
+Run `npm run preview:share -- https://your-tunnel-host` after starting an HTTPS tunnel to `http://127.0.0.1:3000`. This builds the production app once, binds the server to loopback, and configures the tunnel origin for authentication. Keep that process and the tunnel running. This command uses the existing local database and configured identity provider.
+
+Use `npm run dev` for editing. Sharing the development server makes first visits compile routes and can block other API requests during compilation. The production preview requires a rebuild after source changes; it serves already compiled pages to testers.
+
+Request abuse protections and the reviewer metrics dashboard are documented in [request-protection.md](request-protection.md). Shared preview builds now use `.next-preview` so a new build can finish while the current app keeps serving.

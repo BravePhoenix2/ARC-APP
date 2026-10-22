@@ -1,3 +1,4 @@
+import { withAbuseProtection } from "@/lib/abuseProtection";
 import { unstable_cache } from "next/cache";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -22,10 +23,12 @@ const loadDailyPicks = async (_day: string, ordinal: number) => {
 const getDailyPicks = process.env.NODE_ENV === "production"
   ? unstable_cache(loadDailyPicks, ["daily-muse-picks-v1"], { revalidate: 60 })
   : loadDailyPicks;
-export async function GET() {
+async function handleGET() {
   const { day, ordinal, nextAt } = museDay();
   try {
     const items = await getDailyPicks(day, ordinal);
     return NextResponse.json({ day, nextAt, ...musePrompt(ordinal), items }, { headers: { "Cache-Control": "public, max-age=0, s-maxage=30, stale-while-revalidate=30" } });
   } catch { return NextResponse.json({ error: "Today’s muse could not be loaded. Please try again." }, { status: 503 }); }
 }
+
+export const GET = withAbuseProtection("GET discovery", "read", handleGET);

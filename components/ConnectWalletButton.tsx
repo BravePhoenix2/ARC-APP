@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
+import ReviewerOnly from "@/components/ReviewerOnly";
 import { LoaderCircle, LogOut, UserRound } from "lucide-react";
 import { useWallet } from "@/hooks/useWallet";
 import { usePrivySession } from "@/hooks/usePrivySession";
@@ -88,7 +89,7 @@ export default function ConnectWalletButton() {
           {accountWallet && wallet.isBalanceError && <button type="button" onClick={() => void wallet.refetchBalance()} className="mt-3 block text-xs font-semibold text-[#b55fbe]">Retry balance</button>}
           <Link href="/watchlist" onClick={() => setOpen(false)} className="mt-4 block text-sm hover:text-[#b55fbe]">My watchlist</Link><Link href="/apply#my-applications" onClick={() => setOpen(false)} className="mt-4 block border-t border-[var(--border-soft)] pt-3 text-sm hover:text-[#b55fbe]">My applications</Link>
           <Link href="/settings" onClick={() => setOpen(false)} className="mt-3 block text-sm hover:text-[#b55fbe]">Profile & settings</Link>
-          {user.isAdmin && user.email && <Link href="/admin/submissions" onClick={() => setOpen(false)} className="mt-3 block text-sm hover:text-[#b55fbe]">Reviewer dashboard</Link>}
+          <ReviewerOnly><Link href="/admin/submissions" onClick={() => setOpen(false)} className="mt-3 block text-sm hover:text-[#b55fbe]">Reviewer dashboard</Link><Link href="/admin/security" onClick={() => setOpen(false)} className="mt-3 block text-sm hover:text-[#b55fbe]">Request protection</Link></ReviewerOnly>
           {session.connectedWallets.length > 1 && <label className="mt-3 block text-xs text-[var(--muted-text)]">Active wallet<select aria-label="Active wallet" value={wallet.address?.toLowerCase() ?? ""} onChange={(event) => void session.selectWallet(event.target.value)} className="mt-2 block w-full rounded-lg border border-[var(--border-soft)] bg-[var(--card-bg)] p-2">{session.connectedWallets.map((item) => <option key={item.address} value={item.address.toLowerCase()}>{item.label} · {item.address.slice(0, 6)}…{item.address.slice(-4)}</option>)}</select></label>}
           <button type="button" onClick={() => { setOpen(false); session.connectWallet(); }} className="mt-3 block text-sm hover:text-[#b55fbe]">Add a wallet</button>
         </> : signedIn ? <>

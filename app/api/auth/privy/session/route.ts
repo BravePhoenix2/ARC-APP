@@ -1,3 +1,4 @@
+import { protectAccount, withAbuseProtection } from "@/lib/abuseProtection";
 import { NextRequest, NextResponse } from "next/server";
 import { getAddress } from "viem";
 import { EMAIL_SESSION_COOKIE, clearEmailSessionCookie, getEmailSession } from "@/lib/emailAuth";
@@ -21,6 +22,10 @@ export const runtime = "nodejs";
 const headers = { "Cache-Control": "private, no-store" };
 type Candidate = { id: string; email: string | null; emailVerifiedAt: Date | null; walletAddress: string | null; privyId: string | null };
 const selectCandidate = { id: true, email: true, emailVerifiedAt: true, walletAddress: true, privyId: true } as const;
+
+class LoginThrottled extends Error {
+  constructor(readonly response: NextResponse) { super("LOGIN_THROTTLED"); }
+}
 
 class AccountSelection extends Error {
   constructor(public accounts: Array<{ id: string; label: string }>) { super("ACCOUNT_SELECTION_REQUIRED"); }
@@ -120,7 +125,7 @@ async function revokeRequestSessions(tx: Prisma.TransactionClient, request: Next
   }
 }
 
-export async function GET(request: NextRequest) {
+async function handleGET(request: NextRequest) {
   try {
     const session = await getPrivySession(request);
     // Wallet reconnection and embedded-wallet creation can race a signed identity
@@ -138,11 +143,11 @@ export async function GET(request: NextRequest) {
   }
 }
 
-export async function POST(request: NextRequest) {
+async function handlePOST(request: NextRequest) {
   if (!sameOrigin(request)) return NextResponse.json({ error: "This request must come from Artiq." }, { status: 403, headers });
   if (!getPrivyAppId()) return NextResponse.json({ error: "Privy sign-in needs to be configured for this app.", code: "PRIVY_NOT_CONFIGURED" }, { status: 503, headers });
   let body: unknown;
-  try { body = await limitedJson(request, 32_768); } catch {
+  try { body = await limitedJson(request, 32_768, { totalMs: 10_000 }); } catch {
     return NextResponse.json({ error: "Provide a valid sign-in request." }, { status: 400, headers });
   }
   if (!body || typeof body !== "object" || Array.isArray(body)) return NextResponse.json({ error: "Provide a valid sign-in request." }, { status: 400, headers });
@@ -154,7 +159,13 @@ export async function POST(request: NextRequest) {
   if (identityToken !== undefined && identityToken !== null && typeof identityToken !== "string") return NextResponse.json({ error: "Provide your current Privy sign-in tokens." }, { status: 400, headers });
   let identity: VerifiedPrivyIdentity;
   const verificationStartedAt = Date.now();
-  try { identity = await verifyPrivyTokens({ accessToken, identityToken }); } catch (cause) {
+  try {
+    identity = await verifyPrivyTokens({ accessToken, identityToken }, undefined, async (did) => {
+      const limited = await protectAccount("login", did, "auth/privy/session", request);
+      if (limited) throw new LoginThrottled(limited);
+    });
+  } catch (cause) {
+    if (cause instanceof LoginThrottled) return cause.response;
     const code = privyVerificationFailureCode(cause);
     console.warn("[artiq-auth]", { event: "privy_session_verification_failed", code, ...privyVerificationDiagnostic(cause), elapsedMs: Date.now() - verificationStartedAt });
     if (code === "PRIVY_VERIFICATION_UNAVAILABLE") {
@@ -201,7 +212,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-export async function DELETE(request: NextRequest) {
+async function handleDELETE(request: NextRequest) {
   if (!sameOrigin(request)) return NextResponse.json({ error: "This request must come from Artiq." }, { status: 403, headers });
   try {
     // Anonymous visits also call DELETE to clear stale browser cookies. Avoid
@@ -218,3 +229,7 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: "Could not sign out. Please try again." }, { status: 503, headers });
   }
 }
+
+export const GET = withAbuseProtection("GET auth/privy/session", "session", handleGET);
+export const POST = withAbuseProtection("POST auth/privy/session", "login", handlePOST);
+export const DELETE = withAbuseProtection("DELETE auth/privy/session", "session", handleDELETE);

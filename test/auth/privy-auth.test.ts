@@ -288,7 +288,7 @@ test("configured Privy disables legacy sign-in issuance while preserving existin
   }
   assert.deepEqual(await counters(), before, "blocked legacy calls must not write accounts, challenges, sessions or milestones");
   assert.equal(mailAttempts, 0, "the old email sender is not invoked even when its credentials are configured");
-  assert.equal((await (await legacyEmailRequest.GET()).json()).available, false);
+  assert.equal((await (await legacyEmailRequest.GET(request("/api/auth/email/request"))).json()).available, false);
   assert.equal((await legacyEmailSession.GET(new NextRequest(`${origin}/api/auth/email/session`, { headers: { Cookie: email.cookie } }))).status, 200);
   assert.equal((await legacyWalletSession.GET(new NextRequest(`${origin}/api/auth/session`, { headers: { Cookie: wallet.cookie } }))).status, 200);
 });
@@ -897,4 +897,42 @@ test("anonymous logout clears cookies without opening a database transaction", a
     assert.equal(response.headers.get("cache-control"), "private, no-store");
     assert.equal((await route.DELETE(request("/api/auth/privy/session", "DELETE", undefined, undefined, undefined, "https://attacker.example"))).status, 403);
   } finally { Object.assign(db, { $transaction: transaction }); }
+});
+
+test("security metrics are private to reviewers and contain aggregates only", async () => {
+  const metrics = await import("../../app/api/admin/security/route");
+  const anonymous = await metrics.GET(request("/api/admin/security"));
+  assert.equal(anonymous.status, 401);
+  assert.equal(anonymous.headers.get("cache-control"), "private, no-store");
+  const member = await login([emailAccount("member-metrics@example.com")]);
+  assert.equal((await metrics.GET(request("/api/admin/security", "GET", undefined, member))).status, 403);
+  const reviewer = await login([emailAccount(reviewerEmail)]);
+  const response = await metrics.GET(request("/api/admin/security", "GET", undefined, reviewer));
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "private, no-store");
+  const body = await response.json();
+  assert.equal(body.windowMinutes, 60);
+  assert.equal(body.scope, "instance");
+  assert.ok(body.totals.requests > 0);
+  for (const privateValue of [reviewerEmail, "member-metrics@example.com", reviewer.user.id, reviewer.cookie]) {
+    assert.ok(!JSON.stringify(body).includes(privateValue));
+  }
+});
+
+test("verified login subjects are gated before any provider profile lookup", async () => {
+  const did = "did:privy:pre-provider-limit";
+  const tokens = await tokenPair({ privyDid: did });
+  const denied = new Error("ACCOUNT_AT_CAPACITY");
+  let checked = 0;
+  const before = fetchedUrls.filter((url) => url.includes("/users/me")).length;
+  await assert.rejects(() => auth.verifyPrivyTokens({ accessToken: tokens.accessToken }, undefined, async (subject) => {
+    assert.equal(subject, did);
+    checked++;
+    throw denied;
+  }), (error) => error === denied);
+  assert.equal(checked, 1);
+  assert.equal(fetchedUrls.filter((url) => url.includes("/users/me")).length, before);
+  const forged = await tokenPair({ accessClaims: { aud: "foreign-app" } });
+  await assert.rejects(() => auth.verifyPrivyTokens({ accessToken: forged.accessToken }, undefined, async () => { checked++; }));
+  assert.equal(checked, 1, "unverified subjects never enter the account gate");
 });

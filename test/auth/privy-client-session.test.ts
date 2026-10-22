@@ -270,3 +270,13 @@ test("failed verification cannot trigger a request on every focus event", async 
   await focus(); await focus(); await focus();
   assert.equal(postCount, 2);
 });
+
+test("login retry respects the server cooldown without clearing a valid session", async () => {
+  responses.push(success()); await render();
+  responses.push(Response.json({ error: "Please wait before trying again." }, { status: 429, headers: { "Retry-After": "10" } }));
+  await refresh();
+  assert.equal(session.authenticated, true);
+  assert.equal(session.isSyncing, false);
+  assert.ok(timers.some((timer) => timer.active && timer.delay === 10_000));
+  assert.equal(draftUnmounts, 0);
+});

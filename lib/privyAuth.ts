@@ -165,6 +165,7 @@ function privyKeys(appId: string): JWTVerifyGetKey {
 export async function verifyPrivyTokens(
   input: { accessToken: string; identityToken?: string | null },
   verificationKey?: JWTVerifyGetKey,
+  onVerifiedSubject?: (privyDid: string) => Promise<void>,
 ): Promise<VerifiedPrivyIdentity> {
   const appId = getPrivyAppId();
   if (!appId) throw new Error("PRIVY_NOT_CONFIGURED");
@@ -198,6 +199,8 @@ export async function verifyPrivyTokens(
   };
   validateClaims(access);
   if (typeof access.payload.sid !== "string" || !access.payload.sid) throw new Error("INVALID_PRIVY_TOKEN");
+  // A verified DID can acquire its abuse budget before any provider profile read.
+  await onVerifiedSubject?.(access.payload.sub!);
   let accounts: unknown;
   let identityExpiresAt = access.payload.exp!;
   if (input.identityToken) {
