@@ -319,3 +319,60 @@ test("NFT types survive private review, filter publicly, and block soulbound res
   const editionId = published.get("EDITION")!;
   assert.equal((await itemStatus.PATCH(request(`/api/items/${editionId}/status`, "PATCH", { status: "LISTED" }, ownerCookie), { params: { id: editionId } })).status, 200);
 });
+
+test("catalog pages stay bounded with tied timestamps, deletions, and newer inserts", async () => {
+  const creator = await db.user.create({ data: { username: "Pagination fixture" } });
+  const createdAt = new Date("2020-01-01T00:00:00.000Z");
+  const wallet = "0x5555555555555555555555555555555555555555";
+  await db.user.update({ where: { id: creator.id }, data: { walletAddress: wallet } });
+  for (const id of ["page-a", "page-b", "page-c", "page-d", "page-e"]) {
+    await db.item.create({ data: { id, creatorId: creator.id, itemType: "NFT", title: id, createdAt } });
+  }
+  const path = `/api/items?creator=${wallet}&limit=2`;
+  const first = await (await catalog.GET(request(path))).json();
+  assert.deepEqual(first.items.map((item: { id: string }) => item.id), ["page-e", "page-d"]);
+  await db.item.delete({ where: { id: "page-d" } });
+  await db.item.create({ data: { id: "page-new", creatorId: creator.id, itemType: "NFT", title: "Newer" } });
+  const second = await (await catalog.GET(request(`${path}&cursor=${first.nextCursor}`))).json();
+  assert.deepEqual(second.items.map((item: { id: string }) => item.id), ["page-c", "page-b"]);
+  const third = await (await catalog.GET(request(`${path}&cursor=${second.nextCursor}`))).json();
+  assert.deepEqual(third.items.map((item: { id: string }) => item.id), ["page-a"]);
+  assert.equal(third.nextCursor, null);
+  for (const query of ["limit=0", "limit=101", "cursor=invalid"]) {
+    assert.equal((await catalog.GET(request(`/api/items?${query}`))).status, 400);
+  }
+});
+
+test("landing trending drops select four published NFTs and advance at the next hour", async () => {
+  const { GET } = await import("../../app/api/trending/route");
+  const originalNow = Date.now;
+  const creator = await db.user.create({ data: { username: "Hourly trending fixture" } });
+  try {
+    Date.now = () => Date.parse("2030-01-01T12:30:00.000Z");
+    for (let index = 0; index < 5; index++) {
+      await db.item.create({ data: { id: `trending-${index}`, title: `Published ${index}`, itemType: "NFT", creatorId: creator.id, createdAt: new Date(`2030-01-01T11:5${index}:00.000Z`) } });
+    }
+    await db.item.create({ data: { id: "trending-next", title: "Published this hour", itemType: "NFT", creatorId: creator.id, createdAt: new Date("2030-01-01T12:10:00.000Z") } });
+    await db.item.create({ data: { id: "trending-art", title: "Physical art", itemType: "WEB2_ART", creatorId: creator.id, createdAt: new Date("2030-01-01T11:59:00.000Z") } });
+    const response = await GET();
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("cache-control"), "public, max-age=0, s-maxage=1800");
+    const first = await response.json();
+    assert.deepEqual(first.items.map((item: { id: string }) => item.id), ["trending-4", "trending-3", "trending-2", "trending-1"]);
+    assert.equal(first.nextAt, "2030-01-01T13:00:00.000Z");
+    assert.deepEqual(Object.keys(first.items[0]).sort(), ["id", "imageUrl", "status", "title"]);
+    Date.now = () => Date.parse("2030-01-01T12:59:59.000Z");
+    assert.deepEqual((await (await GET()).json()).items, first.items);
+    Date.now = () => Date.parse("2030-01-01T13:00:00.000Z");
+    const next = await (await GET()).json();
+    assert.deepEqual(next.items.map((item: { id: string }) => item.id), ["trending-next", "trending-4", "trending-3", "trending-2"]);
+    assert.equal(next.nextAt, "2030-01-01T14:00:00.000Z");
+    await db.item.deleteMany({ where: { creatorId: creator.id } });
+    Date.now = () => Date.parse("2000-01-01T00:00:00.000Z");
+    assert.deepEqual((await (await GET()).json()).items, []);
+  } finally {
+    Date.now = originalNow;
+    await db.item.deleteMany({ where: { creatorId: creator.id } });
+    await db.user.delete({ where: { id: creator.id } });
+  }
+});

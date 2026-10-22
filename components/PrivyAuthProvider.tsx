@@ -1,6 +1,6 @@
 "use client";
 
-import { getIdentityToken, useIdentityToken, useLinkAccount, usePrivy, useUser, useWallets } from "@privy-io/react-auth";
+import { getIdentityToken, useIdentityToken, useLinkAccount, usePrivy, useWallets } from "@privy-io/react-auth";
 import { useSetActiveWallet } from "@privy-io/wagmi";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -30,6 +30,17 @@ function accountChoices(value: unknown): PrivyAccountChoice[] {
   if (!Array.isArray(value)) return [];
   return value.filter((account): account is PrivyAccountChoice =>
     Boolean(account) && typeof account === "object" && typeof account.id === "string" && typeof account.label === "string");
+}
+
+// SDK promises need cancellation too: aborting fetch alone cannot release a
+// stalled token read. Late SDK results never update the current session.
+function abortable<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(new Error("SESSION_REQUEST_ABORTED"));
+    if (signal.aborted) { void work.catch(() => undefined); onAbort(); return; }
+    signal.addEventListener("abort", onAbort, { once: true });
+    work.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+  });
 }
 
 type VerifiedSession = { binding: string; user: PrivyAccount; expiresAt: number };
@@ -65,7 +76,6 @@ export function UnconfiguredPrivyAuthProvider({ children }: { children: ReactNod
 /** Converts signed Privy tokens to a short-lived, server-verified Artiq session. */
 export default function PrivyAuthProvider({ children }: { children: ReactNode }) {
   const { ready, authenticated: sdkAuthenticated, user: sdkUser, getAccessToken, login: openLogin, logout: sdkLogout } = usePrivy();
-  const { refreshUser } = useUser();
   const { identityToken: observedIdentityToken } = useIdentityToken();
   const { wallets } = useWallets();
   const { setActiveWallet } = useSetActiveWallet();
@@ -76,6 +86,10 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
   const verifiedRef = useRef(verified);
   verifiedRef.current = verified;
   const [isSyncing, setIsSyncing] = useState(false);
+  const [retryDelay, setRetryDelay] = useState<number | null>(null);
+  const retryCount = useRef(0);
+  const renewalAttemptedFor = useRef<number | null>(null);
+  const lastFocusSync = useRef(0);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { linkWallet } = useLinkAccount({ onError: () => setError("Could not link this wallet. Please try again.") });
@@ -89,8 +103,6 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
   const lastAccount = useRef<string | null>(null);
   const tokenGetter = useRef(getAccessToken);
   tokenGetter.current = getAccessToken;
-  const refreshSdkUser = useRef(refreshUser);
-  refreshSdkUser.current = refreshUser;
   const invalidatePendingSync = useCallback(() => {
     ++generation.current;
     pending.current?.controller.abort();
@@ -126,11 +138,18 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
   const revokeServerSession = useCallback(async () => {
     if (pendingRevocation.current) return pendingRevocation.current;
     const request = (async () => {
-      const response = await fetch("/api/auth/privy/session", { method: "DELETE", credentials: "same-origin", cache: "no-store" });
-      if (!response.ok) {
-        const body = await response.json().catch(() => null);
-        throw new Error(typeof body?.error === "string" ? body.error : "Could not sign out. Please try again.");
-      }
+      const controller = new AbortController();
+      const timer = window.setTimeout(() => controller.abort(), 15_000);
+      try {
+        const response = await abortable(fetch("/api/auth/privy/session", { method: "DELETE", credentials: "same-origin", cache: "no-store", signal: controller.signal }), controller.signal);
+        if (!response.ok) {
+          const body = await abortable(response.json(), controller.signal).catch(() => null);
+          throw new Error(typeof body?.error === "string" ? body.error : "Could not sign out. Please try again.");
+        }
+      } catch (cause) {
+        if (controller.signal.aborted) throw new Error("Sign-out took too long. Please try again.");
+        throw cause;
+      } finally { window.clearTimeout(timer); }
     })();
     pendingRevocation.current = request;
     try { await request; }
@@ -145,36 +164,31 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
     const controller = new AbortController();
     const version = ++generation.current;
     setIsSyncing(true);
+    setRetryDelay(null);
     setError(null);
-    const isCurrent = () => mounted.current && !controller.signal.aborted && version === generation.current && current.current.binding === requestedBinding && !loggingOut.current && !suspended.current;
+    let timedOut = false;
+    const deadline = window.setTimeout(() => { timedOut = true; controller.abort(); }, 20_000);
+    const isLatest = () => mounted.current && version === generation.current && current.current.binding === requestedBinding && !loggingOut.current && !suspended.current;
+    const isCurrent = () => isLatest() && !controller.signal.aborted;
     const request = (async () => {
       let invalidSession = false;
       try {
         // A previous unauthenticated render may still be clearing a cookie.
         // Let that response finish before a fresh sign-in writes its cookie.
-        await pendingRevocation.current?.catch(() => undefined);
+        await abortable(pendingRevocation.current?.catch(() => undefined) ?? Promise.resolve(), controller.signal);
         if (!isCurrent()) return false;
-        const accessToken = await tokenGetter.current();
+        const accessToken = await abortable(tokenGetter.current(), controller.signal);
         if (!isCurrent()) return false;
         if (!accessToken) {
           invalidSession = true;
           throw new Error("Your sign-in has expired. Sign out and sign in again.");
         }
-        let identityToken = await getIdentityToken().catch(() => null);
+        const identityToken = await abortable(getIdentityToken().catch(() => null), controller.signal);
         if (!isCurrent()) return false;
-        if (!identityToken) {
-          // Privy may finish login before publishing its identity token. The
-          // documented refresh also recovers sessions created before the app
-          // enabled identity tokens; no unsigned SDK identity reaches the API.
-          await refreshSdkUser.current().catch(() => undefined);
-          if (!isCurrent()) return false;
-          identityToken = await getIdentityToken().catch(() => null);
-          if (!isCurrent()) return false;
-        }
         // A missing identity token is supported by the server's authenticated
         // Privy profile lookup. Only Privy can attest email/wallet ownership;
         // the unsigned SDK user is never sent as an authentication substitute.
-        const response = await fetch("/api/auth/privy/session", {
+        const response = await abortable(fetch("/api/auth/privy/session", {
           method: "POST",
           credentials: "same-origin",
           cache: "no-store",
@@ -183,8 +197,8 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ accessToken, identityToken, ...(preferredAccountId ? { preferredAccountId } : {}) }),
           signal: controller.signal,
-        });
-        const body = await response.json().catch(() => null);
+        }), controller.signal);
+        const body = await abortable(response.json().catch(() => null), controller.signal);
         if (!isCurrent()) return false;
         if (response.status === 409 && body?.code === "ACCOUNT_SELECTION_REQUIRED") {
           clearSession();
@@ -205,20 +219,27 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
         if (lastAccount.current !== accountId) clearPrivateQueries(queryClient);
         const changed = lastAccount.current !== accountId;
         lastAccount.current = accountId;
+        retryCount.current = 0;
         setVerified({ binding: requestedBinding, user: body.user, expiresAt });
         setPendingAccounts([]);
         setError(null);
         if (changed) window.dispatchEvent(new Event(PRIVY_SESSION_CHANGED));
         return true;
       } catch (cause) {
-        if (!isCurrent()) return false;
+        if (!isLatest()) return false;
         const previous = verifiedRef.current;
         // A failed network/provider refresh does not revoke a previously
         // verified, unexpired session. Private APIs still check its cookie.
         if (invalidSession || !previous || previous.binding !== requestedBinding || previous.expiresAt <= Date.now()) clearSession();
-        setError(cause instanceof Error ? cause.message : "Could not verify your sign-in. Please try again.");
+        setError(timedOut ? "Sign-in took too long. Check your connection and try again." : cause instanceof Error ? cause.message : "Could not verify your sign-in. Please try again.");
+        // Spread recovery traffic after an outage; never retry rejected credentials.
+        if (!invalidSession && retryCount.current < 2) {
+          const attempt = retryCount.current++;
+          setRetryDelay(2_000 * 2 ** attempt + Math.floor(Math.random() * 1_000));
+        }
         return false;
       } finally {
+        window.clearTimeout(deadline);
         if (version === generation.current && mounted.current) {
           pending.current = null;
           setIsSyncing(false);
@@ -229,7 +250,7 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
     return request;
   }, [clearSession, queryClient]);
 
-  const refresh = useCallback(() => sync(), [sync]);
+  const refresh = useCallback(() => { retryCount.current = 0; return sync(); }, [sync]);
   const selectAccount = useCallback((accountId: string) => {
     if (!pendingAccounts.some((account) => account.id === accountId)) return Promise.resolve(false);
     return sync(accountId);
@@ -248,6 +269,10 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
     pending.current?.controller.abort();
     pending.current = null;
     setIsSyncing(false);
+    setRetryDelay(null);
+    retryCount.current = 0;
+    renewalAttemptedFor.current = null;
+    lastFocusSync.current = 0;
     clearSession();
     setError(null);
     if (!ready || loggingOut.current || suspended.current) return;
@@ -264,6 +289,12 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
     if (binding && !pending.current && !current.current.hasPendingChoice) void sync();
   }, [binding, identity, sync]);
 
+  useEffect(() => {
+    if (!binding || retryDelay === null || pendingAccounts.length || isLoggingOut) return;
+    const timer = window.setTimeout(() => { void sync(); }, retryDelay);
+    return () => window.clearTimeout(timer);
+  }, [binding, isLoggingOut, pendingAccounts.length, retryDelay, sync]);
+
   // A token can arrive after the login callback. Resume verification rather
   // than leaving a successfully signed-in user at a second Sign in button.
   const hasIdentityToken = Boolean(observedIdentityToken);
@@ -278,6 +309,8 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
       // Switching tabs need not hit Privy's current-user API again. Renewal
       // handles expiring sessions; explicit retries remain available.
       if (active?.binding === binding && active.expiresAt - Date.now() > 60_000) return;
+      if (Date.now() - lastFocusSync.current < 30_000) return;
+      lastFocusSync.current = Date.now();
       void sync();
     };
     const timer = window.setInterval(onFocus, 4 * 60_000);
@@ -293,16 +326,23 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
     // Renew before expiry so the review queue and unsaved notes stay mounted.
     // The separate expiry timer still locks the UI if renewal cannot succeed.
     const remaining = verified.expiresAt - Date.now();
-    const renewal = window.setTimeout(() => { void sync(); }, Math.max(1_000, remaining > 60_000 ? remaining - 60_000 : remaining / 2));
+    // A refreshed SDK token can retain its original expiry. Renew that expiry
+    // once, rather than creating an accelerating loop of session writes.
+    const lead = 60_000 + Math.floor(Math.random() * 30_000);
+    const renewal = renewalAttemptedFor.current === verified.expiresAt ? null : window.setTimeout(() => {
+      renewalAttemptedFor.current = verified.expiresAt;
+      void sync();
+    }, Math.max(1_000, remaining > lead ? remaining - lead : remaining / 2));
     const timer = window.setTimeout(() => {
       clearSession();
       void sync();
     }, Math.max(0, verified.expiresAt - Date.now()));
-    return () => { window.clearTimeout(renewal); window.clearTimeout(timer); };
+    return () => { if (renewal !== null) window.clearTimeout(renewal); window.clearTimeout(timer); };
   }, [clearSession, sync, verified]);
 
   const login = useCallback((options?: PrivyLoginOptions) => {
     suspended.current = false;
+    retryCount.current = 0;
     setError(null);
     if (sdkAuthenticated) {
       void sync();
@@ -347,21 +387,25 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
     pending.current?.controller.abort();
     pending.current = null;
     setIsSyncing(false);
+    setRetryDelay(null);
     setIsLoggingOut(true);
     setError(null);
     clearSession();
     clearPrivateQueries(queryClient);
+    const controller = new AbortController();
+    const deadline = window.setTimeout(() => controller.abort(), 30_000);
     try {
       // Revoke the server's HttpOnly session before logging out of Privy.
       await revokeServerSession();
-      await sdkLogout();
-      await disconnectAsync().catch(() => undefined);
+      await abortable(sdkLogout(), controller.signal);
+      await abortable(disconnectAsync().catch(() => undefined), controller.signal);
       window.dispatchEvent(new Event(PRIVY_SESSION_CHANGED));
       return true;
     } catch (cause) {
-      if (mounted.current) setError(cause instanceof Error ? cause.message : "Could not sign out. Please try again.");
+      if (mounted.current) setError(controller.signal.aborted ? "Sign-out took too long. Please try again." : cause instanceof Error ? cause.message : "Could not sign out. Please try again.");
       return false;
     } finally {
+      window.clearTimeout(deadline);
       loggingOut.current = false;
       if (mounted.current) setIsLoggingOut(false);
     }

@@ -1,9 +1,15 @@
+import { unstable_cache } from "next/cache";
 import { NextRequest, NextResponse } from "next/server";
 import { getTesterLeaderboard } from "@/lib/testerLeaderboard";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 const headers = { "Cache-Control": "no-store" };
+const publicHeaders = { "Cache-Control": "public, max-age=0, s-maxage=30, stale-while-revalidate=30" };
+const loadLeaderboard = (page: number, pageSize: number) => getTesterLeaderboard({ page, pageSize });
+const cachedLeaderboard = process.env.NODE_ENV === "production"
+  ? unstable_cache(loadLeaderboard, ["tester-leaderboard-v1"], { revalidate: 30 })
+  : loadLeaderboard;
 
 export async function GET(request: NextRequest) {
   const pageValue = request.nextUrl.searchParams.get("page");
@@ -12,7 +18,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Choose a valid leaderboard page and page size." }, { status: 400, headers });
   }
   try {
-    return NextResponse.json(await getTesterLeaderboard({ page: pageValue ? Number(pageValue) : 1, pageSize: sizeValue ? Number(sizeValue) : 20 }), { headers });
+    return NextResponse.json(await cachedLeaderboard(pageValue ? Number(pageValue) : 1, sizeValue ? Number(sizeValue) : 20), { headers: publicHeaders });
   } catch {
     return NextResponse.json({ error: "The tester leaderboard is temporarily unavailable. Please try again." }, { status: 503, headers });
   }

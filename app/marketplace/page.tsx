@@ -8,7 +8,7 @@ import { arcChain } from "@/lib/arcConfig";
 import Atmosphere from "@/components/Atmosphere";
 import { Suspense, useEffect, useState, type FormEvent } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
+import { useCatalogPage } from "@/hooks/useCatalogPage";
 import ArticLogo from "@/components/ArticLogo";
 import ThemeToggle from "@/components/ThemeToggle";
 import ConnectWalletButton from "@/components/ConnectWalletButton";
@@ -157,15 +157,8 @@ function MarketplaceShell() {
   }
 
   const itemType = mode === "nft" ? "NFT" : "WEB2_ART";
-  const { data, isLoading, isError } = useQuery({
-    queryKey: ["items", itemType],
-    queryFn: async (): Promise<MarketplaceItem[]> => {
-      const res = await fetch(`/api/items?itemType=${itemType}`);
-      if (!res.ok) throw new Error("Failed to load items");
-      const json = await res.json();
-      return json.items;
-    },
-  });
+  const catalog = useCatalogPage<MarketplaceItem>(itemType);
+  const { data, isLoading, isError } = catalog;
 
   const allItems = data ?? [];
   const searchTerms = search.trim().split(/\s+/).filter(Boolean);
@@ -330,6 +323,12 @@ function MarketplaceShell() {
               : items.map((item) => <ItemCard key={item.id} item={item} />)}
           </div>
 
+          <div className="mt-6 flex items-center justify-center gap-4 text-xs">
+            <button disabled={!catalog.hasPrevious || catalog.isFetching} onClick={catalog.previous}>Previous</button>
+            <span>Page {catalog.page} · Filters apply to this page</span>
+            <button disabled={!catalog.hasNext || catalog.isFetching} onClick={catalog.next}>Next</button>
+          </div>
+          {isError && <button className="mt-4 text-sm" onClick={() => void catalog.refetch()}>Try again</button>}
           {!isLoading && !isError && items.length === 0 && (
             <div className="mt-10 rounded-xl border border-[var(--border-soft)] p-6">
               <h2 className="text-lg font-semibold">No matching {mode === "nft" ? "collections" : "art pieces"}</h2>

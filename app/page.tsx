@@ -1,3 +1,4 @@
+import TrendingDrops from "@/components/TrendingDrops";
 import DailyMuse from "@/components/DailyMuse";
 import Image from "next/image";
 import { arcChain } from "@/lib/arcConfig";
@@ -71,13 +72,6 @@ const FLOW_STATS = [
   { label: "COLLECTIONS LIVE", value: "—" },
   { label: "ITEMS MINTED", value: "—" },
   { label: "VOLUME SETTLED", value: "—" },
-] as const;
-
-const TRENDING_DROPS = [
-  { image: "/trend-1.png", title: "Telescope Study No. 3", status: "UPCOMING" },
-  { image: "/trend-2.png", title: "Ascent", status: "LIVE" },
-  { image: "/trend-3.png", title: "Reaching Hand", status: "LIVE" },
-  { image: "/trend-4.png", title: "Pencil & Aperture", status: "UPCOMING" },
 ] as const;
 
 const sectionHeading = "text-2xl font-extrabold uppercase tracking-[-0.01em] text-[var(--page-text)] sm:text-3xl lg:text-4xl";
@@ -251,27 +245,14 @@ export default function Home() {
             <div>
               <Eyebrow className="text-[var(--faint-text)]">Trending</Eyebrow>
               <h2 className={sectionHeading}>Trending drops</h2>
+              <p className="mt-3 text-sm text-[var(--muted-text)]">The newest published NFT collections, updated every hour.</p>
             </div>
-            <Link href="/marketplace" className="text-sm font-semibold text-[#EF476F] hover:text-[#d73c63] sm:text-base">
+            <Link href="/nfts" className="text-sm font-semibold text-[#EF476F] hover:text-[#d73c63] sm:text-base">
               View all ↗
             </Link>
           </div>
 
-          <div className="mt-10 grid grid-cols-2 gap-4 border-t border-[var(--border-soft)] pt-10 sm:gap-6 lg:mt-14 lg:grid-cols-4 lg:pt-14">
-            {TRENDING_DROPS.map((item) => (
-              <div key={item.title} className="gallery-card overflow-hidden bg-[var(--card-bg)]">
-                <div className="gallery-card-media relative aspect-square">
-                  <Image src={item.image} alt={item.title} fill sizes="(min-width: 1024px) 25vw, 50vw" className="object-cover" />
-                  <span className="absolute left-3 top-3 rounded bg-white/90 px-2 py-0.5 font-mono text-[10px] font-semibold tracking-[0.05em] text-[#362A67]">
-                    {item.status}
-                  </span>
-                </div>
-                <div className="p-4">
-                  <p className="text-sm font-semibold text-[var(--page-text)]">{item.title}</p>
-                </div>
-              </div>
-            ))}
-          </div>
+          <TrendingDrops />
         </div>
       </section>
 

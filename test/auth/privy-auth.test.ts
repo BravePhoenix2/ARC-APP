@@ -886,3 +886,15 @@ test("uses secure production cookies, respects the earliest JWT expiry and revok
   assert.equal(await db.privySession.count(), 0);
   assert.ok(fetchedUrls.length > 0, "actual route token verification loaded the stubbed official JWKS endpoint");
 });
+
+test("anonymous logout clears cookies without opening a database transaction", async () => {
+  const transaction = db.$transaction;
+  Object.assign(db, { $transaction: () => { throw new Error("Anonymous logout must not access the database"); } });
+  try {
+    const response = await route.DELETE(request("/api/auth/privy/session", "DELETE"));
+    assert.equal(response.status, 200);
+    assert.ok(response.headers.get("set-cookie")?.includes("Max-Age=0"));
+    assert.equal(response.headers.get("cache-control"), "private, no-store");
+    assert.equal((await route.DELETE(request("/api/auth/privy/session", "DELETE", undefined, undefined, undefined, "https://attacker.example"))).status, 403);
+  } finally { Object.assign(db, { $transaction: transaction }); }
+});

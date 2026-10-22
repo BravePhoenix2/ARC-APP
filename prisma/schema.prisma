@@ -158,6 +158,9 @@ model Item {
   artOrder ArtOrder?
   watchers WatchlistEntry[]
 
+  @@index([createdAt, id])
+  @@index([itemType, createdAt, id])
+  @@index([creatorId, createdAt, id])
   @@index([itemType])
   @@index([nftKind])
   @@index([status])

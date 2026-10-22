@@ -1,11 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/lib/generated/prisma/client";
+import { catalogPagination, catalogCursor } from "@/lib/catalogPagination";
+import { publicCatalogSelect } from "@/lib/publicCatalog";
 import { isNftKind } from "@/lib/nftTypes";
 
 // GET /api/items?itemType=NFT|WEB2_ART&status=LIVE&category=PAINTING&creator=0x...
 export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
+  let pagination;
+  try { pagination = catalogPagination(params); }
+  catch (error) { return NextResponse.json({ error: (error as Error).message }, { status: 400 }); }
+  const { limit, after } = pagination;
   const itemType = params.get("itemType");
   const status = params.get("status");
   const category = params.get("category");
@@ -34,12 +40,20 @@ export async function GET(request: NextRequest) {
   };
 
   const items = await prisma.item.findMany({
-    where,
-    include: { creator: { select: { id: true, walletAddress: true, username: true } } },
-    orderBy: { createdAt: "desc" },
+    where: after ? { AND: [where, { OR: [
+      { createdAt: { lt: after.createdAt } },
+      { createdAt: after.createdAt, id: { lt: after.id } },
+    ] }] } : where,
+    select: { ...publicCatalogSelect, nftKind: true, maxSupply: true, mintedCount: true, contractAddress: true, creationMethod: true, creatorId: true, symbol: true, maxPerWallet: true, royaltyBps: true, metadataUri: true, attributes: true },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: limit + 1,
   });
 
-  return NextResponse.json({ items });
+  const hasMore = items.length > limit;
+  const page = items.slice(0, limit);
+  return NextResponse.json({ items: page, nextCursor: hasMore ? catalogCursor(page[page.length - 1]) : null }, {
+    headers: { "Cache-Control": "public, max-age=0, s-maxage=15, stale-while-revalidate=30" },
+  });
 }
 
 // Public creation would bypass creator review. Publishing happens only when

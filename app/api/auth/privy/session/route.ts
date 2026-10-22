@@ -204,7 +204,11 @@ export async function POST(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   if (!sameOrigin(request)) return NextResponse.json({ error: "This request must come from Artiq." }, { status: 403, headers });
   try {
-    await prisma.$transaction((tx) => revokeRequestSessions(tx, request));
+    // Anonymous visits also call DELETE to clear stale browser cookies. Avoid
+    // opening a write transaction when no revocable token was supplied.
+    const hasSessionToken = [PRIVY_SESSION_COOKIE, EMAIL_SESSION_COOKIE, WALLET_SESSION_COOKIE]
+      .some((name) => /^[a-f0-9]{64}$/.test(request.cookies.get(name)?.value ?? ""));
+    if (hasSessionToken) await prisma.$transaction((tx) => revokeRequestSessions(tx, request));
     const response = NextResponse.json({ ok: true }, { headers });
     clearPrivySessionCookie(response);
     clearEmailSessionCookie(response);

@@ -447,7 +447,7 @@ test("locking rejects oversubscribed Ultimate guarantees and allows a fully back
 test("daily discovery returns published work only and never exposes identity or delivery fields", async () => {
   const discovery = await import("../../app/api/discovery/route");
   const first = await discovery.GET(); const second = await discovery.GET();
-  assert.equal(first.status, 200); assert.equal(first.headers.get("cache-control"), "no-store");
+  assert.equal(first.status, 200); assert.equal(first.headers.get("cache-control"), "public, max-age=0, s-maxage=30, stale-while-revalidate=30");
   const body = await first.json(); assert.deepEqual(await second.json(), body);
   assert.match(body.day, /^\d{4}-\d{2}-\d{2}$/); assert.ok(body.items.length);
   for (const item of body.items) {

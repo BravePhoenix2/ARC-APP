@@ -19,15 +19,19 @@ let events: EventTarget;
 let responses: Array<Response | Error>;
 let timers: Array<{ callback: () => void; delay: number; active: boolean }>;
 let draftUnmounts: number;
+let accessToken: () => Promise<string | null>;
+let identityToken: () => Promise<string | null>;
+let postCount: number;
+let sdkLogout: () => Promise<void>;
 const originalFetch = globalThis.fetch;
 const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
 
 const dependencies: Record<string, unknown> = {
   "@privy-io/react-auth": {
-    usePrivy: () => ({ ...sdk, getAccessToken: async () => "signed-access", login() {}, logout: async () => {} }),
+    usePrivy: () => ({ ...sdk, getAccessToken: () => accessToken(), login() {}, logout: () => sdkLogout() }),
     useUser: () => ({ refreshUser: async () => {} }),
     useIdentityToken: () => ({ identityToken: "signed-identity" }),
-    getIdentityToken: async () => "signed-identity",
+    getIdentityToken: () => identityToken(),
     useLinkAccount: () => ({ linkWallet() {} }),
     useWallets: () => ({ wallets: [] }),
   },
@@ -67,6 +71,10 @@ async function refresh() { await act(async () => { await session.refresh(); }); 
 beforeEach(() => {
   sdk = { ready: true, authenticated: true, user: { id: "did:privy:reviewer", email: { address: "reviewer@example.com" }, linkedAccounts: [{ type: "email", address: "reviewer@example.com" }] } };
   events = new EventTarget(); responses = []; timers = []; draftUnmounts = 0;
+  accessToken = async () => "signed-access";
+  identityToken = async () => "signed-identity";
+  sdkLogout = async () => {};
+  postCount = 0;
   Object.defineProperty(globalThis, "window", { configurable: true, value: {
     addEventListener: events.addEventListener.bind(events), removeEventListener: events.removeEventListener.bind(events), dispatchEvent: events.dispatchEvent.bind(events),
     setInterval: () => 1, clearInterval() {},
@@ -75,6 +83,7 @@ beforeEach(() => {
   } });
   globalThis.fetch = async (_url, options) => {
     if (options?.method === "DELETE") return Response.json({ ok: true });
+    postCount++;
     const response = responses.shift();
     assert.ok(response, "Unexpected session request");
     if (response instanceof Error) throw response;
@@ -144,4 +153,120 @@ test("tab focus does not repeat provider verification for an unexpired session",
   assert.equal(responses[0], untouched);
   assert.equal(session.error, null);
   assert.equal(session.authenticated, true);
+});
+
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+async function fireTimer(timer: { callback: () => void; active: boolean }) {
+  timer.active = false;
+  await act(async () => { timer.callback(); });
+}
+function retryTimer() { return timers.find((timer) => timer.active && timer.delay >= 2_000 && timer.delay < 5_000); }
+
+test("a stalled SDK token read times out, releases loading and ignores late credentials", async () => {
+  const token = deferred<string>();
+  accessToken = () => token.promise;
+  await render();
+  assert.equal(session.isSyncing, true);
+  const deadline = timers.find((timer) => timer.active && timer.delay === 20_000)!;
+  await fireTimer(deadline);
+  assert.equal(session.isSyncing, false);
+  assert.equal(session.authenticationState, "verification-error");
+  assert.match(session.error!, /took too long/);
+  await act(async () => { token.resolve("late-token"); });
+  assert.equal(postCount, 0);
+  accessToken = async () => "fresh-token";
+  responses.push(success());
+  await refresh();
+  assert.equal(session.authenticated, true);
+});
+
+test("concurrent refreshes share one verification request", async () => {
+  responses.push(success()); await render();
+  const token = deferred<string>(); accessToken = () => token.promise;
+  let first!: Promise<boolean>; let second!: Promise<boolean>;
+  await act(async () => { first = session.refresh(); second = session.refresh(); });
+  responses.push(success());
+  await act(async () => { token.resolve("fresh-token"); assert.deepEqual(await Promise.all([first, second]), [true, true]); });
+  assert.equal(postCount, 2, "one bootstrap and one shared refresh");
+});
+
+test("temporary login failures retry twice with backoff, then stop", async () => {
+  responses.push(Response.json({ error: "Unavailable" }, { status: 503 })); await render();
+  const first = retryTimer()!; assert.ok(first);
+  responses.push(new TypeError("fetch failed")); await fireTimer(first);
+  const second = retryTimer()!; assert.ok(second);
+  assert.ok(second.delay > first.delay);
+  responses.push(Response.json({ error: "Unavailable" }, { status: 503 })); await fireTimer(second);
+  assert.equal(retryTimer(), undefined);
+  assert.equal(postCount, 3);
+  assert.equal(session.isSyncing, false);
+  responses.push(success()); await refresh();
+  assert.equal(session.authenticated, true);
+});
+
+test("rejected credentials do not schedule automatic retries", async () => {
+  responses.push(Response.json({ error: "Invalid token" }, { status: 401 })); await render();
+  assert.equal(retryTimer(), undefined);
+  assert.equal(session.authenticated, false);
+  assert.equal(postCount, 1);
+});
+
+test("a missing identity token uses the server fallback immediately", async () => {
+  let reads = 0;
+  identityToken = async () => { reads++; return null; };
+  responses.push(success()); await render();
+  assert.equal(reads, 1);
+  assert.equal(postCount, 1);
+  assert.equal(session.authenticated, true);
+});
+
+test("a stalled HTTP verification times out without discarding a valid session", async () => {
+  responses.push(success()); await render();
+  const response = deferred<Response>();
+  globalThis.fetch = () => response.promise;
+  let result!: Promise<boolean>;
+  await act(async () => { result = session.refresh(); });
+  await fireTimer(timers.find((timer) => timer.active && timer.delay === 20_000)!);
+  assert.equal(await result, false);
+  assert.equal(session.isSyncing, false);
+  assert.equal(session.authenticated, true);
+  assert.equal(draftUnmounts, 0);
+  await act(async () => { response.resolve(success("wrong-late-account")); });
+  assert.equal(session.user?.id, "reviewer");
+});
+
+test("a stalled SDK logout releases the button and keeps private UI locked", async () => {
+  responses.push(success()); await render();
+  sdkLogout = () => new Promise(() => {});
+  let result!: Promise<boolean>;
+  await act(async () => { result = session.logout(); });
+  await fireTimer(timers.find((timer) => timer.active && timer.delay === 30_000)!);
+  assert.equal(await result, false);
+  assert.equal(session.authenticationState, "signed-out");
+  assert.equal(session.authenticated, false);
+  assert.equal(session.isLoading, false);
+  assert.match(session.error!, /Sign-out took too long/);
+});
+
+test("renewal with an unchanged token expiry does not start a refresh loop", async () => {
+  const expiresAt = Date.now() + 3_600_000;
+  responses.push(success("reviewer", expiresAt)); await render();
+  const renewal = timers.filter((timer) => timer.active).sort((a, b) => a.delay - b.delay)[0];
+  responses.push(success("reviewer", expiresAt)); await fireTimer(renewal);
+  const active = timers.filter((timer) => timer.active);
+  assert.equal(active.length, 1, "only hard expiry remains scheduled");
+  assert.ok(active[0].delay > 3_500_000);
+  assert.equal(postCount, 2);
+});
+
+test("failed verification cannot trigger a request on every focus event", async () => {
+  responses.push(Response.json({ error: "Unavailable" }, { status: 503 })); await render();
+  responses.push(Response.json({ error: "Unavailable" }, { status: 503 })); await focus();
+  await focus(); await focus(); await focus();
+  assert.equal(postCount, 2);
 });
