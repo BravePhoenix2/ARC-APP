@@ -39,7 +39,7 @@ export type PrivySession = {
   selectAccount: (accountId: string) => Promise<boolean>;
 };
 
-const unconfiguredSession: PrivySession = {
+export const unconfiguredSession: PrivySession = {
   configured: false,
   ready: true,
   authenticated: false,

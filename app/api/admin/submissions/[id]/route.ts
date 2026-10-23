@@ -71,5 +71,4 @@ async function handlePATCH(request: NextRequest, { params }: { params: { id: str
     return NextResponse.json({ error: "Couldn't save the review. Please try again." }, { status: 500 });
   }
 }
-
 export const PATCH = withAbuseProtection("PATCH admin/submissions/[id]", "interaction", handlePATCH);

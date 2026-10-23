@@ -10,6 +10,7 @@ const actionClass = "gallery-button inline-flex items-center justify-center gap-
 
 function SignInStatus() {
   const session = usePrivySession();
+  if (!session.ready) return <p role="status" className="mt-4 text-sm text-[var(--muted-text)]">Loading sign-in…</p>;
   if (!session.pendingAccounts.length && !session.sdkAuthenticated && !session.error) return null;
   return <div className="mt-4 max-w-md space-y-3 text-sm leading-6">
     {session.pendingAccounts.length > 0 ? <>

@@ -6,7 +6,7 @@ const require = createRequire(import.meta.url);
 const nextConfig = {
   reactStrictMode: true,
   // Build shared previews separately so the running app stays available.
-  distDir: process.env.ARTIQ_SHARED_BUILD === "true"
+  distDir: process.env.ARTIQ_LOCAL_BUILD === "true" ? ".next-local" : process.env.ARTIQ_SHARED_BUILD === "true"
     ? (process.env.ARTIQ_SHARED_BUILD_SLOT === "b" ? ".next-preview-b" : ".next-preview")
     : ".next",
   webpack(config) {

@@ -1,51 +1,40 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ComponentType, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { PrivyProvider } from "@privy-io/react-auth";
-import { WagmiProvider as PrivyWagmiProvider } from "@privy-io/wagmi";
-import { WagmiProvider } from "wagmi";
-import { privyWagmiConfig, wagmiConfig } from "@/lib/wagmiConfig";
-import { arcChain } from "@/lib/arcConfig";
-import { privyAppId, privyClientId } from "@/lib/privyClient";
-import PrivyAuthProvider, { UnconfiguredPrivyAuthProvider } from "@/components/PrivyAuthProvider";
+import { PrivySessionContext, unconfiguredSession, type PrivySession } from "@/hooks/usePrivySession";
+import { privyAppId } from "@/lib/privyClient";
 import { AppAccessGate } from "@/components/AppEntry";
 
+type WalletRuntime = ComponentType<{ children: ReactNode }>;
+
+/** Render the page before downloading and initializing the wallet SDK. */
 export default function Providers({ children }: { children: ReactNode }) {
   const [queryClient] = useState(() => new QueryClient());
+  const [Runtime, setRuntime] = useState<WalletRuntime | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const loadWallets = useCallback(() => {
+    setError(null);
+    void import("./wallet-providers").then((module) => setRuntime(() => module.default)).catch(() => {
+      setError("Sign-in could not load. Check your connection and try again.");
+    });
+  }, []);
 
-  if (privyAppId) {
-    return (
-      <PrivyProvider
-        appId={privyAppId}
-        clientId={privyClientId}
-        config={{
-          loginMethods: ["email", "wallet"],
-          supportedChains: [arcChain],
-          defaultChain: arcChain,
-          embeddedWallets: { ethereum: { createOnLogin: "users-without-wallets" } },
-          appearance: {
-            theme: "dark",
-            accentColor: "#F14B94",
-            walletChainType: "ethereum-only",
-            logo: "/brand/artic-wordmark-dark.svg",
-          },
-        }}
-      >
-        <QueryClientProvider client={queryClient}>
-          <PrivyWagmiProvider config={privyWagmiConfig}>
-            <PrivyAuthProvider><AppAccessGate>{children}</AppAccessGate></PrivyAuthProvider>
-          </PrivyWagmiProvider>
-        </QueryClientProvider>
-      </PrivyProvider>
-    );
-  }
+  useEffect(loadWallets, [loadWallets]);
 
-  return (
-    <WagmiProvider config={wagmiConfig}>
-      <QueryClientProvider client={queryClient}>
-        <UnconfiguredPrivyAuthProvider><AppAccessGate>{children}</AppAccessGate></UnconfiguredPrivyAuthProvider>
-      </QueryClientProvider>
-    </WagmiProvider>
-  );
+  const loadingSession: PrivySession = {
+    ...unconfiguredSession,
+    configured: Boolean(privyAppId),
+    ready: Boolean(error),
+    isLoading: !error,
+    authenticationState: error ? "signed-out" : "loading",
+    error,
+    login: loadWallets,
+  };
+
+  return <QueryClientProvider client={queryClient}>
+    {Runtime ? <Runtime>{children}</Runtime> : <PrivySessionContext.Provider value={loadingSession}>
+      <AppAccessGate>{children}</AppAccessGate>
+    </PrivySessionContext.Provider>}
+  </QueryClientProvider>;
 }

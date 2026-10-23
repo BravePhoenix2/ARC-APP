@@ -298,10 +298,16 @@ an unused Tempo connector import, and externalizes Privy’s optional Solana ada
 For fast local browsing without per-page development compilation, run
 `npm run preview` once, then open http://127.0.0.1:3000. Later, `npm run start:local`
 reuses the existing build. Rebuild after source or public environment changes.
+The optimized local build lives in `.next-local`, separate from development and
+shared preview files. `npm run build:local` builds it without starting a server.
 This command binds only to loopback and explicitly permits HTTP session cookies
 for that local run, including Safari. Normal `npm start` keeps production HTTPS
 cookies. Use `npm run dev` when editing and hot reload is needed; stop the other
 server before switching modes.
+
+The landing page renders before the wallet SDK downloads and initializes.
+Authenticated watchlist controls load separately, so public discovery does not
+pull wallet and private-account code into its initial JavaScript.
 
 The app and Prisma CLI default to `file:./prisma/dev.db` when `DATABASE_URL`
 is absent. Keep `.env.local` private. Blockchain transactions require a wallet,
