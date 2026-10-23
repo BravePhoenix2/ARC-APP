@@ -30,6 +30,7 @@ type VerificationDiagnostic = {
   stage: "jwks" | "access-token" | "identity-token" | "current-user";
   reason: "key-lookup" | "invalid-token" | "network" | "timeout" | "http-status" | "oversized" | "missing-body" | "invalid-json" | "invalid-profile";
   upstreamStatus?: number;
+  retryAfterSeconds?: number;
   networkCode?: string;
 };
 
@@ -85,7 +86,16 @@ async function currentPrivyAccounts(accessToken: string, appId: string, subject:
     throw new PrivyVerificationUnavailable({ stage: "current-user", ...networkDiagnostic(error) });
   }
   if (response.status === 401 || response.status === 403) throw new Error("INVALID_PRIVY_TOKEN");
-  if (!response.ok) throw new PrivyVerificationUnavailable({ stage: "current-user", reason: "http-status", upstreamStatus: response.status });
+  if (!response.ok) {
+    const retryAfter = response.headers.get("retry-after");
+    const seconds = retryAfter && /^\d+$/.test(retryAfter) ? Number(retryAfter)
+      : retryAfter ? Math.ceil((Date.parse(retryAfter) - Date.now()) / 1000) : NaN;
+    await response.body?.cancel();
+    throw new PrivyVerificationUnavailable({
+      stage: "current-user", reason: "http-status", upstreamStatus: response.status,
+      ...(response.status === 429 ? { retryAfterSeconds: Number.isFinite(seconds) && seconds > 0 ? Math.min(300, seconds) : 30 } : {}),
+    });
+  }
   // Bound both advertised and streamed JSON before parsing the upstream profile.
   const limit = 65_536;
   if (Number(response.headers.get("content-length")) > limit || !response.body) {

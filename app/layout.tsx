@@ -1,6 +1,9 @@
 import "./globals.css";
 import type { Metadata, Viewport } from "next";
+import { Raleway } from "next/font/google";
 import Providers from "./providers";
+
+const raleway = Raleway({ subsets: ["latin"], display: "swap", variable: "--font-raleway" });
 
 export const metadata: Metadata = {
   title: "Artic",
@@ -19,7 +22,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" className={raleway.variable}>
       <head>
         <script
           // Runs before paint to avoid a flash of the wrong theme: applies the

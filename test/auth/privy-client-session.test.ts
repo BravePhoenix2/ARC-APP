@@ -280,3 +280,25 @@ test("login retry respects the server cooldown without clearing a valid session"
   assert.ok(timers.some((timer) => timer.active && timer.delay === 10_000));
   assert.equal(draftUnmounts, 0);
 });
+
+test("provider throttling waits for Retry-After and repeated clicks cannot bypass the cooldown", async () => {
+  responses.push(success()); await render();
+  responses.push(Response.json({ error: "The sign-in provider is busy." }, { status: 503, headers: { "Retry-After": "45" } }));
+  await refresh();
+  assert.equal(session.authenticated, true);
+  assert.ok(timers.some((timer) => timer.active && timer.delay === 45_000));
+  const requests = postCount;
+  await refresh();
+  await act(async () => session.login());
+  assert.equal(postCount, requests, "manual retries do not make the upstream throttle worse");
+  assert.match(session.error!, /provider is busy/);
+  const originalNow = Date.now;
+  const afterCooldown = originalNow() + 45_001;
+  try {
+    Date.now = () => afterCooldown;
+    responses.push(success());
+    await refresh();
+    assert.equal(postCount, requests + 1);
+    assert.equal(session.error, null);
+  } finally { Date.now = originalNow; }
+});

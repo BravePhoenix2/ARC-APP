@@ -167,9 +167,12 @@ async function handlePOST(request: NextRequest) {
   } catch (cause) {
     if (cause instanceof LoginThrottled) return cause.response;
     const code = privyVerificationFailureCode(cause);
-    console.warn("[artiq-auth]", { event: "privy_session_verification_failed", code, ...privyVerificationDiagnostic(cause), elapsedMs: Date.now() - verificationStartedAt });
+    const diagnostic = privyVerificationDiagnostic(cause);
+    console.warn("[artiq-auth]", { event: "privy_session_verification_failed", code, ...diagnostic, elapsedMs: Date.now() - verificationStartedAt });
     if (code === "PRIVY_VERIFICATION_UNAVAILABLE") {
-      return NextResponse.json({ error: "Sign-in verification is temporarily unavailable. Please retry in a moment.", code }, { status: 503, headers });
+      return NextResponse.json({ error: diagnostic.retryAfterSeconds ? "The sign-in provider is busy. Please wait a moment before trying again." : "Sign-in verification is temporarily unavailable. Please retry in a moment.", code }, {
+        status: 503, headers: { ...headers, ...(diagnostic.retryAfterSeconds ? { "Retry-After": String(diagnostic.retryAfterSeconds) } : {}) },
+      });
     }
     return NextResponse.json({ error: "Your sign-in could not be verified. Sign in again and try once more.", code }, { status: 401, headers });
   }

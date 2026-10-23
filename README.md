@@ -308,6 +308,8 @@ server before switching modes.
 The landing page renders before the wallet SDK downloads and initializes.
 Authenticated watchlist controls load separately, so public discovery does not
 pull wallet and private-account code into its initial JavaScript.
+Raleway is served with the app through `next/font`, so page rendering does not
+wait for an external Google Fonts stylesheet.
 
 The app and Prisma CLI default to `file:./prisma/dev.db` when `DATABASE_URL`
 is absent. Keep `.env.local` private. Blockchain transactions require a wallet,

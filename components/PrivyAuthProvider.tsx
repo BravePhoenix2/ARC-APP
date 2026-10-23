@@ -88,6 +88,7 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
   const [isSyncing, setIsSyncing] = useState(false);
   const [retryDelay, setRetryDelay] = useState<number | null>(null);
   const retryCount = useRef(0);
+  const retryAfterUntil = useRef(0);
   const renewalAttemptedFor = useRef<number | null>(null);
   const lastFocusSync = useRef(0);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
@@ -158,6 +159,7 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
 
   const sync = useCallback(async (preferredAccountId?: string): Promise<boolean> => {
     const requestedBinding = current.current.binding;
+    if (Date.now() < retryAfterUntil.current) return false;
     if (!requestedBinding || !current.current.ready || !current.current.sdkAuthenticated || loggingOut.current || suspended.current) return false;
     if (pending.current?.binding === requestedBinding && pending.current.accountId === preferredAccountId) return pending.current.promise;
     pending.current?.controller.abort();
@@ -208,9 +210,12 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
           return false;
         }
         if (!response.ok) {
-          if (response.status === 429) {
+          if (response.status === 429 || response.status === 503) {
             const seconds = Number(response.headers.get("Retry-After"));
-            if (Number.isFinite(seconds) && seconds > 0) retryAfterMs = Math.min(60_000, seconds * 1000);
+            if (Number.isFinite(seconds) && seconds > 0) {
+              retryAfterMs = Math.min(300_000, seconds * 1000);
+              retryAfterUntil.current = Date.now() + retryAfterMs;
+            }
           }
           invalidSession = response.status < 500 && response.status !== 429;
           throw new Error(typeof body?.error === "string" ? body.error : "Could not verify your sign-in. Please try again.");
@@ -255,7 +260,11 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
     return request;
   }, [clearSession, queryClient]);
 
-  const refresh = useCallback(() => { retryCount.current = 0; return sync(); }, [sync]);
+  const refresh = useCallback(() => {
+    if (Date.now() < retryAfterUntil.current) return Promise.resolve(false);
+    retryCount.current = 0;
+    return sync();
+  }, [sync]);
   const selectAccount = useCallback((accountId: string) => {
     if (!pendingAccounts.some((account) => account.id === accountId)) return Promise.resolve(false);
     return sync(accountId);
@@ -276,6 +285,7 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
     setIsSyncing(false);
     setRetryDelay(null);
     retryCount.current = 0;
+    retryAfterUntil.current = 0;
     renewalAttemptedFor.current = null;
     lastFocusSync.current = 0;
     clearSession();
@@ -346,6 +356,7 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
   }, [clearSession, sync, verified]);
 
   const login = useCallback((options?: PrivyLoginOptions) => {
+    if (Date.now() < retryAfterUntil.current) return;
     suspended.current = false;
     retryCount.current = 0;
     setError(null);

@@ -35,8 +35,8 @@ const config: Config = {
         artic: "6px",
       },
       fontFamily: {
-        sans: ["Raleway", "sans-serif"],
-        display: ["Raleway", "sans-serif"],
+        sans: ["var(--font-raleway)", "sans-serif"],
+        display: ["var(--font-raleway)", "sans-serif"],
       },
       keyframes: {
         fadeSlideIn: {

@@ -15,7 +15,12 @@ async function handlePATCH(request: NextRequest, { params }: { params: { id: str
   if (limited) return limited;
   if (!session.isAdmin) return NextResponse.json({ error: "Reviewer access is required." }, { status: 403 });
   let body;
-  try { body = await limitedJson(request); } catch { return NextResponse.json({ error: "Invalid review request." }, { status: 400 }); }
+  try { 
+    body = await limitedJson(request); 
+  } 
+  catch {
+     return NextResponse.json({ error: "Invalid review request." }, { status: 400 });
+    }
   if (!body || typeof body !== "object") return NextResponse.json({ error: "Invalid review request." }, { status: 400 });
   const { decision, reviewNote, artReviewConfirmed } = body as { decision?: unknown; reviewNote?: unknown; artReviewConfirmed?: unknown };
   if (decision !== "APPROVED" && decision !== "REJECTED") return NextResponse.json({ error: "Choose approve or reject." }, { status: 400 });

@@ -419,6 +419,19 @@ test("current-user authentication failures and provider outages fail closed with
   assert.equal(currentUserRequests.length, cases.length);
 });
 
+test("provider throttling forwards a bounded retry delay and preserves verified sessions", async () => {
+  const signed = await login([emailAccount(reviewerEmail)]);
+  const tokens = await tokenPair({ privyDid: signed.privyDid });
+  for (const [header, expected] of [["45", "45"], [undefined, "30"], ["invalid", "30"], ["999999", "300"]] as const) {
+    currentUserPlans.push({ status: 429, headers: header ? { "Retry-After": header } : {} });
+    const response = await route.POST(request("/api/auth/privy/session", "POST", { accessToken: tokens.accessToken, identityToken: null }, signed));
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get("retry-after"), expected);
+    assert.equal((await response.json()).code, "PRIVY_VERIFICATION_UNAVAILABLE");
+    assert.equal(await db.privySession.count(), 1, "throttling cannot issue or revoke a session");
+  }
+});
+
 test("verification service outages remain retryable and do not invalidate an existing verified reviewer cookie", async () => {
   const signed = await login([emailAccount(reviewerEmail)]);
   const originalAppId = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
