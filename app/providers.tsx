@@ -9,6 +9,7 @@ import { privyWagmiConfig, wagmiConfig } from "@/lib/wagmiConfig";
 import { arcChain } from "@/lib/arcConfig";
 import { privyAppId, privyClientId } from "@/lib/privyClient";
 import PrivyAuthProvider, { UnconfiguredPrivyAuthProvider } from "@/components/PrivyAuthProvider";
+import { AppAccessGate } from "@/components/AppEntry";
 
 export default function Providers({ children }: { children: ReactNode }) {
   const [queryClient] = useState(() => new QueryClient());
@@ -33,7 +34,7 @@ export default function Providers({ children }: { children: ReactNode }) {
       >
         <QueryClientProvider client={queryClient}>
           <PrivyWagmiProvider config={privyWagmiConfig}>
-            <PrivyAuthProvider>{children}</PrivyAuthProvider>
+            <PrivyAuthProvider><AppAccessGate>{children}</AppAccessGate></PrivyAuthProvider>
           </PrivyWagmiProvider>
         </QueryClientProvider>
       </PrivyProvider>
@@ -43,7 +44,7 @@ export default function Providers({ children }: { children: ReactNode }) {
   return (
     <WagmiProvider config={wagmiConfig}>
       <QueryClientProvider client={queryClient}>
-        <UnconfiguredPrivyAuthProvider>{children}</UnconfiguredPrivyAuthProvider>
+        <UnconfiguredPrivyAuthProvider><AppAccessGate>{children}</AppAccessGate></UnconfiguredPrivyAuthProvider>
       </QueryClientProvider>
     </WagmiProvider>
   );

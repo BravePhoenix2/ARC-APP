@@ -6,7 +6,7 @@ import Atmosphere from "@/components/Atmosphere";
 import Link from "next/link";
 import ArticLogo from "@/components/ArticLogo";
 import Eyebrow from "@/components/Eyebrow";
-import ConnectWalletButton from "@/components/ConnectWalletButton";
+import { LaunchAppButton } from "@/components/AppEntry";
 import { OrbitCircle, OrbitOval, OrbitSquare, OrbitTriangle } from "@/components/orbit-shapes";
 
 const FEATURES = [
@@ -84,7 +84,6 @@ export default function Home() {
         <div className="hero-copy relative flex min-h-[420px] flex-col px-6 py-6 sm:px-10 lg:px-16 xl:px-20">
           <header className="flex flex-wrap items-center justify-between gap-3">
             <ArticLogo className="text-xl sm:text-2xl" />
-            <div className="min-w-0 max-w-full"><ConnectWalletButton /></div>
           </header>
 
           <div className="flex flex-1 flex-col justify-center py-10 lg:py-14">
@@ -100,14 +99,9 @@ export default function Home() {
               A USDC-native art marketplace driven by creators, craft, clarity, and community.
             </p>
 
-            <div className="mt-7 lg:mt-8">
-              <Link
-                href="/nfts"
-                className="gallery-button inline-flex items-center justify-center border border-[#EF476F] bg-[#EF476F] px-6 py-3.5 text-sm font-semibold text-white transition hover:bg-[#d73c63] sm:px-8 sm:py-4 sm:text-base"
-              >
-                Launch App <span aria-hidden="true">↗</span>
-              </Link>
-              <Link href="/apply" className="ml-5 inline-flex py-3 text-sm font-semibold text-[var(--muted-text)] underline decoration-[#b55fbe]/50 underline-offset-4">Are you a creator? Apply ↗</Link>
+            <div className="mt-7 flex flex-wrap items-start gap-x-5 gap-y-3 lg:mt-8">
+              <LaunchAppButton />
+              <Link href="/apply" className="inline-flex py-3 text-sm font-semibold text-[var(--muted-text)] underline decoration-[#b55fbe]/50 underline-offset-4">Are you a creator? Apply ↗</Link>
             </div>
             <div className="mt-7 flex flex-wrap gap-5 text-[10px] font-semibold uppercase tracking-[.15em] text-[var(--faint-text)]">
               <span className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-[#20b88a]" /> Built on Arc</span>

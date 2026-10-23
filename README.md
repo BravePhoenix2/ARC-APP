@@ -343,10 +343,13 @@ New databases use the usual `npm run db:setup`. This project uses schema pushes;
 the one-time upgrade adds only a nullable user ID, a session table, and indexes.
 It avoids rebuilding or deleting existing user records.
 
-The single **Sign in** button uses Privy for email OTP and Ethereum wallets.
+The landing page's **Launch App** button opens Privy for email OTP and Ethereum
+wallet sign-in, then opens the NFT gallery after server verification. Returning
+signed-in users enter directly. App pages also require sign-in when opened from
+a direct link; the landing page remains public.
 Email users without a wallet get an embedded Ethereum wallet. Arc Testnet is the
 default and supported chain, with native USDC for gas. Until a real App ID is
-configured, the app renders normally and sign-in shows a setup notice.
+configured, the landing page renders normally and app entry shows a setup notice.
 
 1. Create an app named **Artiq Testnet** at [Privy Dashboard](https://dashboard.privy.io).
 2. Under **User management > Authentication**, enable **Email** and **Ethereum
