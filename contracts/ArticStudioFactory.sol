@@ -11,8 +11,10 @@ import {ArticPlatformFees} from "./ArticPlatformFees.sol";
 contract ArticStudioFactory is ArticPlatformFees {
     ArticCollectionDeployer private immutable collectionDeployer = new ArticCollectionDeployer();
     ArticEditionDeployer private immutable editionDeployer = new ArticEditionDeployer();
+    uint256 public immutable mintSurchargeBps;
     function supportsMintPhases() external pure returns (bool) { return true; }
     function supportsImageSeries() external pure returns (bool) { return true; }
+    function supportsMintSurcharge() external pure returns (bool) { return true; }
     struct CollectionInfo {
         address collection;
         address creator;
@@ -31,7 +33,12 @@ contract ArticStudioFactory is ArticPlatformFees {
     error NotRegisteredCollection();
     error InvalidMinter();
 
-    constructor(address feeRecipient_, uint256 platformFeeBps_) ArticPlatformFees(feeRecipient_, platformFeeBps_) {}
+    constructor(address feeRecipient_, uint256 creatorMintFeeBps_, uint256 mintSurchargeBps_)
+        ArticPlatformFees(feeRecipient_, creatorMintFeeBps_)
+    {
+        if (mintSurchargeBps_ > MAX_PLATFORM_FEE_BPS) revert PlatformFeeTooHigh();
+        mintSurchargeBps = mintSurchargeBps_;
+    }
 
     function create721(
         string calldata name_, string calldata symbol_, string calldata metadataURI_, uint256 mintPrice_,

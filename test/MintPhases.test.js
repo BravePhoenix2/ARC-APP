@@ -6,7 +6,7 @@ const pair = (a, b) => ethers.keccak256(ethers.concat([a, b].sort()));
 describe("Phased mint access", function () {
   for (const edition of [false, true]) it(`enforces phase windows, proofs, payments and cumulative wallet caps for ${edition ? "1155" : "721"}`, async function () {
     const [creator, ultimate, fcfs, publicWallet] = await ethers.getSigners();
-    const factory = await ethers.deployContract("ArticStudioFactory", [creator.address, 250]);
+    const factory = await ethers.deployContract("ArticStudioFactory", [creator.address, 250, 200]);
     const start = await time.latest() + 100;
     const key = ethers.id("collection-one"); const a = leaf(key, ultimate.address, 1); const b = leaf(key, fcfs.address, 2);
     const config = { root: pair(a, b), collectionKey: key, ultimateStart: start, fcfsStart: start + 100, publicStart: start + 200, ultimateLimit: 1, fcfsLimit: 1, publicLimit: 2, ultimatePrice: 1, fcfsPrice: 2 };
@@ -50,7 +50,7 @@ describe("Phased mint access", function () {
 describe("Guaranteed Ultimate allocations", function () {
   it("protects the entire Ultimate supply from other tiers until every selected wallet can claim", async function () {
     const [treasury, first, second, outsider] = await ethers.getSigners();
-    const factory = await ethers.deployContract("ArticStudioFactory", [treasury.address, 250]);
+    const factory = await ethers.deployContract("ArticStudioFactory", [treasury.address, 250, 200]);
     const start = await time.latest() + 100; const key = ethers.id("guaranteed");
     const a = leaf(key, first.address, 1); const b = leaf(key, second.address, 1);
     const config = { root: pair(a, b), collectionKey: key, ultimateStart: start, fcfsStart: start + 100, publicStart: start + 200, ultimateLimit: 2, fcfsLimit: 1, publicLimit: 1, ultimatePrice: 0, fcfsPrice: 1 };

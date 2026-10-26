@@ -1,51 +1,55 @@
-# Artiq MVP launch
+# Artiq public Testnet launch
 
-Target: launch before October 18, 2026 (Africa/Lagos). Aim to release October 17, leaving time for fixes.
-User confirmed: an in-app Settings page and an end-to-end USDC purchase flow on Arc Testnet is required for a public testing pilot. User explicitly selected Testnet first; Mainnet is a separate later release.
+Confirmed target: **Monday, November 2, 2026 (Africa/Lagos)**. Release the public Arc Testnet pilot with a working Settings page and a complete native-USDC NFT mint path. Test USDC has no monetary value. Mainnet and real-money payments remain a separate release.
 
-## Included
+## Current implementation
 
-- Responsive home and marketplace, light/dark/system appearance.
-- Settings: appearance, wallet connection/disconnection, address copy, balance, Arc network status.
-- Browse real artwork, search/filter/sort, and item detail pages.
-- One complete NFT purchase/mint path using native USDC, with wallet confirmation, pending/success/failure states, receipt link, and verified on-chain ownership.
-- Verified wallet authentication and creator-only mutations, or disable public mutations until authentication is ready.
-- A persistent production database, catalog assets, deployed Testnet contracts, and a public URL.
+- Responsive home, marketplace, appearance settings, wallet controls, account sign-in, and item detail pages are implemented.
+- Marketplace search, filters, sorting, creator profiles, and watchlists are implemented. Catalog controls operate on loaded pages; this does not establish complete server-side search across the catalog.
+- Creator applications, private uploads, review, collection deployment, and NFT minting are implemented. Public mint price and Ultimate/FCFS tier prices are independent; locking the allowlist freezes its prices, schedule, limits, and roster. Standard paid mints combine a 2.5% creator proceeds fee with a separate 2% buyer surcharge: a 5 USDC mint costs 5.10 USDC, pays 4.875 USDC to the creator, and accrues 0.225 USDC total to the platform before gas.
+- Privy provides email and Ethereum-wallet sign-in. Protected mutations verify the account and creator ownership. Reviewers use verified emails in server-only `ARTIQ_ADMIN_EMAILS`; `ARTIQ_ADMIN_WALLETS` no longer grants access.
+- ART BAZZAR requires an uploaded image, human-made declaration, creation details, metadata screening, and documented human review. AI-generated and assisted NFTs remain allowed. Optional Sightengine screening is disabled by default and does not replace review.
+- Art checkout, asset/NFT auctions, and funded rewards are implemented. Availability depends on the configured deployed contracts. Seller payment does not escrow physical delivery. Local tests do not establish successful live transactions for these flows.
+- SQLite stores the catalog, account state, and uploaded image bytes. The current Prisma adapter requires SQLite; changing only `DATABASE_URL` does not migrate the app to another provider.
 
-## Defer
+## Local verification — October 26, 2026
 
-Auctions, offers, social feeds, notification delivery, advanced rarity tools, multi-chain support, and physical-art checkout/shipping. Physical art may be browsable without checkout for the first release.
+- [x] `npm run lint` passed.
+- [x] `npm run typecheck` passed.
+- [x] `npm run test:app` passed: 284 application tests, including price edits, pending saves, public-only transitions, and rejection after Ultimate opens.
+- [x] `npm test` passed: 56 contract tests on the local Hardhat network.
+- [x] `npm run build` passed with network access for the build-time font, using the current local environment. Repeat with the final release environment.
+- [x] Local production-server smoke checks passed: home, NFT gallery, marketplace, settings, creator application, and catalog API return 200; anonymous wallet-session, watchlist, and review API requests return 401.
+- [x] `npm audit --omit=dev` completed. It reports 40 vulnerable package entries: 1 critical, 24 high, and 15 moderate. Dependency remediation and exposure review remain open.
 
-## Current evidence
+These results cover local behavior. They do not verify hosting persistence, production authentication configuration, or deployed Arc Testnet receipts.
 
-- Home/marketplace and wagmi wallet integration implemented; wallet requests covered by three connector tests.
-- Settings implemented. TypeScript, lint, wallet connector tests, and the settings production build pass. Repeat the production build with final release environment variables before deployment.
-- Arc Testnet selected: chain ID 5042002, native test USDC 18 decimals. Mainnet 5042 remains configurable for a later release. No public contract deployment or purchase has been verified.
-- Contracts exist, but there is no frontend purchase flow or item detail route.
-- Marketplace search works across titles, descriptions, and creators in both modes, including mobile. Sidebar filter and sort controls are not wired up.
-- Seed items lack images; use real catalog assets for release.
-- Creator applications at `/apply` require a signed wallet session. Uploads and applications remain private until review; approval publishes an item atomically. Reviewers use `/admin/submissions` and the server-only `ARTIQ_ADMIN_WALLETS` allowlist (currently unconfigured at the user's request).
-- Public item creation is disabled to prevent bypassing review. Status and mint-time mutations require verified creator ownership (status also permits reviewers).
-- ART BAZZAR requires an uploaded image, human-made declaration, creation details, server metadata screening, and a documented reviewer assessment before publication. AI-generated and AI-assisted NFTs remain allowed. Metadata checks cannot establish authorship. Optional Sightengine pixel analysis requires an owned account, server credentials, and explicit activation; it is disabled by default.
-- Local database is SQLite. Hosting must preserve it or use a production database migration.
-- Contract deployment defaults and native-USDC precision comments/tests need review against the selected release network.
+## Dependency release blocker
 
-## Delivery order
+Resolve or document the application exposure and mitigation for the reported critical/high findings before public launch. Audit counts include findings propagated through nested dependencies; they are not counts of confirmed application exploits.
 
-1. Finish settings and validate shared appearance behavior.
-2. Release network: Arc Testnet. Select hosting target; verify RPC and contract deployment configuration.
-3. Secure or disable mutation routes, implement item details and a single end-to-end purchase path.
-4. Connect marketplace discovery controls, add actual catalog images, verify mobile and failure states.
-5. Run type checks, build, wallet/contract tests, and a test wallet purchase with a verified receipt on Arc Testnet.
-6. Deploy, verify production persistence and the public URL, then freeze feature scope.
+- Prioritize `next@14.2.15`, reported as critical. The audit includes authorization-bypass and image-optimization advisories. The app performs authorization in server handlers, and the production host is not yet selected; assess the actual affected paths. The suggested automatic fix upgrades Next.js to a new major version, requiring a reviewed migration and regression checks.
+- Review direct high findings in `@privy-io/react-auth@3.50.0` and `prisma@7.9.1`, including their nested dependency paths. The suggested Privy fix is an older version, so an automatic force fix is not a validated remediation.
+- Choose compatible dependency updates, repeat the audit, and rerun lint, TypeScript, application/contract tests, the production build, and runtime checks after changes. Preserve the verified mint-pricing change in its own commit.
 
-## Release acceptance
+## Required before public launch
 
-- No active purchase button without a deployed, verified collection/marketplace contract.
-- Prices use integer native units (18 decimal native USDC); do not confuse ERC-20 USDC precision with native gas precision.
-- Never mark a purchase successful from a submitted transaction alone; wait for a successful receipt.
-- Unauthorized callers cannot create or mutate another creator's items.
-- Label the public pilot as Testnet and make clear that test USDC has no monetary value. Do not enable Mainnet purchases during the pilot.
-- Funds remain in the user's wallet until they explicitly approve a purchase.
-- Hosting survives restart/redeploy without losing catalog data.
-- Check home, marketplace, settings, details, rejection, insufficient funds, wrong network, and failed transactions on mobile and desktop.
+- [ ] Close the dependency release blocker above and record the resulting audit and regression evidence.
+- [ ] Select the hosting target and configure a persistent SQLite path. Back up the database, test a restore, and verify that catalog records and uploaded images survive an app restart and redeploy. Do not put the database on ephemeral storage.
+- [ ] Apply required additive schema changes to the backed-up release database. Follow the existing-installation instructions in [README.md](../README.md) and confirm original contract references before replacing protocol addresses. Run `npm run studio:pin-factories` with the original factory and art-market configuration when upgrading existing deployments.
+- [ ] Configure the final HTTPS app domain, `NEXT_PUBLIC_APP_URL`, Privy App ID and allowed origins, and reviewer `ARTIQ_ADMIN_EMAILS`. Verify email login, external-wallet login, refresh, wallet linking/switching, and sign-out on that domain. Verify reviewer access and rejection of an ordinary account.
+- [ ] Configure trusted ingress for the chosen host. Verify trusted client IP handling before relying on anonymous IP quotas. Configure the shared quota store if using multiple app instances; see [request-protection.md](request-protection.md).
+- [ ] Confirm Arc Testnet chain ID **5042002**, a working RPC, and all enabled protocol contract addresses. Verify the current factory reports buyer-paid mint surcharge support and verify all deployed fee terms. Retain original addresses for existing collections, auctions, refunds, and claims; existing contracts do not gain new fee behavior in place.
+- [ ] Build with the final public environment, deploy the production build, and verify the public HTTPS URL. Rebuild after changing public contract addresses or authentication configuration.
+- [ ] Complete a live Testnet flow: sign in, submit a collection, approve it, configure independent tier prices, lock the allowlist, deploy, and mint from another funded wallet. For a 5 USDC mint under the standard terms, confirm the minter pays 5.10 USDC before gas, the creator can withdraw 4.875 USDC, and the platform can withdraw 0.225 USDC. Confirm the successful receipt and on-chain ownership; verify the app records the result after refresh.
+- [ ] Check home, marketplace, settings, review, details, and minting on mobile and desktop. Exercise rejected signatures, insufficient funds, wrong network, failed transactions, and retry after a confirmed transaction without paying twice. Verify locked/deployed tier prices cannot be edited.
+- [ ] Check release catalog assets and visible Testnet labels. Verify every enabled payment flow has a deployed, verified contract; unavailable flows must not expose an active purchase action.
+
+## Acceptance rules
+
+- On-chain payment amounts use integer native units with **18 decimals** for native Arc Testnet USDC. Do not substitute ERC-20 USDC precision.
+- A submitted transaction alone is not success. Require a successful receipt and the relevant ownership or event verification.
+- Unauthorized accounts cannot create or mutate another creator's items or access private uploads, applications, allowlist rosters, or delivery details.
+- Wallet transactions require the user's explicit approval. The public pilot remains clearly labeled Testnet and must not enable Mainnet purchases.
+- Mint pricing must show the creator's price, the buyer-paid surcharge, the creator proceeds fee, both resulting payouts, and the total before wallet confirmation. Marketplace and auction fees remain deductions from seller proceeds.
+- Record the final build, deployed configuration, live smoke-test receipts, and persistence check before marking the launch ready.

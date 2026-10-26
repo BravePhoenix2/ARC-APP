@@ -12,9 +12,9 @@ const factory = `0x${"2".repeat(40)}` as const;
 const auction = `0x${"3".repeat(40)}` as const;
 const factoryHash = `0x${"a".repeat(64)}` as const;
 const auctionHash = `0x${"b".repeat(64)}` as const;
-const storageKey = "artiq:studio-testnet-deployment:asset-auctions-v1";
+const storageKey = "artiq:studio-testnet-deployment:mint-surcharge-v2";
 const artHash = `0x${"c".repeat(64)}` as const;
-const fees = { feeRecipient: market, mintFeeBps: 250, marketplaceFeeBps: 250 };
+const fees = { feeRecipient: market, mintFeeBps: 250, mintSurchargeBps: 200, marketplaceFeeBps: 250 };
 const originalRecipient = process.env.NEXT_PUBLIC_PLATFORM_FEE_RECIPIENT;
 let renderer: ReactTestRenderer | undefined;
 let stored: Map<string, string>;
@@ -24,16 +24,22 @@ let walletFailure: boolean;
 let receiptFailure: boolean;
 let auctionFailure: boolean;
 let connects: number;
+let supportsMintSurcharge: boolean;
+let supportReadFailure: boolean;
 let supportsAssets: boolean;
+let surchargeOverride: bigint | undefined;
 const storageDescriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
 const account = { authenticated: true, login: () => { connects++; }, connectWallet: () => { connects++; } };
 const tx = { address: market, isConnected: true, isWrongNetwork: false, chainId: 5042002, switchToArc: async () => {}, refetchBalance: async () => {}, client: {
   getCode: async () => "0x6000",
   readContract: async ({ address, functionName }: { address: string; functionName: string }) => {
+    if (functionName === "supportsMintSurcharge") { if (supportReadFailure) throw new Error("function unavailable"); return supportsMintSurcharge; }
     if (functionName === "supportsAssetAuctions") return supportsAssets;
     const bytecode = address === factory ? "0x01" : address === market ? "0x02" : "0x03";
     const args = writes.find((write) => write.bytecode === bytecode)?.args as unknown[] | undefined;
-    return functionName === "feeRecipient" ? (args?.at(-2) ?? market) : (args?.at(-1) ?? BigInt(250));
+    if (functionName === "feeRecipient") return args ? (address === factory ? args[0] : args.at(-2)) : market;
+    if (functionName === "mintSurchargeBps") return surchargeOverride ?? args?.[2] ?? BigInt(200);
+    return args ? (address === factory ? args[1] : args.at(-1)) : BigInt(250);
   },
   waitForTransactionReceipt: async ({ hash }: { hash: string }) => { waited.push(hash); if (receiptFailure) { receiptFailure = false; throw new Error("Receipt request timed out. Resume to check confirmation."); } return { status: "success", contractAddress: hash === factoryHash ? factory : hash === artHash ? market : auction }; },
 } };
@@ -66,7 +72,9 @@ async function deploy() { const button = renderer!.root.findAllByType("button").
 beforeEach(() => {
   process.env.NEXT_PUBLIC_PLATFORM_FEE_RECIPIENT = market;
   stored = new Map(); writes = []; waited = []; connects = 0; walletFailure = receiptFailure = auctionFailure = false;
-  supportsAssets = true;
+  supportsMintSurcharge = supportsAssets = true;
+  supportReadFailure = false;
+  surchargeOverride = undefined;
   account.authenticated = true; tx.isConnected = true;
   Object.defineProperty(globalThis, "localStorage", { configurable: true, value: { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => stored.set(key, value), removeItem: (key: string) => stored.delete(key) } });
 });
@@ -84,12 +92,13 @@ test("upgrade deploys all three fee contracts with explicit treasury terms and e
   await mount(); assert.equal(exportBlocks().length, 0);
   await deploy();
   assert.equal(writes.length, 3); assert.deepEqual(writes.map((w) => w.bytecode), ["0x01", "0x02", "0x03"]);
-  assert.deepEqual(writes[0].args, [market, BigInt(250)]);
+  assert.deepEqual(writes[0].args, [market, BigInt(250), BigInt(200)]);
   assert.deepEqual(writes[1].args, [market, BigInt(250)]);
   assert.deepEqual(writes[2].args, [factory, market, market, BigInt(250)]);
   assert.equal(exportBlocks().length, 1);
   const config = exportBlocks()[0].props.children;
   assert.equal(config, deploymentConfiguration({ factory, artMarket: market, auctions: auction, fees }, [`0x${"5".repeat(40)}`]));
+  assert.match(String(config), /MINT_FEE_BPS=250\nMINT_SURCHARGE_BPS=200\nMARKETPLACE_FEE_BPS=250/);
   assert.equal(JSON.parse(stored.get(storageKey)!).pending, undefined);
 });
 test("cancelled wallet deployment reports the error and never displays blank configuration", async () => {
@@ -129,15 +138,15 @@ test("an already connected wallet can deploy while app session verification is u
 });
 
 
-test("OpenSea preset uses separate mint and sale rates without stacking fees", async () => {
+test("OpenSea-style preset uses separate mint surcharge and sale rates", async () => {
   await mount();
-  const preset = renderer!.root.findAllByType("button").find((node) => node.props.children === "OpenSea: 1% sales / 10% mints")!;
+  const preset = renderer!.root.findAllByType("button").find((node) => node.props.children === "OpenSea-style: 10% creator fee + 2% buyer surcharge / 1% sales")!;
   await act(async () => preset.props.onClick());
   await deploy();
-  assert.deepEqual(writes[0].args, [market, BigInt(1000)]);
+  assert.deepEqual(writes[0].args, [market, BigInt(1000), BigInt(200)]);
   assert.deepEqual(writes[1].args, [market, BigInt(100)]);
   assert.deepEqual(writes[2].args, [factory, market, market, BigInt(100)]);
-  assert.match(exportBlocks()[0].props.children, /MINT_FEE_BPS=1000/);
+  assert.match(exportBlocks()[0].props.children, /MINT_FEE_BPS=1000\nMINT_SURCHARGE_BPS=200\nMARKETPLACE_FEE_BPS=100/);
 });
 
 test("invalid fee wallet or excessive rate prevents all deployment transactions", async () => {
@@ -146,12 +155,16 @@ test("invalid fee wallet or excessive rate prevents all deployment transactions"
   await act(async () => recipient.props.onChange({ target: { value: `0x${"0".repeat(40)}` } }));
   await deploy(); assert.equal(writes.length, 0); assert.match(text(), /nonzero/);
   await act(async () => recipient.props.onChange({ target: { value: market } }));
-  await act(async () => renderer!.root.findByProps({ "aria-label": "Primary mint fee (%)" }).props.onChange({ target: { value: "10.01" } }));
+  await act(async () => renderer!.root.findByProps({ "aria-label": "Creator mint proceeds fee (%)" }).props.onChange({ target: { value: "10.01" } }));
+  await deploy(); assert.equal(writes.length, 0); assert.match(text(), /exceed 10%/);
+  await act(async () => renderer!.root.findByProps({ "aria-label": "Creator mint proceeds fee (%)" }).props.onChange({ target: { value: "2.5" } }));
+  await act(async () => renderer!.root.findByProps({ "aria-label": "Buyer mint surcharge (%)" }).props.onChange({ target: { value: "10.01" } }));
   await deploy(); assert.equal(writes.length, 0); assert.match(text(), /exceed 10%/);
 });
 
-test("resumed deployment retains frozen fee terms and ignores the old zero-fee draft", async () => {
+test("resumed deployment retains frozen fee terms and ignores drafts from older factory generations", async () => {
   stored.set("artiq:studio-testnet-deployment:phases-v1", JSON.stringify({ factory, artMarket: market, auctions: auction }));
+  stored.set("artiq:studio-testnet-deployment:asset-auctions-v1", JSON.stringify({ factory, artMarket: market, auctions: auction, fees: { feeRecipient: market, mintFeeBps: 250, marketplaceFeeBps: 250 } }));
   await mount();
   assert.equal(exportBlocks().length, 0);
   receiptFailure = true;
@@ -169,4 +182,32 @@ test("an auction house without asset support cannot become complete configuratio
   assert.equal(writes.length, 3);
   await deploy();
   assert.equal(writes.length, 3, "retry verifies the submitted house instead of deploying a duplicate");
+});
+
+test("a factory without buyer-paid mint surcharge support cannot become current configuration", async () => {
+  supportsMintSurcharge = false;
+  await mount(); await deploy();
+  assert.equal(exportBlocks().length, 0);
+  assert.match(text(), /does not support buyer-paid mint surcharges/);
+  assert.equal(writes.length, 1);
+  await deploy();
+  assert.equal(writes.length, 1, "retry verifies the submitted factory instead of deploying a duplicate");
+});
+
+test("a saved legacy factory is rejected before any later contract is deployed", async () => {
+  supportReadFailure = true;
+  stored.set(storageKey, JSON.stringify({ factory, fees }));
+  await mount(); await deploy();
+  assert.equal(writes.length, 0);
+  assert.equal(exportBlocks().length, 0);
+  assert.match(text(), /does not support buyer-paid mint surcharges/);
+});
+
+test("a saved factory with a different buyer surcharge is rejected before deployment continues", async () => {
+  surchargeOverride = BigInt(300);
+  stored.set(storageKey, JSON.stringify({ factory, fees }));
+  await mount(); await deploy();
+  assert.equal(writes.length, 0);
+  assert.equal(exportBlocks().length, 0);
+  assert.match(text(), /buyer surcharge does not match/);
 });

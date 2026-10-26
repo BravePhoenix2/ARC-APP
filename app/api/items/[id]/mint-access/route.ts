@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { sameOrigin } from "@/lib/walletAuth";
 import { getCreatorSession } from "@/lib/creatorSession";
 import { limitedJson } from "@/lib/requestBody";
-import { guaranteedUltimateAllocation, mintTree, tierNumber, validateMintConfig } from "@/lib/mintAccess";
+import { guaranteedUltimateAllocation, mintTree, tierNumber, validateMintConfig, type MintPhaseConfig } from "@/lib/mintAccess";
 export const dynamic = "force-dynamic";
 const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: { "Cache-Control": "private, no-store" } });
 async function handleGET(request: NextRequest, { params }: { params: { id: string } }) {
@@ -37,7 +37,7 @@ async function handlePOST(request: NextRequest, { params }: { params: { id: stri
       const item = await tx.item.findUnique({ where: { id: params.id }, include: { mintAccessPlan: { include: { entries: true } } } });
       if (!item || item.itemType !== "NFT") throw new Error("NFT collection not found.");
       const plan = item.mintAccessPlan;
-      if (item.contractAddress || plan?.frozenAt) throw new Error("Mint access is locked. Registrations and tier changes are closed.");
+      if (item.contractAddress || plan?.frozenAt) throw new Error("Mint access is locked. Prices, registrations, and tier changes cannot be edited.");
       if (input.action === "register") {
         if (!session.walletAddress) throw new Error("Connect a wallet linked to your signed-in account.");
         if (!plan) throw new Error("This collection has not opened registrations.");
@@ -55,6 +55,12 @@ async function handlePOST(request: NextRequest, { params }: { params: { id: stri
         const config = validateMintConfig(input.config, item.maxPerWallet ?? item.maxSupply ?? 1, item.mintPriceUsdc ?? 0);
         await tx.mintAccessPlan.upsert({ where: { itemId: item.id }, create: { itemId: item.id, config }, update: { config } });
         await tx.item.update({ where: { id: item.id }, data: { mintStartTime: new Date(config.ultimateStart), status: "UPCOMING" } });
+      } else if (input.action === "price") {
+        if (!plan) throw new Error("Save the phase settings first.");
+        if (input.tier !== "ULTIMATE" && input.tier !== "FCFS") throw new Error("Choose Ultimate or FCFS to edit its price.");
+        const priceKey = input.tier === "ULTIMATE" ? "ultimatePrice" : "fcfsPrice";
+        const config = validateMintConfig({ ...(plan.config as MintPhaseConfig), [priceKey]: input.price }, item.maxPerWallet ?? item.maxSupply ?? 1, item.mintPriceUsdc ?? 0);
+        await tx.mintAccessPlan.update({ where: { id: plan.id }, data: { config } });
       } else if (input.action === "disable") {
         if (plan) await tx.mintAccessPlan.delete({ where: { id: plan.id } });
       } else if (input.action === "assign") {

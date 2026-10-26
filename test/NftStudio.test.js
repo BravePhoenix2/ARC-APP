@@ -3,10 +3,13 @@ const { ethers } = require("hardhat");
 const { time, loadFixture } = require("@nomicfoundation/hardhat-network-helpers");
 
 const PRICE = ethers.parseUnits("2", 18);
+const CREATOR_FEE_BPS = 250n;
+const MINT_SURCHARGE_BPS = 200n;
+const mintPayment = base => base + base * MINT_SURCHARGE_BPS / 10_000n;
 
 async function deployStudio() {
   const [creator, minter, other] = await ethers.getSigners();
-  const factory = await ethers.deployContract("ArticStudioFactory", [other.address, 250]);
+  const factory = await ethers.deployContract("ArticStudioFactory", [other.address, CREATOR_FEE_BPS, MINT_SURCHARGE_BPS]);
   await factory.waitForDeployment();
   return { factory, creator, minter, other };
 }
@@ -32,7 +35,7 @@ describe("NFT Studio", function () {
     const { collection, start } = await createCollection(factory, creator, { metadataURI: "https://artiq.example/api/items/series/metadata/", supply: 3 });
     await expect(collection.tokenURI(1)).to.be.revertedWithCustomError(collection, "ERC721NonexistentToken");
     await time.increaseTo(start);
-    await collection.connect(minter).mint(3, { value: PRICE * 3n });
+    await collection.connect(minter).mint(3, { value: mintPayment(PRICE * 3n) });
     for (let id = 1; id <= 3; id++) expect(await collection.tokenURI(id)).to.equal(`https://artiq.example/api/items/series/metadata/${id}`);
     expect(await collection.metadataURI()).to.equal("https://artiq.example/api/items/series/metadata/");
   });
@@ -50,6 +53,15 @@ describe("NFT Studio", function () {
     expect(await factory.getCollectionsByCreator(creator.address)).to.have.length(2);
     expect(await nft.supportsInterface("0x80ac58cd")).to.equal(true);
     expect(await edition.supportsInterface("0xd9b67a26")).to.equal(true);
+    expect(await factory.supportsMintSurcharge()).to.equal(true);
+    expect(await factory.platformFeeBps()).to.equal(CREATOR_FEE_BPS);
+    expect(await factory.mintSurchargeBps()).to.equal(MINT_SURCHARGE_BPS);
+    expect(await nft.supportsMintSurcharge()).to.equal(true);
+    expect(await nft.platformFeeBps()).to.equal(CREATOR_FEE_BPS);
+    expect(await nft.mintSurchargeBps()).to.equal(MINT_SURCHARGE_BPS);
+    expect(await edition.supportsMintSurcharge()).to.equal(true);
+    expect(await edition.platformFeeBps()).to.equal(CREATOR_FEE_BPS);
+    expect(await edition.mintSurchargeBps()).to.equal(MINT_SURCHARGE_BPS);
   });
 
   it("uses native USDC at 18 decimals, fixed metadata and withdrawable creator proceeds", async function () {
@@ -58,13 +70,17 @@ describe("NFT Studio", function () {
     await expect(collection.connect(minter).mint(1, { value: PRICE })).to.be.revertedWithCustomError(collection, "MintingNotStarted");
     await time.increaseTo(start);
     await expect(collection.connect(minter).mint(1, { value: ethers.parseUnits("2", 6) })).to.be.revertedWithCustomError(collection, "IncorrectPayment");
-    await collection.connect(minter).mint(2, { value: PRICE * 2n });
+    await expect(collection.connect(minter).mint(2, { value: PRICE * 2n })).to.be.revertedWithCustomError(collection, "IncorrectPayment");
+    const baseAmount = PRICE * 2n;
+    const creatorFee = baseAmount * CREATOR_FEE_BPS / 10_000n;
+    const surcharge = baseAmount * MINT_SURCHARGE_BPS / 10_000n;
+    const platformRevenue = creatorFee + surcharge;
+    const creatorProceeds = baseAmount - creatorFee;
+    await collection.connect(minter).mint(2, { value: baseAmount + surcharge });
     expect(await collection.ownerOf(1)).to.equal(minter.address);
     expect(await collection.ownerOf(2)).to.equal(minter.address);
     expect(await collection.tokenURI(2)).to.equal("ipfs://metadata.json");
-    const platformFee = PRICE * 2n * 250n / 10_000n;
-    const creatorProceeds = PRICE * 2n - platformFee;
-    expect(await factory.pendingPlatformFees()).to.equal(platformFee);
+    expect(await factory.pendingPlatformFees()).to.equal(platformRevenue);
     expect(await ethers.provider.getBalance(await collection.getAddress())).to.equal(creatorProceeds);
     await expect(collection.connect(minter).withdraw(minter.address)).to.be.revertedWithCustomError(collection, "OwnableUnauthorizedAccount");
     await expect(collection.withdraw(creator.address)).to.changeEtherBalances([collection, creator], [-creatorProceeds, creatorProceeds]);
@@ -77,10 +93,10 @@ describe("NFT Studio", function () {
     await expect(collection.connect(minter).mint(0)).to.be.revertedWithCustomError(collection, "InvalidQuantity");
     await expect(collection.connect(minter).mint(1)).to.be.revertedWithCustomError(collection, "IncorrectPayment");
     expect(await factory.hasMinted(minter.address)).to.equal(false);
-    await collection.connect(minter).mint(2, { value: PRICE * 2n });
+    await collection.connect(minter).mint(2, { value: mintPayment(PRICE * 2n) });
     expect(await factory.hasMinted(minter.address)).to.equal(true);
     await expect(collection.connect(minter).mint(1, { value: PRICE })).to.be.revertedWithCustomError(collection, "ExceedsWalletLimit");
-    await collection.connect(other).mint(1, { value: PRICE });
+    await collection.connect(other).mint(1, { value: mintPayment(PRICE) });
     await expect(collection.connect(other).mint(1, { value: PRICE })).to.be.revertedWithCustomError(collection, "ExceedsMaxSupply");
   });
 
@@ -88,7 +104,7 @@ describe("NFT Studio", function () {
     const { factory, creator, minter, other } = await loadFixture(deployStudio);
     const { collection, start } = await createCollection(factory, creator, { soulbound: true });
     await time.increaseTo(start);
-    await expect(collection.connect(minter).mint(1, { value: PRICE })).to.emit(collection, "Locked").withArgs(1);
+    await expect(collection.connect(minter).mint(1, { value: mintPayment(PRICE) })).to.emit(collection, "Locked").withArgs(1);
     expect(await collection.supportsInterface("0xb45a3c0e")).to.equal(true);
     expect(await collection.locked(1)).to.equal(true);
     await expect(collection.connect(minter).transferFrom(minter.address, other.address, 1)).to.be.revertedWithCustomError(collection, "Soulbound");
@@ -102,7 +118,7 @@ describe("NFT Studio", function () {
     const { factory, creator, minter, other } = await loadFixture(deployStudio);
     const { collection, start } = await createCollection(factory, creator);
     await time.increaseTo(start);
-    await collection.connect(minter).mint(1, { value: PRICE });
+    await collection.connect(minter).mint(1, { value: mintPayment(PRICE) });
     expect(await collection.locked(1)).to.equal(false);
     await collection.connect(minter).transferFrom(minter.address, other.address, 1);
     expect(await collection.ownerOf(1)).to.equal(other.address);
@@ -114,7 +130,7 @@ describe("NFT Studio", function () {
     const { factory, creator, minter, other } = await loadFixture(deployStudio);
     const { collection, start } = await createCollection(factory, creator, { edition: true, supply: 5, perWallet: 3 });
     await time.increaseTo(start);
-    await collection.connect(minter).mint(3, { value: PRICE * 3n });
+    await collection.connect(minter).mint(3, { value: mintPayment(PRICE * 3n) });
     expect(await collection.balanceOf(minter.address, 1)).to.equal(3);
     expect(await collection.totalMinted()).to.equal(3);
     expect(await collection.uri(1)).to.equal("ipfs://metadata.json");

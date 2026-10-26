@@ -28,12 +28,13 @@ const tx = { isConnected: false, pending: false, isWrongNetwork: false, address:
   catch (error) { tx.error = (error as Error).message; }
 } };
 const item = { artMarketAddress: undefined as string | undefined, id: "approved", itemType: "NFT", title: "Approved item", creationMethod: "HUMAN", nftKind: "COLLECTIBLE", contractAddress: wallet as string | null, mintPriceUsdc: 25, priceUsdc: 25, sold: false, artListingId: "42" as string | null, artListingSeller: market, creator: { username: "Creator" } };
-const state = { phase: 3, phaseCount: BigInt(0), phasePrice: BigInt(25), phaseLimit: BigInt(2), price: BigInt(25), start: BigInt(0), timestamp: BigInt(1), count: BigInt(0), supply: BigInt(10), max: BigInt(2), minted: BigInt(0), owner: market, proceeds: BigInt(0) };
+const state = { phase: 3, phaseCount: BigInt(0), phasePrice: BigInt(25), phaseLimit: BigInt(2), price: BigInt(25), start: BigInt(0), timestamp: BigInt(1), count: BigInt(0), supply: BigInt(10), max: BigInt(2), minted: BigInt(0), owner: market, proceeds: BigInt(0), mintSurchargeBps: BigInt(200) as bigint | undefined };
 let mintAccess: any = { plan: null };
 let feeTerms: PlatformFeeTerms | undefined = { legacy: false, bps: BigInt(250), recipient: market };
 let feeError = false;
 let feeContract: string | null = null;
 let isOwner = false;
+let factoryMintSurcharge: bigint | null | undefined = BigInt(200);
 const noop = () => null;
 const deps: Record<string, unknown> = {
   "next/link": { default: ({ children, ...props }: React.PropsWithChildren) => React.createElement("a", props, children), __esModule: true },
@@ -57,7 +58,7 @@ const deps: Record<string, unknown> = {
   "@/lib/protocol": { ...require("../../lib/protocol"), protocol: { ...protocol, factory: market, artMarket: market, isTestnet: true }, artMarketForItem: (item: { artMarketAddress?: string | null }) => item.artMarketAddress ? require("../../lib/protocol").artMarketForItem(item) : market, artMarketAbi },
   "@/lib/nftTypes": require("../../lib/nftTypes"),
   "@/lib/artDelivery": require("../../lib/artDelivery"),
-  "@tanstack/react-query": { useQuery: ({ queryKey }: { queryKey: string[] }) => ({ isLoading: false, isError: false, refetch: async () => {}, data: queryKey[0] === "item-detail" ? { item, isOwner } : queryKey[0] === "collection-state" ? state : queryKey[0] === "art-order" ? { order: null } : { listing: [market, "art-hash", BigInt(25), `0x${"0".repeat(40)}`, false], proceeds: BigInt(0) } }) },
+  "@tanstack/react-query": { useQuery: ({ queryKey }: { queryKey: string[] }) => ({ isLoading: false, isError: false, refetch: async () => {}, data: queryKey[0] === "item-detail" ? { item, isOwner } : queryKey[0] === "collection-state" ? state : queryKey[0] === "factory-mint-surcharge" ? factoryMintSurcharge : queryKey[0] === "art-order" ? { order: null } : { listing: [market, "art-hash", BigInt(25), `0x${"0".repeat(40)}`, false], proceeds: BigInt(0) } }) },
 };
 function load(file: string): React.ComponentType<{ id: string }> {
   const source = readFileSync(new URL(`../../components/${file}.tsx`, import.meta.url), "utf8");
@@ -72,8 +73,8 @@ beforeEach(() => {
   logins = connections = payments = 0; saved = undefined; lastWrite = undefined; saveFailure = false;
   Object.assign(account, { authenticated: false, identity: "guest", walletAddress: undefined });
   Object.assign(tx, { isConnected: false, error: "" });
-  feeTerms = { legacy: false, bps: BigInt(250), recipient: market }; feeError = false; isOwner = false; item.artMarketAddress = undefined; item.contractAddress = wallet; item.artListingId = "42";
-  Object.assign(state, { price: BigInt(25) });
+  feeTerms = { legacy: false, bps: BigInt(250), recipient: market }; feeError = false; isOwner = false; factoryMintSurcharge = BigInt(200); item.artMarketAddress = undefined; item.contractAddress = wallet; item.artListingId = "42";
+  Object.assign(state, { price: BigInt(25), mintSurchargeBps: BigInt(200) });
   item.itemType = "NFT"; mintAccess = { plan: null }; Object.assign(state, { phase: 3, phaseCount: BigInt(0), phasePrice: BigInt(25), phaseLimit: BigInt(2) });
   globalThis.fetch = async (_url, options) => { saved = JSON.parse(options?.body as string); return saveFailure ? Response.json({ error: "Retry saving; do not pay again." }, { status: 503 }) : Response.json({ order: { id: "order" } }); };
 });
@@ -125,13 +126,14 @@ test("failed order saving retries delivery without charging for a second purchas
 });
 
 
-test("allowlisted mint uses the assigned tier proof and phase price; pending wallets cannot mint early", async () => {
+test("allowlisted and public mints add the actual deployed buyer rate to their base prices", async () => {
   Object.assign(account, { authenticated: true, identity: "collector", walletAddress: wallet }); tx.isConnected = true;
+  feeTerms = { legacy: false, bps: BigInt(250), recipient: market };
   mintAccess = { plan: { root: hash, frozenAt: new Date().toISOString() }, entry: { tier: "ULTIMATE" }, proof: [] };
-  Object.assign(state, { phase: 1, phasePrice: BigInt(5), phaseLimit: BigInt(1) });
+  Object.assign(state, { phase: 1, phasePrice: usdcAmount("5"), phaseLimit: BigInt(1), price: usdcAmount("25"), mintSurchargeBps: BigInt(175) });
   await act(async () => { renderer = create(React.createElement(CollectionDetail, { id: item.id })); });
   await act(async () => renderer!.root.findByType("form").props.onSubmit({ preventDefault() {} }));
-  assert.equal(lastWrite?.functionName, "mintAllowlisted"); assert.deepEqual(lastWrite?.args, [BigInt(1), 1, []]); assert.equal(lastWrite?.value, BigInt(5));
+  assert.equal(lastWrite?.functionName, "mintAllowlisted"); assert.deepEqual(lastWrite?.args, [BigInt(1), 1, []]); assert.equal(lastWrite?.value, usdcAmount("5.0875"));
   lastWrite = undefined; mintAccess.entry.tier = "PENDING";
   await act(async () => renderer!.update(React.createElement(CollectionDetail, { id: item.id })));
   await act(async () => renderer!.root.findByType("form").props.onSubmit({ preventDefault() {} }));
@@ -140,22 +142,35 @@ test("allowlisted mint uses the assigned tier proof and phase price; pending wal
   await act(async () => renderer!.update(React.createElement(CollectionDetail, { id: item.id })));
   await act(async () => renderer!.root.findByType("form").props.onSubmit({ preventDefault() {} }));
   const publicWrite = lastWrite as Record<string, unknown> | undefined;
-  assert.equal(publicWrite?.functionName, "mint"); assert.equal(publicWrite?.value, state.price);
+  assert.equal(publicWrite?.functionName, "mint"); assert.equal(publicWrite?.value, usdcAmount("25.4375"));
 });
 
 
-test("mint breakdown tracks quantity and current phase price without adding a buyer surcharge", async () => {
+test("mint breakdown tracks quantity and adds the deployed buyer surcharge", async () => {
   Object.assign(account, { authenticated: true, identity: "collector", walletAddress: wallet }); tx.isConnected = true;
+  feeTerms = { legacy: false, bps: BigInt(250), recipient: market };
   Object.assign(state, { phase: 1, phasePrice: usdcAmount("0.1"), phaseLimit: BigInt(2) });
   mintAccess = { plan: { root: hash, frozenAt: new Date().toISOString() }, entry: { tier: "ULTIMATE" }, proof: [] };
   await act(async () => { renderer = create(React.createElement(CollectionDetail, { id: item.id })); });
   await act(async () => renderer!.root.findByProps({ id: "mint-quantity" }).props.onChange({ target: { value: "2" } }));
   const disclosure = renderer!.root.findByProps({ "aria-label": "Payment breakdown" });
   const text = disclosure.findAllByType("span").map((node) => node.children.filter((child) => typeof child === "string").join("")).join(" ");
-  assert.match(text, /Total mint payment/); assert.match(text, /0.2 USDC/); assert.match(text, /0.005 USDC/); assert.match(text, /0.195 USDC/);
+  for (const expected of ["Mint price", "0.2 USDC", "Collector platform fee (2%)", "0.004 USDC", "Total mint payment", "0.204 USDC", "Creator platform fee (2.5%)", "0.005 USDC", "Creator receives", "0.195 USDC", "Total platform fees", "0.009 USDC"]) assert.ok(text.includes(expected), expected);
   assert.equal(feeContract, item.contractAddress, "deployed collection terms must override the current factory terms");
   await act(async () => renderer!.root.findByType("form").props.onSubmit({ preventDefault() {} }));
-  assert.equal(lastWrite?.value, usdcAmount("0.2"));
+  assert.equal(lastWrite?.value, usdcAmount("0.204"));
+});
+
+test("older and legacy collections keep their exact base mint payment", async () => {
+  Object.assign(account, { authenticated: true, identity: "collector", walletAddress: wallet }); tx.isConnected = true;
+  Object.assign(state, { phase: 3, phasePrice: usdcAmount("5"), price: usdcAmount("5"), mintSurchargeBps: undefined });
+  for (const terms of [{ legacy: false, bps: BigInt(250), recipient: market }, { legacy: true, bps: BigInt(0), recipient: null }] satisfies PlatformFeeTerms[]) {
+    feeTerms = terms; lastWrite = undefined;
+    await act(async () => { renderer?.unmount(); renderer = create(React.createElement(CollectionDetail, { id: item.id })); });
+    await act(async () => renderer!.root.findByType("form").props.onSubmit({ preventDefault() {} }));
+    const legacyWrite = lastWrite as Record<string, unknown> | undefined;
+    assert.equal(legacyWrite?.value, usdcAmount("5"));
+  }
 });
 
 test("art fee terms follow the listing market address and unavailable fees block new payment", async () => {
@@ -182,9 +197,17 @@ test("creators see the platform deduction before activating art checkout", async
 
 test("collection creators review the factory mint fee before deployment", async () => {
   item.contractAddress = null; isOwner = true;
-  feeTerms = { legacy: false, bps: BigInt(1000), recipient: market };
+  feeTerms = { legacy: false, bps: BigInt(250), recipient: market };
   await act(async () => { renderer = create(React.createElement(CollectionDetail, { id: item.id })); });
   assert.equal(feeContract, market);
   const spans = renderer!.root.findByProps({ "aria-label": "Payment breakdown" }).findAllByType("span").map((node) => node.children.filter((child) => typeof child === "string").join("")).join(" ");
-  for (const text of ["Public mint payment per token", "25 USDC", "Platform fee (10%)", "2.5 USDC", "22.5 USDC"]) assert.ok(spans.includes(text), text);
+  for (const text of ["Public mint price per token", "25 USDC", "Collector platform fee (2%)", "0.5 USDC", "Collector pays per token", "25.5 USDC", "Creator platform fee (2.5%)", "0.625 USDC", "Creator receives per token", "24.375 USDC", "Total platform fees", "1.125 USDC"]) assert.ok(spans.includes(text), text);
+});
+
+test("an older factory cannot deploy collections without buyer-paid mint fees", async () => {
+  item.contractAddress = null; isOwner = true; factoryMintSurcharge = null;
+  await act(async () => { renderer = create(React.createElement(CollectionDetail, { id: item.id })); });
+  const deploy = renderer!.root.findAllByType("button").find((node) => node.props.children === "Deploy approved collection")!;
+  assert.equal(deploy.props.disabled, true);
+  assert.match(JSON.stringify(renderer!.toJSON()), /does not support buyer-paid mint fees/);
 });

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { usdcAmount, transactionError, minimumUsdcBid, displayUsdc, splitPlatformFee, formatFeePercent } from "../../lib/protocol";
-import { percentToBps, readFeeTerms } from "../../lib/monetization";
+import { usdcAmount, transactionError, minimumUsdcBid, displayUsdc, splitPlatformFee, addPlatformFee, formatFeePercent } from "../../lib/protocol";
+import { feePresets, percentToBps, readFeeTerms } from "../../lib/monetization";
 
 test("payable Arc USDC amounts use 18 decimals, including fractional prices", () => {
   assert.equal(usdcAmount("1"), BigInt("1000000000000000000"));
@@ -34,10 +34,22 @@ test("platform deductions preserve exact native USDC totals across both presets"
   assert.equal(formatFeePercent(250), "2.5%");
 });
 
+test("buyer surcharge and creator proceeds fee produce the standard mint split", () => {
+  const surcharge = addPlatformFee(usdcAmount("5"), 200);
+  const proceeds = splitPlatformFee(usdcAmount("5"), 250);
+  assert.deepEqual(surcharge, { base: usdcAmount("5"), platformFee: usdcAmount("0.1"), total: usdcAmount("5.1") });
+  assert.equal(proceeds.net, usdcAmount("4.875"));
+  assert.equal(proceeds.platformFee + surcharge.platformFee, usdcAmount("0.225"));
+  assert.deepEqual(addPlatformFee(BigInt(1), 200), { base: BigInt(1), platformFee: BigInt(0), total: BigInt(1) });
+  assert.deepEqual(addPlatformFee(BigInt(0), 200), { base: BigInt(0), platformFee: BigInt(0), total: BigInt(0) });
+});
+
 test("deployment terms reject zero wallets, fractional basis points and rates above the contract cap", () => {
+  assert.deepEqual(feePresets.standard, { mintFeeBps: 250, mintSurchargeBps: 200, marketplaceFeeBps: 250 });
   assert.equal(percentToBps("2.55"), 255);
   assert.equal(percentToBps("10.00"), 1000);
   for (const value of ["-1", "10.01", "1e1", "NaN", "2.555"]) assert.throws(() => percentToBps(value));
   for (const bps of [-1, 1.5, 1001]) assert.throws(() => splitPlatformFee(BigInt(1), bps));
-  assert.equal(readFeeTerms({ feeRecipient: `0x${"0".repeat(40)}`, mintFeeBps: 250, marketplaceFeeBps: 250 }), null);
+  assert.equal(readFeeTerms({ feeRecipient: `0x${"1".repeat(40)}`, mintFeeBps: 250, marketplaceFeeBps: 250 }), null);
+  assert.equal(readFeeTerms({ feeRecipient: `0x${"0".repeat(40)}`, mintFeeBps: 250, mintSurchargeBps: 200, marketplaceFeeBps: 250 }), null);
 });

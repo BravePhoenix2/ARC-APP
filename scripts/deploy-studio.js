@@ -7,14 +7,15 @@ async function main() {
   if (!deployer) throw new Error("Use the browser setup at /settings/protocol, or configure a testnet deployer privately. Never share a private key in chat.");
   const feeRecipient = process.env.FEE_RECIPIENT_ADDRESS || (hre.network.name === "hardhat" ? deployer.address : "");
   if (!hre.ethers.isAddress(feeRecipient) || feeRecipient === hre.ethers.ZeroAddress) throw new Error("Set FEE_RECIPIENT_ADDRESS to your nonzero treasury wallet before deploying.");
-  const feeBps = (name) => {
-    const value = process.env[name] || "250";
+  const feeBps = (name, defaultValue) => {
+    const value = process.env[name] || defaultValue;
     if (!/^\d+$/.test(value) || Number(value) > 1000) throw new Error(`${name} must be an integer from 0 to 1000 basis points.`);
     return Number(value);
   };
-  const mintFeeBps = feeBps("MINT_FEE_BPS");
-  const marketplaceFeeBps = feeBps("MARKETPLACE_FEE_BPS");
-  const factory = await (await hre.ethers.getContractFactory("ArticStudioFactory")).deploy(feeRecipient, mintFeeBps);
+  const mintFeeBps = feeBps("MINT_FEE_BPS", "250");
+  const mintSurchargeBps = feeBps("MINT_SURCHARGE_BPS", "200");
+  const marketplaceFeeBps = feeBps("MARKETPLACE_FEE_BPS", "250");
+  const factory = await (await hre.ethers.getContractFactory("ArticStudioFactory")).deploy(feeRecipient, mintFeeBps, mintSurchargeBps);
   await factory.waitForDeployment();
   const art = await (await hre.ethers.getContractFactory("ArticArtMarket")).deploy(feeRecipient, marketplaceFeeBps);
   await art.waitForDeployment();
@@ -34,6 +35,7 @@ async function main() {
   console.log(`NEXT_PUBLIC_PLATFORM_FEE_RECIPIENT=${feeRecipient}`);
   console.log(`FEE_RECIPIENT_ADDRESS=${feeRecipient}`);
   console.log(`MINT_FEE_BPS=${mintFeeBps}`);
+  console.log(`MINT_SURCHARGE_BPS=${mintSurchargeBps}`);
   console.log(`MARKETPLACE_FEE_BPS=${marketplaceFeeBps}`);
 }
 main().catch((error) => { console.error(error.message); process.exitCode = 1; });

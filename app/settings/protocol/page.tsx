@@ -12,12 +12,12 @@ import PlatformRevenue from "@/components/PlatformRevenue";
 import { useProtocolTransaction } from "@/hooks/useProtocolTransaction";
 import { useArtiqAccount } from "@/hooks/useArtiqAccount";
 import { arcChain } from "@/lib/arcConfig";
-import { auctionAbi, platformFeeAbi, protocol, transactionError } from "@/lib/protocol";
+import { auctionAbi, factoryAbi, platformFeeAbi, protocol, transactionError } from "@/lib/protocol";
 import { feePresets, percentToBps, readFeeTerms } from "@/lib/monetization";
 import { deploymentConfiguration, deploymentKeys, readDeploymentDraft, type StudioDeployment } from "@/lib/studioDeployment";
 
 const button = "gallery-button inline-flex items-center justify-center gap-2 px-5 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40";
-const storageKey = "artiq:studio-testnet-deployment:asset-auctions-v1";
+const storageKey = "artiq:studio-testnet-deployment:mint-surcharge-v2";
 const labels = { factory: "NFT studio factory", artMarket: "Art checkout", auctions: "Auction and rewards house" };
 const initialDraft = (): StudioDeployment => ({});
 
@@ -35,8 +35,9 @@ export default function ProtocolSetupPage() {
   const [storageWarning, setStorageWarning] = useState("");
   const [copied, setCopied] = useState(false);
   const [feeRecipient, setFeeRecipient] = useState(process.env.NEXT_PUBLIC_PLATFORM_FEE_RECIPIENT || "");
-  const [mintPercent, setMintPercent] = useState("2.5");
-  const [salePercent, setSalePercent] = useState("2.5");
+  const [mintPercent, setMintPercent] = useState(String(feePresets.standard.mintFeeBps / 100));
+  const [mintSurchargePercent, setMintSurchargePercent] = useState(String(feePresets.standard.mintSurchargeBps / 100));
+  const [salePercent, setSalePercent] = useState(String(feePresets.standard.marketplaceFeeBps / 100));
   const guard = useRef(false);
   useEffect(() => {
     try {
@@ -44,7 +45,7 @@ export default function ProtocolSetupPage() {
       if (saved) {
         const draft = { ...initialDraft(), ...readDeploymentDraft(saved) };
         setDeployed(draft); setStarted(true); setHash(draft.pending?.hash || null);
-        if (draft.fees) { setFeeRecipient(draft.fees.feeRecipient); setMintPercent(String(draft.fees.mintFeeBps / 100)); setSalePercent(String(draft.fees.marketplaceFeeBps / 100)); }
+        if (draft.fees) { setFeeRecipient(draft.fees.feeRecipient); setMintPercent(String(draft.fees.mintFeeBps / 100)); setMintSurchargePercent(String(draft.fees.mintSurchargeBps / 100)); setSalePercent(String(draft.fees.marketplaceFeeBps / 100)); }
         if (draft.pending) setStage("A deployment transaction was submitted. Resume to check its confirmation before sending another transaction.");
       }
     } catch { setStorageWarning("Browser storage is unavailable. Keep this tab open until deployment finishes."); }
@@ -67,7 +68,7 @@ export default function ProtocolSetupPage() {
     if (!walletClient || !tx.client) { setError("Your wallet is still connecting. Wait a moment and try again."); return; }
     let fees = deployed.fees;
     try {
-      fees ||= readFeeTerms({ feeRecipient: feeRecipient.trim(), mintFeeBps: percentToBps(mintPercent), marketplaceFeeBps: percentToBps(salePercent) }) || undefined;
+      fees ||= readFeeTerms({ feeRecipient: feeRecipient.trim(), mintFeeBps: percentToBps(mintPercent), mintSurchargeBps: percentToBps(mintSurchargePercent), marketplaceFeeBps: percentToBps(salePercent) }) || undefined;
       if (!fees) throw new Error("Enter a valid, nonzero public wallet address for platform fees.");
     } catch (cause) { setError(transactionError(cause)); return; }
     guard.current = true; setPending(true); setStarted(true); setCopied(false);
@@ -87,6 +88,12 @@ export default function ProtocolSetupPage() {
             tx.client!.readContract({ address, abi: platformFeeAbi, functionName: "platformFeeBps" }),
           ]);
           if (recipient.toLowerCase() !== fees.feeRecipient.toLowerCase() || Number(bps) !== (key === "factory" ? fees.mintFeeBps : fees.marketplaceFeeBps)) throw new Error(`The ${labels[key]} fee terms do not match this deployment. Check the saved draft.`);
+          if (key === "factory") {
+            const supportsSurcharge = await tx.client!.readContract({ address, abi: factoryAbi, functionName: "supportsMintSurcharge" }).catch(() => false);
+            if (supportsSurcharge !== true) throw new Error("This NFT studio factory does not support buyer-paid mint surcharges. Deploy the updated factory and preserve the old address for its existing collections.");
+            const surchargeBps = await tx.client!.readContract({ address, abi: factoryAbi, functionName: "mintSurchargeBps" });
+            if (Number(surchargeBps) !== fees.mintSurchargeBps) throw new Error("The NFT studio factory buyer surcharge does not match this deployment. Check the saved draft.");
+          }
           if (key === "auctions" && await tx.client!.readContract({ address, abi: auctionAbi, functionName: "supportsAssetAuctions" }) !== true) throw new Error("This auction house does not support digital and physical asset auctions. Deploy the updated contracts.");
         };
         if (next[key]) {
@@ -100,7 +107,8 @@ export default function ProtocolSetupPage() {
           const artifact = artifacts[key === "factory" ? "ArticStudioFactory" : key === "artMarket" ? "ArticArtMarket" : "ArticAuctionHouse"];
           setStage(`Confirm ${labels[key]} deployment in your wallet.`);
           const feeArgs = [fees.feeRecipient, BigInt(key === "factory" ? fees.mintFeeBps : fees.marketplaceFeeBps)];
-          transaction = await walletClient.deployContract({ abi: artifact.abi as Abi, bytecode: artifact.bytecode as Hex, args: key === "auctions" ? [next.factory!, next.artMarket!, ...feeArgs] : feeArgs, account: tx.address, chain: arcChain });
+          const args = key === "factory" ? [...feeArgs, BigInt(fees.mintSurchargeBps)] : key === "auctions" ? [next.factory!, next.artMarket!, ...feeArgs] : feeArgs;
+          transaction = await walletClient.deployContract({ abi: artifact.abi as Abi, bytecode: artifact.bytecode as Hex, args, account: tx.address, chain: arcChain });
           // Persist the hash before waiting: refreshing or a slow RPC must not deploy a duplicate.
           next.pending = { key, hash: transaction }; remember();
         }
@@ -127,20 +135,20 @@ export default function ProtocolSetupPage() {
       <Link href="/settings" className="text-xs font-semibold text-[var(--muted-text)]">← Settings</Link>
       <p className="mt-8 text-[10px] font-semibold uppercase tracking-[.18em] text-[#b55fbe]">Project owner · Arc Testnet</p>
       <h1 className="mt-4 text-4xl">Set up marketplace revenue.</h1>
-      <p className="mt-5 max-w-2xl text-sm leading-7 text-[var(--muted-text)]">Choose your commission and fee wallet, then deploy the studio, art checkout, and auction contracts. The updated auction house supports timed digital and physical asset listings as well as NFTs. Fees are included in the displayed price and deducted from proceeds.</p>
+      <p className="mt-5 max-w-2xl text-sm leading-7 text-[var(--muted-text)]">Choose your commission and fee wallet, then deploy the studio, art checkout, and auction contracts. The updated auction house supports timed digital and physical asset listings as well as NFTs. Paid mints have a creator proceeds fee and a separate surcharge paid by the minter. Art and auction fees are deducted from seller proceeds.</p>
       <section className="gallery-card mt-8 p-6 sm:p-8">
         <div className="flex items-center gap-3"><ShieldCheck size={23} className="text-[#b55fbe]" /><h2 className="text-xl">{configured ? "Current project addresses" : "Testnet setup required"}</h2></div>
         <div className="mt-6 space-y-4">{deploymentKeys.map((key) => <div key={key} className="rounded-xl border border-[var(--border-soft)] p-4"><p className="text-xs font-semibold">{labels[key]}</p>{protocol[key] ? <a href={`${arcChain.blockExplorers?.default.url}/address/${protocol[key]}`} target="_blank" rel="noreferrer" className="mt-2 flex items-center gap-2 break-all font-mono text-[11px] text-[#b55fbe]">{protocol[key]}<ExternalLink size={12} className="shrink-0" /></a> : <p className="mt-2 text-xs text-[var(--muted-text)]">Not configured</p>}</div>)}</div>
         {!complete && <div className="mt-6 space-y-4">
           <fieldset disabled={pending || !!deployed.fees} className="space-y-4 disabled:opacity-70">
             <legend className="text-sm font-semibold">Commission terms</legend>
-            <div className="flex flex-wrap gap-3">{Object.entries(feePresets).map(([key, preset]) => <button key={key} type="button" className="rounded-full border border-[var(--border-soft)] px-4 py-2 text-xs font-semibold" onClick={() => { setMintPercent(String(preset.mintFeeBps / 100)); setSalePercent(String(preset.marketplaceFeeBps / 100)); }}>{key === "standard" ? "2.5% on every sale" : "OpenSea: 1% sales / 10% mints"}</button>)}</div>
+            <div className="flex flex-wrap gap-3">{Object.entries(feePresets).map(([key, preset]) => <button key={key} type="button" className="rounded-full border border-[var(--border-soft)] px-4 py-2 text-xs font-semibold" onClick={() => { setMintPercent(String(preset.mintFeeBps / 100)); setMintSurchargePercent(String(preset.mintSurchargeBps / 100)); setSalePercent(String(preset.marketplaceFeeBps / 100)); }}>{key === "standard" ? "Standard: 2.5% creator fee + 2% buyer surcharge" : "OpenSea-style: 10% creator fee + 2% buyer surcharge / 1% sales"}</button>)}</div>
             <label className="block text-xs font-semibold">Platform fee wallet<input aria-label="Platform fee wallet" value={feeRecipient} onChange={(event) => setFeeRecipient(event.target.value)} placeholder="0x…" className="mt-2 block w-full rounded-xl border border-[var(--border-soft)] bg-[var(--chip-bg)] px-4 py-3 font-mono text-xs" /></label>
-            <div className="grid gap-4 sm:grid-cols-2"><label className="block text-xs font-semibold">Primary mint fee (%)<input aria-label="Primary mint fee (%)" type="number" min="0" max="10" step="0.01" value={mintPercent} onChange={(event) => setMintPercent(event.target.value)} className="mt-2 block w-full rounded-xl border border-[var(--border-soft)] bg-[var(--chip-bg)] px-4 py-3 text-sm" /></label><label className="block text-xs font-semibold">Art and auction fee (%)<input aria-label="Art and auction fee (%)" type="number" min="0" max="10" step="0.01" value={salePercent} onChange={(event) => setSalePercent(event.target.value)} className="mt-2 block w-full rounded-xl border border-[var(--border-soft)] bg-[var(--chip-bg)] px-4 py-3 text-sm" /></label></div>
+            <div className="grid gap-4 sm:grid-cols-3"><label className="block text-xs font-semibold">Creator mint proceeds fee (%)<input aria-label="Creator mint proceeds fee (%)" type="number" min="0" max="10" step="0.01" value={mintPercent} onChange={(event) => setMintPercent(event.target.value)} className="mt-2 block w-full rounded-xl border border-[var(--border-soft)] bg-[var(--chip-bg)] px-4 py-3 text-sm" /></label><label className="block text-xs font-semibold">Buyer mint surcharge (%)<input aria-label="Buyer mint surcharge (%)" type="number" min="0" max="10" step="0.01" value={mintSurchargePercent} onChange={(event) => setMintSurchargePercent(event.target.value)} className="mt-2 block w-full rounded-xl border border-[var(--border-soft)] bg-[var(--chip-bg)] px-4 py-3 text-sm" /></label><label className="block text-xs font-semibold">Art and auction proceeds fee (%)<input aria-label="Art and auction proceeds fee (%)" type="number" min="0" max="10" step="0.01" value={salePercent} onChange={(event) => setSalePercent(event.target.value)} className="mt-2 block w-full rounded-xl border border-[var(--border-soft)] bg-[var(--chip-bg)] px-4 py-3 text-sm" /></label></div>
           </fieldset>
-          <p className="text-xs leading-6 text-[var(--muted-text)]">Choose one preset or set custom rates up to 10%. Terms are fixed in these contracts after deployment. A 100 USDC sale at 2.5% credits 2.50 USDC to the platform and 97.50 USDC to the seller before any creator royalty. Gas is paid separately. Free mints, refunds, and reward pools have no platform fee. <a className="underline" href="https://support.opensea.io/en/articles/8867091-what-fees-do-i-pay-on-opensea" target="_blank" rel="noreferrer">OpenSea fee reference</a>.</p>
+          <p className="text-xs leading-6 text-[var(--muted-text)]">Choose one preset or set custom rates up to 10%. Terms are fixed in these contracts after deployment. Under the standard terms, a 5 USDC NFT costs the minter 5.10 USDC: the 2.5% proceeds fee leaves 4.875 USDC for the creator, while the platform receives that 0.125 USDC fee plus the 0.10 USDC buyer surcharge, totaling 0.225 USDC. Art and auction fees remain part of the displayed price and are deducted from seller proceeds; a 100 USDC sale at 2.5% credits 2.50 USDC to the platform and 97.50 USDC to the seller before any creator royalty. Gas is paid separately. Free mints, refunds, and reward pools have no platform fee. <a className="underline" href="https://support.opensea.io/en/articles/8867091-what-fees-do-i-pay-on-opensea" target="_blank" rel="noreferrer">OpenSea fee reference</a>.</p>
           <p className="text-xs leading-6 text-[var(--muted-text)]">Confirm three new contract deployments using test USDC for gas. Confirmed steps and fee terms are saved so you can resume. Test USDC has no monetary value.</p>
-          {configured && <p className="text-xs leading-6 text-[var(--muted-text)]">Before replacing the configured addresses, back up the database, apply the additive schema update, and run npm run studio:pin-factories with the original addresses. Existing collections and art listings retain their original contracts and fee terms. Keep the original auction-house address for existing auctions, refunds, and reward claims.</p>}
+          {configured && <p className="text-xs leading-6 text-[var(--muted-text)]">Before replacing the configured addresses, back up the database, apply the additive schema update, and run npm run studio:pin-factories with the original addresses. Only collections deployed through the updated factory use the buyer-paid mint surcharge. Existing collections and art listings retain their original contracts and fee terms. Keep the original auction-house address for existing auctions, refunds, and reward claims.</p>}
           <button className={button} disabled={pending || !ready || !protocol.isTestnet} onClick={() => void deploy()}><Rocket size={16} />{pending ? "Deploying…" : actionLabel}</button>
         </div>}
         <div className="mt-4"><TransactionStatus pending={pending} error={error} hash={hash} /></div>

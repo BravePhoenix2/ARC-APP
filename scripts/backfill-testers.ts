@@ -7,6 +7,9 @@ async function main() {
   try {
     const { imported } = await backfillVerifiedTesters();
     console.log(`Added ${imported} previously verified tester accounts. Seeded profiles are excluded.`);
-  } finally { await prisma.$disconnect(); }
+  }
+  finally {
+    await prisma.$disconnect();
+  }
 }
 main().catch(() => { console.error("Tester backfill failed. Existing accounts have not been reset."); process.exitCode = 1; });

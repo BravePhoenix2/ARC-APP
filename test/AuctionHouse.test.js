@@ -6,7 +6,7 @@ const USDC = value => ethers.parseUnits(String(value), 18);
 
 async function deployPlatform() {
   const [creator, seller, bidder, other, sponsor, ineligible, treasury] = await ethers.getSigners();
-  const factory = await ethers.deployContract("ArticStudioFactory", [treasury.address, 250]);
+  const factory = await ethers.deployContract("ArticStudioFactory", [treasury.address, 250, 200]);
   const art = await ethers.deployContract("ArticArtMarket", [treasury.address, 250]);
   const auction = await ethers.deployContract("ArticAuctionHouse", [await factory.getAddress(), await art.getAddress(), treasury.address, 250]);
   await factory.connect(creator).create721("Auction collection", "AUCT", "ipfs://token.json", 0, 0, 100, 10, 500, false);

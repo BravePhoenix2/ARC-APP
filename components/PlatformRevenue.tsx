@@ -5,19 +5,19 @@ import { formatUnits, type Address } from "viem";
 import TransactionStatus from "@/components/TransactionStatus";
 import { useProtocolTransaction } from "@/hooks/useProtocolTransaction";
 import { arcChain } from "@/lib/arcConfig";
-import { platformFeeAbi, protocol } from "@/lib/protocol";
+import { factoryAbi, platformFeeAbi, protocol } from "@/lib/protocol";
 import { readPlatformFeeTerms } from "@/lib/platformFeeRead";
 
 type Transaction = ReturnType<typeof useProtocolTransaction>;
-type Revenue = { legacy: true } | { legacy: false; recipient: Address; bps: bigint; pending: bigint; total: bigint };
+type Revenue = { legacy: true } | { legacy: false; recipient: Address; bps: bigint; mintSurchargeBps?: bigint; pending: bigint; total: bigint };
 const sources = [
-  { key: "factory", label: "NFT mint fees" },
+  { key: "factory", label: "NFT mint fees", mintFees: true },
   { key: "artMarket", label: "Art sale fees" },
   { key: "auctions", label: "Auction sale fees" },
 ] as const;
 const button = "gallery-button px-4 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40";
 
-function RevenueSource({ label, address, tx }: { label: string; address: Address | null; tx: Transaction }) {
+function RevenueSource({ label, address, tx, mintFees = false }: { label: string; address: Address | null; tx: Transaction; mintFees?: boolean }) {
   const query = useQuery({
     queryKey: ["platform-revenue", arcChain.id, address],
     enabled: !!address && !!tx.client && protocol.isTestnet,
@@ -29,11 +29,16 @@ function RevenueSource({ label, address, tx }: { label: string; address: Address
       if (terms.legacy) return { legacy: true };
       if (!terms.recipient) throw new Error("The contract did not return a fee recipient.");
       const blockNumber = await client.getBlockNumber();
+      let mintSurchargeBps: bigint | undefined;
+      if (mintFees) {
+        const supported = await client.readContract({ address: address!, abi: factoryAbi, functionName: "supportsMintSurcharge", blockNumber }).catch(() => false);
+        if (supported) mintSurchargeBps = await client.readContract({ address: address!, abi: factoryAbi, functionName: "mintSurchargeBps", blockNumber });
+      }
       const [pending, total] = await Promise.all([
         client.readContract({ address: address!, abi: platformFeeAbi, functionName: "pendingPlatformFees", blockNumber }),
         client.readContract({ address: address!, abi: platformFeeAbi, functionName: "totalPlatformFees", blockNumber }),
       ]);
-      return { legacy: false, recipient: terms.recipient, bps: terms.bps, pending, total };
+      return { legacy: false, recipient: terms.recipient, bps: terms.bps, mintSurchargeBps, pending, total };
     },
   });
   const revenue = query.data && !query.data.legacy ? query.data : null;
@@ -65,7 +70,10 @@ function RevenueSource({ label, address, tx }: { label: string; address: Address
       : query.isPending ? <p role="status" className="mt-3 text-xs text-[var(--muted-text)]">Loading on-chain fee accounting…</p>
       : query.data?.legacy ? <p className="mt-3 text-xs leading-6 text-[var(--muted-text)]">This legacy deployment does not collect platform fees. Deploy and configure a fee-enabled contract to activate monetization here.</p>
       : revenue && <>
-        <p className="mt-4 text-xs text-[var(--muted-text)]">Platform rate <strong className="text-[var(--text)]">{formatUnits(revenue.bps, 2)}%</strong></p>
+        {mintFees ? <div className="mt-4 space-y-1 text-xs text-[var(--muted-text)]">
+          <p>Creator mint fee <strong className="text-[var(--text)]">{formatUnits(revenue.bps, 2)}%</strong></p>
+          {revenue.mintSurchargeBps !== undefined ? <><p>Collector mint surcharge <strong className="text-[var(--text)]">{formatUnits(revenue.mintSurchargeBps, 2)}%</strong></p><p>Combined mint platform rate <strong className="text-[var(--text)]">{formatUnits(revenue.bps + revenue.mintSurchargeBps, 2)}%</strong></p></> : <p>This deployment does not add a collector mint surcharge.</p>}
+        </div> : <p className="mt-4 text-xs text-[var(--muted-text)]">Platform rate <strong className="text-[var(--text)]">{formatUnits(revenue.bps, 2)}%</strong></p>}
         <dl className="mt-4 grid gap-4 sm:grid-cols-2">
           <div><dt className="text-[11px] text-[var(--muted-text)]">Total fees accrued</dt><dd className="mt-1 break-words text-lg font-semibold">{formatUnits(revenue.total, 18)} <span className="text-xs">test USDC</span></dd></div>
           <div><dt className="text-[11px] text-[var(--muted-text)]">Available to withdraw</dt><dd className="mt-1 break-words text-lg font-semibold">{formatUnits(revenue.pending, 18)} <span className="text-xs">test USDC</span></dd></div>
@@ -84,7 +92,7 @@ export default function PlatformRevenue() {
     <p className="text-[10px] font-semibold uppercase tracking-[.18em] text-[#b55fbe]">Arc Testnet</p>
     <h2 id="platform-revenue-title" className="mt-2 text-xl">Platform revenue</h2>
     <p className="mt-3 text-xs leading-6 text-[var(--muted-text)]">Fees recorded by the configured contracts appear below. Test USDC has no monetary value. Withdrawals go to the connected fee recipient wallet.</p>
-    <div className="mt-5 space-y-4">{sources.map((source) => <RevenueSource key={source.key} label={source.label} address={protocol[source.key]} tx={tx} />)}</div>
+    <div className="mt-5 space-y-4">{sources.map((source) => <RevenueSource key={source.key} label={source.label} address={protocol[source.key]} tx={tx} mintFees={"mintFees" in source && source.mintFees} />)}</div>
     {previousHouses.length > 0 && <div className="mt-5 space-y-4">{previousHouses.map((address) => <RevenueSource key={address} label="Previous auction house fees" address={address} tx={tx} />)}</div>}
     {tx.isWrongNetwork && <button type="button" className={`${button} mt-5`} disabled={tx.pending} onClick={() => void tx.switchToArc()}>Switch to Arc Testnet</button>}
     <div className="mt-4"><TransactionStatus pending={tx.pending} error={tx.error} hash={tx.hash} /></div>

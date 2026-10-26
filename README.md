@@ -5,25 +5,34 @@ Next.js marketplace with Prisma/SQLite and Solidity contracts.
 ## Marketplace revenue
 
 New studio deployments collect a commission from paid NFT mints, original-art
-purchases, and settled asset and NFT auctions. Fees are included in the sale price: at
-2.5%, a 100 USDC sale credits 2.50 to the platform and 97.50 to the seller before
-any auction creator royalty. Gas is separate. Creator royalties belong to the
-creator and are separate from platform revenue. Free mints, outbid refunds,
-cancelled/unsold auctions, and reward pools carry no platform commission.
+purchases, and settled asset and NFT auctions. Paid NFT mints have two platform
+charges: a fee deducted from creator proceeds and a separate surcharge added to
+the price paid by the minter. Under the standard terms, a 5 USDC NFT costs the
+minter 5.10 USDC. The 2.5% proceeds fee leaves 4.875 USDC for the creator, while
+the platform receives that 0.125 USDC fee plus the 0.10 USDC buyer surcharge,
+totaling 0.225 USDC. Gas is separate. Art and auction fees remain included in the
+sale price and are deducted from seller proceeds: at 2.5%, a 100 USDC sale credits
+2.50 to the platform and 97.50 to the seller before any auction creator royalty.
+Creator royalties belong to the creator and are separate from platform revenue.
+Free mints, outbid refunds, cancelled/unsold auctions, and reward pools carry no
+platform commission.
 
 `/settings/protocol` offers two presets and custom rates up to 10%:
 
-| Preset | Primary NFT mints | Art sales and all auctions |
-| --- | --- | --- |
-| Standard | 2.5% | 2.5% |
-| OpenSea-style | 10% | 1% |
+| Preset | Creator mint proceeds | Buyer mint surcharge | Art sales and all auctions |
+| --- | --- | --- | --- |
+| Standard | 2.5% deducted | 2% added | 2.5% deducted from proceeds |
+| OpenSea-style | 10% deducted | 2% added | 1% deducted from proceeds |
 
-The OpenSea-style preset follows the published
-[OpenSea fee schedule](https://support.opensea.io/en/articles/8867091-what-fees-do-i-pay-on-opensea).
+The OpenSea-style preset uses rates from the published
+[OpenSea fee schedule](https://support.opensea.io/en/articles/8867091-what-fees-do-i-pay-on-opensea),
+with its primary mint rate deducted from creator proceeds. Artiq's separate 2%
+buyer surcharge still applies.
 Choose one preset per deployment. The fee wallet and rates are immutable after
 deployment; changing environment defaults does not change deployed terms.
-Checkout reads the actual contract terms and shows the platform deduction before
-payment. Verified older contracts retain their original zero-platform-fee rules.
+Checkout reads the actual contract terms and shows both mint charges, or the
+marketplace deduction, before payment. Verified older contracts retain their
+original fee rules.
 If fee terms cannot be verified, checkout waits for a successful retry.
 
 Platform fees accrue in separate pull-payment balances. Mint fees accumulate at
@@ -35,8 +44,9 @@ fees. Revenue figures come from the chain and exclude royalties, rewards, gas,
 and sale proceeds owed to sellers.
 
 The browser setup uses `NEXT_PUBLIC_PLATFORM_FEE_RECIPIENT` to prefill the public
-treasury address. The CLI uses `FEE_RECIPIENT_ADDRESS`, `MINT_FEE_BPS`, and
-`MARKETPLACE_FEE_BPS` (defaults 250/250; use 1000/100 for the alternative preset).
+treasury address. The CLI uses `FEE_RECIPIENT_ADDRESS`, `MINT_FEE_BPS`,
+`MINT_SURCHARGE_BPS`, and `MARKETPLACE_FEE_BPS` (standard defaults 250/200/250;
+use 1000/200/100 for the alternative preset).
 No fee wallet private key is required for deployment. Only the recipient can
 later sign a fee withdrawal. Browser deployments save their confirmed steps,
 pending hash, and frozen terms so retries do not deploy duplicates.
@@ -58,7 +68,8 @@ npm run studio:pin-factories
 The pin command records both original collection factories and original art
 markets. Deploy all three fee-enabled contracts in `/settings/protocol`, then
 copy the complete configuration, rebuild, and restart. Existing collections and
-art listings keep their original contracts and fee terms. New listings store
+art listings keep their original contracts and fee terms; only collections
+deployed through the updated factory use the buyer-paid mint surcharge. New listings store
 their market address when their creation receipt is verified. Old auction houses
 are retained in `NEXT_PUBLIC_LEGACY_AUCTION_HOUSE_ADDRESSES` (comma-separated) and
 remain selectable on `/auctions` for NFT claims, refunds, seller withdrawals, and
@@ -201,7 +212,11 @@ settings before the app attaches a collection or art checkout listing.
 
 Creators can configure **Ultimate → FCFS → Public** access in **Mint access** on
 an approved, undeployed collection. Set ordered opening dates, tier prices, and
-phase wallet limits. Collectors request a tier using a linked, signed-in wallet;
+phase wallet limits. The main **Public mint price** from the creator form is used
+for Public minting. Ultimate and FCFS have separate prices: after setting up the
+phases, use **Edit price** on either tier to save its price independently without
+changing the other tier, schedule, or Public price. Edit prices before Ultimate
+opens and before the allowlist is locked. Collectors request a tier using a linked, signed-in wallet;
 the creator approves requests or imports wallet addresses from text/CSV. Pending
 requests do not grant mint access. The roster is private to the creator; a
 collector sees only their own assignment and proof.

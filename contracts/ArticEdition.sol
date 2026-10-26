@@ -21,6 +21,7 @@ contract ArticEdition is ERC1155, ERC2981, Ownable, ReentrancyGuard, ArticMintPh
     address public immutable registry;
     address public immutable feeRecipient;
     uint256 public immutable platformFeeBps;
+    uint256 public immutable mintSurchargeBps;
     uint256 public totalMinted;
     mapping(address => uint256) public mintedByWallet;
 
@@ -53,10 +54,13 @@ contract ArticEdition is ERC1155, ERC2981, Ownable, ReentrancyGuard, ArticMintPh
         if (registry_ != address(0)) {
             feeRecipient = IArticMintRegistry(registry_).feeRecipient();
             platformFeeBps = IArticMintRegistry(registry_).platformFeeBps();
-            if (feeRecipient == address(0) || platformFeeBps > 1_000) revert InvalidConfiguration();
+            mintSurchargeBps = IArticMintRegistry(registry_).mintSurchargeBps();
+            if (feeRecipient == address(0) || platformFeeBps > 1_000 || mintSurchargeBps > 1_000) revert InvalidConfiguration();
         }
         _setDefaultRoyalty(creator_, royaltyBps_);
     }
+
+    function supportsMintSurcharge() external pure returns (bool) { return true; }
 
     function configurePhases(PhaseConfig calldata config) external {
         if (msg.sender != registry || totalMinted != 0) revert InvalidPhases();
@@ -77,12 +81,14 @@ contract ArticEdition is ERC1155, ERC2981, Ownable, ReentrancyGuard, ArticMintPh
         if (block.timestamp < mintStartTime) revert MintingNotStarted();
         if (totalMinted + quantity > maxSupply) revert ExceedsMaxSupply();
         if (mintedByWallet[msg.sender] + quantity > maxPerWallet) revert ExceedsWalletLimit();
-        if (msg.value != price * quantity) revert IncorrectPayment();
+        uint256 baseAmount = price * quantity;
+        uint256 creatorFee = (baseAmount * platformFeeBps) / 10_000;
+        uint256 surcharge = (baseAmount * mintSurchargeBps) / 10_000;
+        if (msg.value != baseAmount + surcharge) revert IncorrectPayment();
         totalMinted += quantity;
         mintedByWallet[msg.sender] += quantity;
         if (registry != address(0)) {
-            uint256 fee = (msg.value * platformFeeBps) / 10_000;
-            IArticMintRegistry(registry).notifyMint{value: fee}(msg.sender);
+            IArticMintRegistry(registry).notifyMint{value: creatorFee + surcharge}(msg.sender);
         }
         _mint(msg.sender, TOKEN_ID, quantity, "");
         emit Minted(msg.sender, quantity, msg.value);

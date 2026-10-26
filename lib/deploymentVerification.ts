@@ -13,11 +13,13 @@ const verificationAbi = parseAbi([
   "function royaltyInfo(uint256 tokenId,uint256 salePrice) view returns (address receiver,uint256 royaltyAmount)",
   "function collectionCreator(address) view returns (address)",
   "function supportsImageSeries() pure returns (bool)",
+  "function supportsMintSurcharge() pure returns (bool)",
 ]);
 
 export class DeploymentVerificationError extends Error {}
 
 export async function verifiedCollection(item: Item, hash: Hash, factory: Address): Promise<{ address: Address; creator: Address }> {
+  if (!await deploymentClient.readContract({ address: factory, abi: verificationAbi, functionName: "supportsMintSurcharge" }).catch(() => false)) throw new DeploymentVerificationError("The configured factory does not support buyer-paid mint fees.");
   if (item.imageCount > 1 && !await deploymentClient.readContract({ address: factory, abi: verificationAbi, functionName: "supportsImageSeries" })) throw new DeploymentVerificationError("The configured factory does not support image series.");
   const receipt = await deploymentClient.getTransactionReceipt({ hash });
   if (receipt.status !== "success" || receipt.to?.toLowerCase() !== factory.toLowerCase()) throw new DeploymentVerificationError("The transaction must successfully create a collection through the configured Artiq factory.");
@@ -27,7 +29,7 @@ export async function verifiedCollection(item: Item, hash: Hash, factory: Addres
   const events = logs.filter(({ args }) => args.name === item.title && args.symbol === (item.symbol || "ARTIQ") && args.standard === expectedStandard && args.soulbound === expectedSoulbound && args.creator.toLowerCase() === receipt.from.toLowerCase());
   if (events.length !== 1) throw new DeploymentVerificationError("The deployed NFT type, name, symbol, or creator does not match this approved collection.");
   const { collection: address, creator } = events[0].args;
-  const [registeredCreator, owner, price, start, supply, limit, uri, royalty] = await Promise.all([
+  const [registeredCreator, owner, price, start, supply, limit, uri, royalty, supportsMintSurcharge] = await Promise.all([
     deploymentClient.readContract({ address: factory, abi: verificationAbi, functionName: "collectionCreator", args: [address] }),
     deploymentClient.readContract({ address, abi: collectionAbi, functionName: "owner" }),
     deploymentClient.readContract({ address, abi: collectionAbi, functionName: "mintPrice" }),
@@ -36,12 +38,13 @@ export async function verifiedCollection(item: Item, hash: Hash, factory: Addres
     deploymentClient.readContract({ address, abi: collectionAbi, functionName: "maxPerWallet" }),
     deploymentClient.readContract({ address, abi: collectionAbi, functionName: "metadataURI" }),
     deploymentClient.readContract({ address, abi: verificationAbi, functionName: "royaltyInfo", args: [BigInt(1), BigInt(10_000)] }),
+    deploymentClient.readContract({ address, abi: verificationAbi, functionName: "supportsMintSurcharge" }).catch(() => false),
   ]);
   const expectedPrice = usdcAmount(String(item.mintPriceUsdc ?? 0), true);
   if (registeredCreator.toLowerCase() !== creator.toLowerCase() || owner.toLowerCase() !== creator.toLowerCase() ||
     price !== expectedPrice || start !== BigInt(item.mintStartTime ? Math.floor(item.mintStartTime.getTime() / 1000) : 0) ||
     supply !== BigInt(item.maxSupply ?? 0) || limit !== BigInt(item.maxPerWallet ?? item.maxSupply ?? 0) ||
-    uri !== itemMetadataUri(item) || royalty[0].toLowerCase() !== creator.toLowerCase() || royalty[1] !== BigInt(item.royaltyBps ?? 0)) {
+    uri !== itemMetadataUri(item) || royalty[0].toLowerCase() !== creator.toLowerCase() || royalty[1] !== BigInt(item.royaltyBps ?? 0) || !supportsMintSurcharge) {
     throw new DeploymentVerificationError("The deployed mint price, schedule, supply, wallet limit, royalties, owner, or metadata does not match the approved collection.");
   }
   const plan = await prisma.mintAccessPlan.findUnique({ where: { itemId: item.id } });

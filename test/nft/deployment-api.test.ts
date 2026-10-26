@@ -57,6 +57,9 @@ async function nft(overrides: Record<string, unknown> = {}) {
   return db.item.create({ data: { creatorId: ownerUserId, itemType: "NFT", title: "Night study", description: "An approved collection.", imageUrl: "/api/uploads/abcdefghijklmnopqrstuvwx", nftKind: "COLLECTIBLE", symbol: "NIGHT", maxSupply: 50, maxPerWallet: 2, mintPriceUsdc: 2.5, royaltyBps: 500, status: "UPCOMING", attributes: [{ trait_type: "Palette", value: "Blue" }], ...overrides } });
 }
 function collectionReceipt(item: Awaited<ReturnType<typeof nft>>, address = contract, creator = owner, changes: Record<string, unknown> = {}): Hash {
+  const factorySettings = settings.get(factory.toLowerCase()) || {};
+  factorySettings.supportsMintSurcharge ??= true;
+  settings.set(factory.toLowerCase(), factorySettings);
   const txHash = hash();
   receipts.set(txHash, {
     status: "success", to: factory, from: creator,
@@ -64,6 +67,7 @@ function collectionReceipt(item: Awaited<ReturnType<typeof nft>>, address = cont
     ...changes,
   });
   settings.set(address.toLowerCase(), {
+    supportsMintSurcharge: true,
     collectionCreator: creator, owner: creator, mintPrice: parseUnits(String(item.mintPriceUsdc ?? 0), 18),
     mintStartTime: BigInt(item.mintStartTime ? Math.floor(item.mintStartTime.getTime() / 1000) : 0),
     maxSupply: BigInt(item.maxSupply ?? 0), maxPerWallet: BigInt(item.maxPerWallet ?? item.maxSupply ?? 0),
@@ -159,11 +163,15 @@ test("deployment checks successful factory receipts, metadata, mint settings, cr
   const spoofedFactoryHash = collectionReceipt(item);
   (receipts.get(spoofedFactoryHash)!.logs as Array<{ address: Address }>)[0].address = other;
   assert.equal((await deployment.POST(request(`/api/items/${item.id}/deployment`, { txHash: spoofedFactoryHash }), { params: { id: item.id } })).status, 400);
-  for (const [field, value] of [["metadataURI", "https://attacker.example/metadata.json"], ["mintPrice", BigInt(1)], ["maxSupply", BigInt(51)], ["maxPerWallet", BigInt(3)], ["mintStartTime", BigInt(123)], ["owner", other], ["royaltyInfo", [owner, BigInt(900)]]] as const) {
+  for (const [field, value] of [["metadataURI", "https://attacker.example/metadata.json"], ["mintPrice", BigInt(1)], ["maxSupply", BigInt(51)], ["maxPerWallet", BigInt(3)], ["mintStartTime", BigInt(123)], ["owner", other], ["royaltyInfo", [owner, BigInt(900)]], ["supportsMintSurcharge", false]] as const) {
     const txHash = collectionReceipt(item);
     settings.get(contract.toLowerCase())![field] = value;
     assert.equal((await deployment.POST(request(`/api/items/${item.id}/deployment`, { txHash }), { params: { id: item.id } })).status, 400, field);
   }
+  const oldFactoryHash = collectionReceipt(item);
+  settings.get(factory.toLowerCase())!.supportsMintSurcharge = false;
+  assert.equal((await deployment.POST(request(`/api/items/${item.id}/deployment`, { txHash: oldFactoryHash }), { params: { id: item.id } })).status, 400, "the configured factory must support buyer-paid mint fees");
+  settings.get(factory.toLowerCase())!.supportsMintSurcharge = true;
   const foreignWalletTx = collectionReceipt(item, contract, other);
   assert.equal((await deployment.POST(request(`/api/items/${item.id}/deployment`, { txHash: foreignWalletTx }), { params: { id: item.id } })).status, 403);
   assert.equal((await db.item.findUniqueOrThrow({ where: { id: item.id } })).contractAddress, null);
@@ -422,6 +430,83 @@ test("mint allowlist registration binds to signed wallets, protects the roster a
   for (const action of ["configure", "assign", "disable", "register"]) assert.equal((await access.POST(request(path, { action, config, wallets: [owner], tier: "FCFS" }), context)).status, 400);
   const publicDetail = await (await detail.GET(request(`/api/items/${item.id}`, undefined, "anonymous"), context)).json();
   assert.equal(publicDetail.item.mintAccessPlan, undefined);
+});
+
+async function mintPriceFixture(state: "unlocked" | "missing" | "frozen" | "deployed" | "started" = "unlocked") {
+  const token = randomBytes(32).toString("hex");
+  const creator = await db.user.create({ data: { email: `price-${token}@example.com`, emailVerifiedAt: new Date() } });
+  await db.emailSession.create({ data: { userId: creator.id, tokenHash: createHash("sha256").update(token).digest("hex"), expiresAt: new Date(Date.now() + 600_000) } });
+  const config = { ultimateStart: new Date(Date.now() + (state === "started" ? -3600000 : 3600000)).toISOString(), fcfsStart: new Date(Date.now() + 7200000).toISOString(), publicStart: new Date(Date.now() + 10800000).toISOString(), ultimateLimit: 1, fcfsLimit: 2, publicLimit: 2, ultimatePrice: "0.5", fcfsPrice: "1" };
+  const item = await nft({ creatorId: creator.id, mintStartTime: new Date(config.ultimateStart), contractAddress: state === "deployed" ? contract : null });
+  const plan = state === "missing" ? null : await db.mintAccessPlan.create({ data: { itemId: item.id, config, ...(state === "frozen" ? { frozenAt: new Date(), root: hash() } : {}) } });
+  const path = `/api/items/${item.id}/mint-access`;
+  const context = { params: { id: item.id } };
+  const ownerRequest = (body: unknown, browserOrigin = origin) => new NextRequest(`${origin}${path}`, {
+    method: "POST",
+    headers: { Origin: browserOrigin, Cookie: `artiq_email_session=${token}`, "X-Artiq-Account-ID": creator.id, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return { item, plan, config, path, context, ownerRequest };
+}
+
+test("creators edit Ultimate and FCFS prices independently without changing the approved public price", async () => {
+  const access = await import("../../app/api/items/[id]/mint-access/route");
+  const { item, plan, config, path, context, ownerRequest } = await mintPriceFixture();
+  let expected = { ...config };
+  for (const [tier, key, price] of [["ULTIMATE", "ultimatePrice", "0.25"], ["FCFS", "fcfsPrice", "1.75"], ["ULTIMATE", "ultimatePrice", "0"], ["FCFS", "fcfsPrice", "2.5"]] as const) {
+    const response = await access.POST(ownerRequest({ action: "price", tier, price, config: { ...config, publicLimit: 99 }, mintPriceUsdc: 999 }), context);
+    assert.equal(response.status, 200, JSON.stringify(await response.json()));
+    expected = { ...expected, [key]: price };
+    const stored = await db.mintAccessPlan.findUniqueOrThrow({ where: { itemId: item.id } });
+    assert.deepEqual(stored.config, expected);
+    assert.equal(stored.id, plan!.id);
+    assert.equal(stored.frozenAt, null); assert.equal(stored.root, null);
+    const currentItem = await db.item.findUniqueOrThrow({ where: { id: item.id } });
+    const { updatedAt: _before, ...before } = item;
+    const { updatedAt: _after, ...after } = currentItem;
+    assert.deepEqual(after, before, "phase price edits preserve the public price and other approved item fields");
+  }
+  const saved = await (await access.GET(request(path, undefined, "anonymous"), context)).json();
+  assert.deepEqual(saved.plan.config, expected);
+});
+
+test("phase price edits reject anonymous callers, other creators and foreign origins", async () => {
+  const access = await import("../../app/api/items/[id]/mint-access/route");
+  const { item, config, path, context, ownerRequest } = await mintPriceFixture();
+  const payload = { action: "price", tier: "ULTIMATE", price: "0" };
+  assert.equal((await access.POST(request(path, payload, "anonymous"), context)).status, 401);
+  assert.equal((await access.POST(request(path, payload, "other"), context)).status, 400);
+  assert.equal((await access.POST(ownerRequest(payload, "https://attacker.example"), context)).status, 403);
+  assert.deepEqual((await db.mintAccessPlan.findUniqueOrThrow({ where: { itemId: item.id } })).config, config);
+});
+
+test("phase price edits reject invalid tiers, malformed amounts and prices above the public price", async () => {
+  const access = await import("../../app/api/items/[id]/mint-access/route");
+  const { item, config, context, ownerRequest } = await mintPriceFixture();
+  for (const payload of [
+    { tier: "PUBLIC", price: "1" }, { tier: "ultimate", price: "1" }, { price: "1" },
+    { tier: "ULTIMATE", price: 1 }, { tier: "ULTIMATE", price: "" }, { tier: "ULTIMATE", price: "-0.1" },
+    { tier: "ULTIMATE", price: "NaN" }, { tier: "ULTIMATE", price: "1e-3" }, { tier: "FCFS", price: "0.1234567" },
+    { tier: "ULTIMATE", price: "2.500001" }, { tier: "FCFS", price: "2.500001" }, { tier: "FCFS" },
+  ]) {
+    const response = await access.POST(ownerRequest({ action: "price", ...payload }), context);
+    assert.equal(response.status, 400, JSON.stringify({ payload, response: await response.json() }));
+  }
+  assert.deepEqual((await db.mintAccessPlan.findUniqueOrThrow({ where: { itemId: item.id } })).config, config);
+  assert.equal((await db.item.findUniqueOrThrow({ where: { id: item.id } })).mintPriceUsdc, item.mintPriceUsdc);
+});
+
+test("phase prices require an existing unlocked and undeployed mint plan before Ultimate opens", async () => {
+  const access = await import("../../app/api/items/[id]/mint-access/route");
+  for (const state of ["missing", "frozen", "deployed", "started"] as const) {
+    const { item, plan, context, ownerRequest } = await mintPriceFixture(state);
+    for (const tier of ["ULTIMATE", "FCFS"]) {
+      const response = await access.POST(ownerRequest({ action: "price", tier, price: "0" }), context);
+      assert.equal(response.status, 400, JSON.stringify({ state, response: await response.json() }));
+    }
+    assert.deepEqual(await db.mintAccessPlan.findUnique({ where: { itemId: item.id } }), plan);
+    assert.deepEqual(await db.item.findUniqueOrThrow({ where: { id: item.id } }), item);
+  }
 });
 
 test("deployment requires the exact locked allowlist and phase settings on-chain", async () => {

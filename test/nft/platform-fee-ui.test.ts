@@ -64,6 +64,11 @@ test("paid checkout discloses the included platform deduction, creator net, and 
   for (const expected of ["Total payment", "25 USDC", "Platform fee (2.5%)", "0.625 USDC", "Creator receives", "24.375 USDC", "included in the payment", "Network gas is separate", treasury]) assert.ok(markup.includes(expected), expected);
 });
 
+test("mint checkout separates the buyer surcharge from the creator deduction", () => {
+  const markup = renderToStaticMarkup(React.createElement(PlatformFeeBreakdown, { gross: usdcAmount("5"), mintSurchargeBps: BigInt(200), terms: { legacy: false, bps: BigInt(250), recipient: treasury } }));
+  for (const expected of ["Mint price", "5 USDC", "Collector platform fee (2%)", "0.1 USDC", "Total mint payment", "5.1 USDC", "Creator platform fee (2.5%)", "0.125 USDC", "Creator receives", "4.875 USDC", "Total platform fees", "0.225 USDC", "collector fee is added", "creator fee is deducted", "Network gas is separate", treasury]) assert.ok(markup.includes(expected), expected);
+});
+
 test("zero and legacy deployments disclose zero while unavailable terms never imply zero", () => {
   for (const legacy of [false, true]) {
     const markup = renderToStaticMarkup(React.createElement(PlatformFeeBreakdown, { gross: BigInt(0), terms: { legacy, bps: BigInt(0), recipient: legacy ? null : treasury } }));
