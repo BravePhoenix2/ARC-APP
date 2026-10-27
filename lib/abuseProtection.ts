@@ -32,8 +32,11 @@ const state: ProtectionState = globals.artiqProtection ?? (globals.artiqProtecti
 /** Do not trust user-controlled forwarding headers without a restricted ingress. */
 export function protectionClientIp(request: NextRequest): string | null {
   const proxy = process.env.ARTIQ_TRUSTED_PROXY;
+  // Node route adapters do not supply an IP, and Next 15 removed this property.
+  // Older/custom server adapters may still supply trusted request metadata.
+  const directIp = (request as NextRequest & { readonly ip?: string }).ip;
   const candidate = proxy === "cloudflare" ? request.headers.get("cf-connecting-ip")
-    : proxy === "vercel" ? request.headers.get("x-vercel-forwarded-for") : request.ip;
+    : proxy === "vercel" ? request.headers.get("x-vercel-forwarded-for") : directIp;
   if (!candidate || candidate.length > 64 || !isIP(candidate)) return null;
   if (isIP(candidate) === 4) return candidate;
   // URL canonicalization prevents alternate IPv6 spellings creating new quotas.
@@ -187,9 +190,11 @@ const ipConcurrency: Record<ProtectionPolicy, number> = {
 export function withAbuseProtection<Args extends unknown[]>(route: string, policy: ProtectionPolicy,
   handler: (request: NextRequest, ...args: Args) => Promise<Response>) {
   return async (request: NextRequest, ...args: Args): Promise<Response> => {
-    const ip = protectionClientIp(request);
+    // Unidentified clients share a bounded budget. Header churn must never
+    // create new identities or turn off request and concurrency protection.
+    const networkIdentity = protectionClientIp(request) ?? "unidentified-client";
     // A single slow client must not fill every slot before its body/token can be checked.
-    const releaseIp = ip ? state.store.acquire(`ip:${policy}:${fingerprint(ip)}`, ipConcurrency[policy]) : () => {};
+    const releaseIp = state.store.acquire(`ip:${policy}:${fingerprint(networkIdentity)}`, ipConcurrency[policy]);
     if (!releaseIp) {
       record(route, { requests: 1, blocked: 1, busy: 1 });
       return rejected(2, true);
@@ -202,12 +207,10 @@ export function withAbuseProtection<Args extends unknown[]>(route: string, polic
     }
     let status = 500;
     try {
-      if (ip) {
-        const rate = await consume(policy, ip, false);
-        if (!rate.allowed) {
-          status = 429;
-          return rejected(rate.retryAfter);
-        }
+      const rate = await consume(policy, networkIdentity, false);
+      if (!rate.allowed) {
+        status = 429;
+        return rejected(rate.retryAfter);
       }
       accountLeases.set(request, []);
       const response = await handler(request, ...args);

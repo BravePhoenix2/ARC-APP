@@ -1,0 +1,25 @@
+{"observation":"HTML security headers","status":200,"headers":{"content-security-policy":null,"x-frame-options":null,"referrer-policy":null,"x-content-type-options":null,"strict-transport-security":null,"x-powered-by":"Next.js"}}
+{"check":"anonymous security metrics","method":"GET","path":"/api/admin/security","status":401,"expected":[401],"pass":true}
+{"check":"anonymous reviewer queue","method":"GET","path":"/api/admin/submissions","status":401,"expected":[401],"pass":true}
+{"check":"anonymous review mutation","method":"PATCH","path":"/api/admin/submissions/missing","status":401,"expected":[401],"pass":true}
+{"check":"anonymous private submissions","method":"GET","path":"/api/submissions","status":401,"expected":[401],"pass":true}
+{"check":"anonymous submission mutation","method":"POST","path":"/api/submissions","status":401,"expected":[401],"pass":true}
+{"check":"anonymous private watchlist","method":"GET","path":"/api/watchlist","status":401,"expected":[401],"pass":true}
+{"check":"anonymous private auction drafts","method":"GET","path":"/api/asset-auctions?mine=1","status":401,"expected":[401],"pass":true}
+{"check":"anonymous fulfillment","method":"GET","path":"/api/asset-auctions/missing/fulfillment","status":401,"expected":[401],"pass":true}
+{"check":"anonymous image upload","method":"POST","path":"/api/uploads","status":401,"expected":[401],"pass":true}
+{"check":"cross-origin upload","method":"POST","path":"/api/uploads","status":403,"expected":[403],"pass":true}
+{"check":"cross-origin review","method":"PATCH","path":"/api/admin/submissions/missing","status":403,"expected":[403],"pass":true}
+{"check":"cross-origin wallet challenge","method":"POST","path":"/api/auth/nonce","status":403,"expected":[403],"pass":true}
+{"check":"middleware bypass header on admin API","method":"GET","path":"/api/admin/security","status":401,"expected":[401],"pass":true}
+{"check":"forged reviewer/account headers","method":"GET","path":"/api/admin/submissions","status":401,"expected":[401],"pass":true}
+{"check":"forged session cookie","method":"GET","path":"/api/admin/security","status":401,"expected":[401],"pass":true}
+{"check":"public creation disabled","method":"POST","path":"/api/items","status":405,"expected":[405],"pass":true}
+{"check":"invalid catalog type","method":"GET","path":"/api/items?itemType=ADMIN","status":400,"expected":[400],"pass":true}
+{"check":"unbounded catalog limit","method":"GET","path":"/api/items?limit=1000000","status":400,"expected":[400],"pass":true}
+{"check":"invalid catalog cursor","method":"GET","path":"/api/items?cursor=not-a-valid-cursor","status":400,"expected":[400],"pass":true}
+{"check":"private env path","method":"GET","path":"/.env.local","status":404,"expected":[404],"pass":true}
+{"check":"private git path","method":"GET","path":"/.git/config","status":404,"expected":[404],"pass":true}
+{"check":"private database path","method":"GET","path":"/prisma/dev.db","status":404,"expected":[404],"pass":true}
+{"observation":"65 invalid challenge requests; configured challenge quota is 60/minute","statuses":{"409":65}}
+{"summary":{"passed":22,"failed":0,"checks":22}}

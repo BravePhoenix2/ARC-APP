@@ -10,6 +10,7 @@ import { limitedJson } from "@/lib/requestBody";
 import { awardTesterMilestone, ensureTesterProfile, getTesterEntry } from "@/lib/testerLeaderboard";
 import { isTesterMilestoneKind, testerActivityMessage, type TesterMilestoneKind } from "@/lib/testerPoints";
 import { sameOrigin } from "@/lib/walletAuth";
+import { publicItemWhere } from "@/lib/publicCatalog";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -39,6 +40,7 @@ async function inferMilestone(receipt: TransactionReceipt): Promise<TesterMilest
     for (const { args } of events) {
       if (!matches(args.buyer, receipt.from) || args.price <= BigInt(0)) continue;
       const pinned = await prisma.item.findFirst({ where: {
+        AND: [publicItemWhere],
         itemType: "WEB2_ART", artListingId: String(args.listingId),
         artMarketAddress: { in: [receipt.to, receipt.to.toLowerCase(), getAddress(receipt.to)] },
       }, select: { id: true } });
@@ -56,7 +58,7 @@ async function inferMilestone(receipt: TransactionReceipt): Promise<TesterMilest
   }
   if (!protocol.factory || !receipt.to) return null;
   const collection = await prisma.item.findFirst({
-    where: { itemType: "NFT", contractAddress: { in: [receipt.to, receipt.to.toLowerCase(), getAddress(receipt.to)] } },
+    where: { itemType: "NFT", contractAddress: { in: [receipt.to, receipt.to.toLowerCase(), getAddress(receipt.to)] }, AND: [publicItemWhere] },
     select: { contractAddress: true, deploymentFactory: true },
   });
   if (!collection?.contractAddress) return null;

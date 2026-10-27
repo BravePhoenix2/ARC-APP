@@ -2,12 +2,14 @@ import { withAbuseProtection } from "@/lib/abuseProtection";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { publicImageUrl } from "@/lib/itemMetadata";
+import { publicItemWhere } from "@/lib/publicCatalog";
 
 export const dynamic = "force-dynamic";
-async function handleGET(_request: NextRequest, { params }: { params: { id: string; tokenId: string } }) {
+async function handleGET(_request: NextRequest, { params: routeParams }: { params: Promise<{ id: string; tokenId: string }> }) {
+  const params = await routeParams;
   if (!/^[1-9]\d{0,6}$/.test(params.tokenId)) return NextResponse.json({ error: "Token not found." }, { status: 404 });
   const position = Number(params.tokenId);
-  const item = await prisma.item.findUnique({ where: { id: params.id }, select: { itemType: true, title: true, description: true, attributes: true, imageCount: true, collectionImages: { where: { position }, take: 1 } } });
+  const item = await prisma.item.findFirst({ where: { AND: [{ id: params.id }, publicItemWhere] }, select: { itemType: true, title: true, description: true, attributes: true, imageCount: true, collectionImages: { where: { position }, take: 1 } } });
   const image = item?.collectionImages[0];
   if (!item || item.itemType !== "NFT" || item.imageCount < 2 || !image) return NextResponse.json({ error: "Token not found." }, { status: 404 });
   try {

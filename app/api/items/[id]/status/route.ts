@@ -10,7 +10,8 @@ const NFT_STATUSES = ["UPCOMING", "LIVE", "MINTED_OUT", "LISTED"] as const;
 // PATCH /api/items/[id]/status
 // NFT items:      { status: "UPCOMING" | "LIVE" | "MINTED_OUT" | "LISTED" }
 // WEB2_ART items:  { sold: boolean }
-async function handlePATCH(request: NextRequest, { params }: { params: { id: string } }) {
+async function handlePATCH(request: NextRequest, { params: routeParams }: { params: Promise<{ id: string }> }) {
+  const params = await routeParams;
   if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
   const session = await getCreatorSession(request);
   if (!session) return NextResponse.json({ error: "Sign in with email or your wallet." }, { status: 401 });

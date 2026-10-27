@@ -82,23 +82,23 @@ test("a folder series stays private until review and publishes distinct ordered 
   assert.equal(created.status, 201); const { submission } = await created.json();
   assert.equal(submission.imageCount, 3);
   const finalImageId = images[2].imageUrl.split("/").pop()!;
-  assert.equal((await imageRoute.GET(request(images[2].imageUrl), { params: { id: finalImageId } })).status, 404);
+  assert.equal((await imageRoute.GET(request(images[2].imageUrl), { params: Promise.resolve({ id: finalImageId }) })).status, 404);
   const queue = await adminQueue.GET(request("/api/admin/submissions", "GET", undefined, reviewerCookie));
   const queued = (await queue.json()).submissions.find((entry: { id: string }) => entry.id === submission.id);
   assert.deepEqual(queued.collectionImages.map((image: { filename: string }) => image.filename), ["1.png", "2.png", "3.png"]);
-  const result = await review.PATCH(request("/api/admin/submissions/review", "PATCH", { decision: "APPROVED" }, reviewerCookie), { params: { id: submission.id } });
+  const result = await review.PATCH(request("/api/admin/submissions/review", "PATCH", { decision: "APPROVED" }, reviewerCookie), { params: Promise.resolve({ id: submission.id }) });
   assert.equal(result.status, 200); const itemId = (await result.json()).submission.itemId;
-  const published = await imageRoute.GET(request(images[2].imageUrl), { params: { id: finalImageId } });
+  const published = await imageRoute.GET(request(images[2].imageUrl), { params: Promise.resolve({ id: finalImageId }) });
   assert.equal(published.status, 200); assert.match(published.headers.get("cache-control")!, /public/);
   const { itemMetadataUri } = await import("../../lib/itemMetadata");
   assert.match(itemMetadataUri(await db.item.findUniqueOrThrow({ where: { id: itemId } })), /\/metadata\/$/);
   const tokenMetadata = await import("../../app/api/items/[id]/metadata/[tokenId]/route");
   for (let index = 1; index <= 3; index++) {
-    const metadata = await tokenMetadata.GET(request(`/api/items/${itemId}/metadata/${index}`), { params: { id: itemId, tokenId: String(index) } });
+    const metadata = await tokenMetadata.GET(request(`/api/items/${itemId}/metadata/${index}`), { params: Promise.resolve({ id: itemId, tokenId: String(index) }) });
     assert.equal(metadata.status, 200); const json = await metadata.json();
     assert.equal(new URL(json.image).pathname, images[index - 1].imageUrl); assert.equal(json.name, `${application.title} #${index}`);
   }
-  for (const tokenId of ["0", "4", "-1", "foo"]) assert.equal((await tokenMetadata.GET(request("/metadata"), { params: { id: itemId, tokenId } })).status, 404);
+  for (const tokenId of ["0", "4", "-1", "foo"]) assert.equal((await tokenMetadata.GET(request("/metadata"), { params: Promise.resolve({ id: itemId, tokenId }) })).status, 404);
   // Remove this fixture so later legacy count assertions keep their original scope.
   await db.collectionImage.deleteMany({ where: { OR: [{ itemId }, { submissionId: submission.id }] } });
   await db.submission.delete({ where: { id: submission.id } }); await db.item.delete({ where: { id: itemId } });
@@ -111,13 +111,13 @@ test("watchlists are private, account-bound and idempotent; creator pages expose
   const creator = await db.user.findUniqueOrThrow({ where: { walletAddress: owner } });
   await db.user.update({ where: { id: creator.id }, data: { bio: "Public artist biography", email: "private-contact@example.com" } });
   const item = await db.item.create({ data: { creatorId: creator.id, title: "Watchlist fixture", itemType: "NFT", mintPriceUsdc: 5 } });
-  const params = { params: { id: item.id } };
+  const params = { params: Promise.resolve({ id: item.id }) };
   assert.equal((await list.GET(request("/api/watchlist"))).status, 401);
   assert.equal((await toggle.PUT(request("/api/watchlist/x", "PUT"), params)).status, 401);
   assert.equal((await toggle.PUT(request("/api/watchlist/x", "PUT", undefined, ownerCookie, "https://evil.example"), params)).status, 403);
   const mismatch = request("/api/watchlist/x", "PUT", undefined, ownerCookie); mismatch.headers.set("X-Wallet-Address", other);
   assert.equal((await toggle.PUT(mismatch, params)).status, 401);
-  assert.equal((await toggle.PUT(request("/api/watchlist/missing", "PUT", undefined, ownerCookie), { params: { id: "missing" } })).status, 404);
+  assert.equal((await toggle.PUT(request("/api/watchlist/missing", "PUT", undefined, ownerCookie), { params: Promise.resolve({ id: "missing" }) })).status, 404);
   for (let index = 0; index < 2; index++) assert.equal((await toggle.PUT(request("/api/watchlist/x", "PUT", { userId: "spoofed" }, ownerCookie), params)).status, 200);
   assert.equal(await db.watchlistEntry.count({ where: { itemId: item.id } }), 1);
   const saved = await list.GET(request("/api/watchlist", "GET", undefined, ownerCookie));
@@ -128,14 +128,14 @@ test("watchlists are private, account-bound and idempotent; creator pages expose
   assert.equal((await toggle.PUT(request("/api/watchlist/x", "PUT", undefined, otherCookie), params)).status, 200);
   for (let index = 0; index < 2; index++) assert.equal((await toggle.DELETE(request("/api/watchlist/x", "DELETE", undefined, ownerCookie), params)).status, 200);
   assert.equal(await db.watchlistEntry.count({ where: { itemId: item.id } }), 1, "removal never affects another account");
-  const response = await profile.GET(request(`/api/creators/${creator.id}`), { params: { id: creator.id } });
+  const response = await profile.GET(request(`/api/creators/${creator.id}`), { params: Promise.resolve({ id: creator.id }) });
   assert.equal(response.status, 200); const publicCreator = (await response.json()).creator;
   assert.equal(publicCreator.bio, "Public artist biography");
   assert.ok(publicCreator.items.some((entry: { id: string }) => entry.id === item.id));
   assert.equal(publicCreator.email, undefined); assert.equal(publicCreator.submissions, undefined);
   assert.equal(publicCreator.items[0].creator.email, undefined);
   const unpublished = await db.user.create({ data: { email: "not-public@example.com" } });
-  assert.equal((await profile.GET(request("/creator"), { params: { id: unpublished.id } })).status, 404);
+  assert.equal((await profile.GET(request("/creator"), { params: Promise.resolve({ id: unpublished.id }) })).status, 404);
   // Restore fixtures for the original catalog assertions that follow.
   await db.watchlistEntry.deleteMany({ where: { itemId: item.id } }); await db.item.delete({ where: { id: item.id } });
 });
@@ -161,9 +161,9 @@ test("submission authentication, AI policy, privacy, approval, rejection, and im
   const privateList = await submissions.GET(request("/api/submissions", "GET", undefined, otherCookie));
   assert.deepEqual((await privateList.json()).submissions, [], "other wallets cannot view an application");
   assert.equal((await adminQueue.GET(request("/api/admin/submissions", "GET", undefined, ownerCookie))).status, 403);
-  assert.equal((await review.PATCH(request("/api/admin/submissions/x", "PATCH", { decision: "APPROVED" }, ownerCookie), { params: { id: submission.id } })).status, 403);
+  assert.equal((await review.PATCH(request("/api/admin/submissions/x", "PATCH", { decision: "APPROVED" }, ownerCookie), { params: Promise.resolve({ id: submission.id }) })).status, 403);
 
-  const approved = await review.PATCH(request("/api/admin/submissions/x", "PATCH", { decision: "APPROVED" }, reviewerCookie), { params: { id: submission.id } });
+  const approved = await review.PATCH(request("/api/admin/submissions/x", "PATCH", { decision: "APPROVED" }, reviewerCookie), { params: Promise.resolve({ id: submission.id }) });
   assert.equal(approved.status, 200);
   const approvedSubmission = (await approved.json()).submission;
   assert.equal(approvedSubmission.status, "APPROVED");
@@ -176,7 +176,7 @@ test("submission authentication, AI policy, privacy, approval, rejection, and im
   assert.equal(items[0].creationMethod, "AI_GENERATED", "NFT publication preserves the declared creation method");
   assert.equal(items[0].status, "UPCOMING", "approval does not claim an NFT is minting");
   assert.equal(items[0].contactEmail, undefined, "private contact information is not published");
-  assert.equal((await review.PATCH(request("/api/admin/submissions/x", "PATCH", { decision: "APPROVED" }, reviewerCookie), { params: { id: submission.id } })).status, 409);
+  assert.equal((await review.PATCH(request("/api/admin/submissions/x", "PATCH", { decision: "APPROVED" }, reviewerCookie), { params: Promise.resolve({ id: submission.id }) })).status, 409);
   assert.equal(await db.item.count(), 1, "repeat approvals cannot create duplicate items");
 
   const form = new FormData();
@@ -190,8 +190,8 @@ test("submission authentication, AI policy, privacy, approval, rejection, and im
   assert.equal(uploadResult.screening.status, "REVIEW_REQUIRED", "an image without AI metadata still requires human review");
   assert.notEqual(uploadResult.screening.provider?.status, "COMPLETED", "metadata screening does not claim pixel analysis");
   assert.equal(uploadResult.screening.provider?.score, undefined, "metadata screening never fabricates a pixel score");
-  assert.equal((await imageRoute.GET(request(imageUrl), { params: { id: imageUrl.split("/").pop() } })).status, 404, "pending uploads are private");
-  const image = await imageRoute.GET(request(imageUrl, "GET", undefined, ownerCookie), { params: { id: imageUrl.split("/").pop() } });
+  assert.equal((await imageRoute.GET(request(imageUrl), { params: Promise.resolve({ id: imageUrl.split("/").pop() }) })).status, 404, "pending uploads are private");
+  const image = await imageRoute.GET(request(imageUrl, "GET", undefined, ownerCookie), { params: Promise.resolve({ id: imageUrl.split("/").pop() }) });
   assert.equal(image.headers.get("content-type"), "image/png");
   assert.equal(image.headers.get("cache-control"), "private, no-store");
   assert.deepEqual(Buffer.from(await image.arrayBuffer()), png);
@@ -232,8 +232,8 @@ test("submission authentication, AI policy, privacy, approval, rejection, and im
   assert.equal(submittedArt.screening.provider.status, "NOT_CONFIGURED");
   assert.equal(submittedArt.screening.provider.score, undefined, "a spoofed pixel score is never persisted");
   assert.notEqual(submittedArt.screening.summary, spoofedScreening.summary);
-  assert.equal((await review.PATCH(request("/api/admin/submissions/x", "PATCH", { decision: "REJECTED" }, reviewerCookie), { params: { id: artId } })).status, 400);
-  assert.equal((await review.PATCH(request("/api/admin/submissions/x", "PATCH", { decision: "REJECTED", reviewNote: "Please send a clearer photo." }, reviewerCookie), { params: { id: artId } })).status, 200);
+  assert.equal((await review.PATCH(request("/api/admin/submissions/x", "PATCH", { decision: "REJECTED" }, reviewerCookie), { params: Promise.resolve({ id: artId }) })).status, 400);
+  assert.equal((await review.PATCH(request("/api/admin/submissions/x", "PATCH", { decision: "REJECTED", reviewNote: "Please send a clearer photo." }, reviewerCookie), { params: Promise.resolve({ id: artId }) })).status, 200);
   assert.equal(await db.item.count(), 1, "rejection never publishes an item");
 
   const legacyArt = await db.submission.create({ data: {
@@ -242,7 +242,7 @@ test("submission authentication, AI policy, privacy, approval, rejection, and im
   } });
   assert.equal((await review.PATCH(request("/api/admin/submissions/x", "PATCH", {
     decision: "APPROVED", artReviewConfirmed: true, reviewNote: "I reviewed the supplied creation details.",
-  }, reviewerCookie), { params: { id: legacyArt.id } })).status, 409, "legacy unverified Art cannot bypass evidence requirements");
+  }, reviewerCookie), { params: Promise.resolve({ id: legacyArt.id }) })).status, 409, "legacy unverified Art cannot bypass evidence requirements");
   const unchangedLegacy = await db.submission.findUniqueOrThrow({ where: { id: legacyArt.id } });
   assert.equal(unchangedLegacy.status, "PENDING");
   assert.equal(unchangedLegacy.itemId, null);
@@ -258,7 +258,7 @@ test("submission authentication, AI policy, privacy, approval, rejection, and im
     ["note without confirmation", { decision: "APPROVED", reviewNote: approvalNote }],
     ["short approval note", { decision: "APPROVED", artReviewConfirmed: true, reviewNote: "Too short." }],
   ] as const) {
-    assert.equal((await review.PATCH(request("/api/admin/submissions/x", "PATCH", body, reviewerCookie), { params: { id: physicalId } })).status, 400, label);
+    assert.equal((await review.PATCH(request("/api/admin/submissions/x", "PATCH", body, reviewerCookie), { params: Promise.resolve({ id: physicalId }) })).status, 400, label);
   }
   const unchangedArt = await db.submission.findUniqueOrThrow({ where: { id: physicalId } });
   assert.equal(unchangedArt.status, "PENDING", "failed reviews roll back without changing status");
@@ -266,7 +266,7 @@ test("submission authentication, AI policy, privacy, approval, rejection, and im
   assert.equal(unchangedArt.itemId, null);
   assert.equal(await db.item.count(), 1, "no item is published before an Art review is complete");
   const artApproval = { decision: "APPROVED", artReviewConfirmed: true, reviewNote: approvalNote };
-  const approvedArt = await review.PATCH(request("/api/admin/submissions/x", "PATCH", artApproval, reviewerCookie), { params: { id: physicalId } });
+  const approvedArt = await review.PATCH(request("/api/admin/submissions/x", "PATCH", artApproval, reviewerCookie), { params: Promise.resolve({ id: physicalId }) });
   assert.equal(approvedArt.status, 200);
   assert.equal((await approvedArt.json()).submission.artReviewConfirmed, true);
   const physicalCatalog = await catalog.GET(request("/api/items?itemType=WEB2_ART"));
@@ -277,8 +277,8 @@ test("submission authentication, AI policy, privacy, approval, rejection, and im
   assert.equal(physicalItems[0].creationMethod, "HUMAN");
   assert.equal(physicalItems[0].contactEmail, undefined);
   assert.equal(physicalItems[0].creationProcess, undefined, "private creation evidence is not published");
-  assert.equal((await imageRoute.GET(request(imageUrl), { params: { id: imageUrl.split("/").pop() } })).status, 200, "approved artwork images become public");
-  assert.equal((await review.PATCH(request("/api/admin/submissions/x", "PATCH", artApproval, reviewerCookie), { params: { id: physicalId } })).status, 409);
+  assert.equal((await imageRoute.GET(request(imageUrl), { params: Promise.resolve({ id: imageUrl.split("/").pop() }) })).status, 200, "approved artwork images become public");
+  assert.equal((await review.PATCH(request("/api/admin/submissions/x", "PATCH", artApproval, reviewerCookie), { params: Promise.resolve({ id: physicalId }) })).status, 409);
   assert.equal(await db.item.count(), 2, "repeat Art approvals cannot duplicate publication");
 });
 
@@ -296,7 +296,7 @@ test("NFT types survive private review, filter publicly, and block soulbound res
     assert.equal(submission.nftKind, nftKind);
     const beforeApproval = await catalog.GET(request(`/api/items?itemType=NFT&nftKind=${nftKind}`));
     assert.ok(!(await beforeApproval.json()).items.some((item: { title: string }) => item.title === settings.title));
-    const approved = await review.PATCH(request("/api/admin/submissions/x", "PATCH", { decision: "APPROVED" }, reviewerCookie), { params: { id: submission.id } });
+    const approved = await review.PATCH(request("/api/admin/submissions/x", "PATCH", { decision: "APPROVED" }, reviewerCookie), { params: Promise.resolve({ id: submission.id }) });
     assert.equal(approved.status, 200);
     const itemId = (await approved.json()).submission.itemId;
     published.set(nftKind, itemId);
@@ -312,12 +312,12 @@ test("NFT types survive private review, filter publicly, and block soulbound res
   assert.equal((await catalog.GET(request("/api/items?itemType=WEB2_ART&nftKind=SOULBOUND"))).status, 400);
   assert.equal((await catalog.GET(request("/api/items?status=INVALID"))).status, 400);
   const soulboundId = published.get("SOULBOUND")!;
-  const soulboundResale = await itemStatus.PATCH(request(`/api/items/${soulboundId}/status`, "PATCH", { status: "LISTED" }, ownerCookie), { params: { id: soulboundId } });
+  const soulboundResale = await itemStatus.PATCH(request(`/api/items/${soulboundId}/status`, "PATCH", { status: "LISTED" }, ownerCookie), { params: Promise.resolve({ id: soulboundId }) });
   assert.equal(soulboundResale.status, 400);
   assert.match((await soulboundResale.json()).error, /non-transferable/);
   assert.equal((await db.item.findUniqueOrThrow({ where: { id: soulboundId } })).status, "UPCOMING");
   const editionId = published.get("EDITION")!;
-  assert.equal((await itemStatus.PATCH(request(`/api/items/${editionId}/status`, "PATCH", { status: "LISTED" }, ownerCookie), { params: { id: editionId } })).status, 200);
+  assert.equal((await itemStatus.PATCH(request(`/api/items/${editionId}/status`, "PATCH", { status: "LISTED" }, ownerCookie), { params: Promise.resolve({ id: editionId }) })).status, 200);
 });
 
 test("catalog pages stay bounded with tied timestamps, deletions, and newer inserts", async () => {

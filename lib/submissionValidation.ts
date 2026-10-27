@@ -1,4 +1,3 @@
-import { isAddress } from "viem";
 import { isNftKind, type NftAttribute, type NftKind } from "./nftTypes";
 import { parseCollectionImages, type CollectionImageInput } from "./collectionImages";
 
@@ -72,7 +71,7 @@ export function parseSubmission(body: unknown): SubmissionInput {
   let creationProcess: string | null = null;
   const humanMadeDeclaration = b.humanMadeDeclaration === true;
   let category: SubmissionInput["category"] = null;
-  let contractAddress: string | null = null;
+  const contractAddress = null;
   let maxSupply: number | null = null;
   let mintStartTime: Date | null = null;
   let nftKind: NftKind | null = null;
@@ -91,6 +90,9 @@ export function parseSubmission(body: unknown): SubmissionInput {
     if (!categories.includes(b.category as typeof categories[number])) throw new SubmissionValidationError("Choose an art category.");
     category = b.category as typeof categories[number];
   } else {
+    if (b.contractAddress != null && b.contractAddress !== "") {
+      throw new SubmissionValidationError("Submit this collection without an existing contract address. Deploy it from the approved collection page so its ownership and settings can be verified.");
+    }
     if (b.nftKind != null && !isNftKind(b.nftKind)) throw new SubmissionValidationError("Choose a valid NFT type.");
     nftKind = isNftKind(b.nftKind) ? b.nftKind : "COLLECTIBLE";
     if (images.length > 1 && nftKind === "EDITION") throw new SubmissionValidationError("Editions share one image. Choose Collectible for an image series.");
@@ -134,10 +136,6 @@ export function parseSubmission(body: unknown): SubmissionInput {
         if ((typeof value !== "string" || !value.trim() || value.trim().length > 120) && (typeof value !== "number" || !Number.isFinite(value))) throw new SubmissionValidationError("Trait values must be text of 1–120 characters or a finite number.");
         return { trait_type: trait_type.trim(), value: typeof value === "string" ? value.trim() : value as number };
       });
-    }
-    if (b.contractAddress != null && b.contractAddress !== "") {
-      if (typeof b.contractAddress !== "string" || !isAddress(b.contractAddress)) throw new SubmissionValidationError("Enter a valid collection contract address.");
-      contractAddress = b.contractAddress;
     }
     if (b.mintStartTime != null && b.mintStartTime !== "") {
       if (typeof b.mintStartTime !== "string") throw new SubmissionValidationError("Enter a valid mint start time.");

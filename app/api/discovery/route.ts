@@ -3,12 +3,13 @@ import { unstable_cache } from "next/cache";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { museDay, museIndex, musePrompt } from "@/lib/dailyMuse";
+import { publicItemWhere } from "@/lib/publicCatalog";
 export const dynamic = "force-dynamic";
 const loadDailyPicks = async (_day: string, ordinal: number) => {
     return prisma.$transaction(async (tx) => {
       const picks = [];
       for (const itemType of ["NFT", "WEB2_ART"] as const) {
-        const where = { itemType, imageUrl: { not: null }, NOT: { imageUrl: "" } };
+        const where = { itemType, imageUrl: { not: null }, NOT: { imageUrl: "" }, AND: [publicItemWhere] };
         const count = await tx.item.count({ where });
         if (!count) continue;
         const item = await tx.item.findFirst({ where, skip: museIndex(ordinal, count), orderBy: { id: "asc" }, select: {
@@ -21,7 +22,7 @@ const loadDailyPicks = async (_day: string, ordinal: number) => {
     });
 };
 const getDailyPicks = process.env.NODE_ENV === "production"
-  ? unstable_cache(loadDailyPicks, ["daily-muse-picks-v1"], { revalidate: 60 })
+  ? unstable_cache(loadDailyPicks, ["daily-muse-picks-v2"], { revalidate: 60 })
   : loadDailyPicks;
 async function handleGET() {
   const { day, ordinal, nextAt } = museDay();

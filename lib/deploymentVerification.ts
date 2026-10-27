@@ -19,6 +19,7 @@ const verificationAbi = parseAbi([
 export class DeploymentVerificationError extends Error {}
 
 export async function verifiedCollection(item: Item, hash: Hash, factory: Address): Promise<{ address: Address; creator: Address }> {
+  if (await deploymentClient.getChainId() !== arcChain.id) throw new DeploymentVerificationError("The deployment must be verified on Arc Testnet.");
   if (!await deploymentClient.readContract({ address: factory, abi: verificationAbi, functionName: "supportsMintSurcharge" }).catch(() => false)) throw new DeploymentVerificationError("The configured factory does not support buyer-paid mint fees.");
   if (item.imageCount > 1 && !await deploymentClient.readContract({ address: factory, abi: verificationAbi, functionName: "supportsImageSeries" })) throw new DeploymentVerificationError("The configured factory does not support image series.");
   const receipt = await deploymentClient.getTransactionReceipt({ hash });

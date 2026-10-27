@@ -1,6 +1,8 @@
-const { expect } = require("chai");
-const { ethers } = require("hardhat");
-const { time } = require("@nomicfoundation/hardhat-network-helpers");
+import { expect } from "chai";
+import hre from "hardhat";
+
+const { ethers, networkHelpers } = await hre.network.create();
+const { time } = networkHelpers;
 
 const MINT_PRICE = ethers.parseUnits("10", 18); // Arc native USDC uses 18 decimals.
 const MAX_SUPPLY = 100;
@@ -64,7 +66,7 @@ describe("ArticNFT", function () {
 
       await expect(
         nft.connect(other).mint(2, { value: MINT_PRICE * 2n })
-      ).to.changeEtherBalances([other, creator], [-(MINT_PRICE * 2n), MINT_PRICE * 2n]);
+      ).to.changeEtherBalances(ethers, [other, creator], [-(MINT_PRICE * 2n), MINT_PRICE * 2n]);
     });
 
     it("enforces max supply and per-wallet limits", async function () {
@@ -178,7 +180,7 @@ describe("ArticMarketplace", function () {
 
     await expect(
       marketplace.connect(buyer).buyItem(await nft.getAddress(), 1, { value: price })
-    ).to.changeEtherBalances([buyer, seller, deployer], [-price, sellerProceeds, fee]);
+    ).to.changeEtherBalances(ethers, [buyer, seller, deployer], [-price, sellerProceeds, fee]);
 
     expect(await nft.ownerOf(1)).to.equal(buyer.address);
 

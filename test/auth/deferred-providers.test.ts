@@ -6,6 +6,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
+import * as reactQuery from "@tanstack/react-query";
 import ts from "typescript";
 import { PrivySessionContext, unconfiguredSession, usePrivySession, type PrivySession } from "../../hooks/usePrivySession";
 
@@ -18,6 +19,8 @@ let observed: PrivySession;
 let runtimeSession: PrivySession;
 let clients: QueryClient[];
 const dependencies: Record<string, unknown> = {
+  // The transpiled component must share the ESM context used by the probes.
+  "@tanstack/react-query": reactQuery,
   "next/navigation": { usePathname: () => pathname, useRouter: () => ({ push() {}, refresh() {} }) },
   "next/link": { default: ({ children, ...props }: React.PropsWithChildren) => React.createElement("a", props, children), __esModule: true },
   "@/components/ArticLogo": { default: () => null, __esModule: true },

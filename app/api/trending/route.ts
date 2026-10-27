@@ -2,6 +2,7 @@ import { withAbuseProtection } from "@/lib/abuseProtection";
 import { unstable_cache } from "next/cache";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { publicItemWhere } from "@/lib/publicCatalog";
 
 export const dynamic = "force-dynamic";
 const HOUR = 3_600_000;
@@ -9,13 +10,13 @@ const HOUR = 3_600_000;
 // Only published Items qualify. Unreviewed submissions never enter this query.
 // A cutoff gives every visitor the same selection throughout the hour.
 const loadDrops = (cutoff: number) => prisma.item.findMany({
-  where: { itemType: "NFT", createdAt: { lte: new Date(cutoff) } },
+  where: { itemType: "NFT", createdAt: { lte: new Date(cutoff) }, AND: [publicItemWhere] },
   orderBy: [{ createdAt: "desc" }, { id: "desc" }],
   take: 4,
   select: { id: true, title: true, imageUrl: true, status: true },
 });
 const hourlyDrops = process.env.NODE_ENV === "production"
-  ? unstable_cache(loadDrops, ["hourly-trending-drops-v1"], { revalidate: 3600 })
+  ? unstable_cache(loadDrops, ["hourly-trending-drops-v2"], { revalidate: 3600 })
   : loadDrops;
 
 async function handleGET() {

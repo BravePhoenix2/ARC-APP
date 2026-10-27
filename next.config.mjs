@@ -5,6 +5,19 @@ const require = createRequire(import.meta.url);
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  poweredByHeader: false,
+  async headers() {
+    return [{
+      source: "/:path*",
+      headers: [
+        { key: "Content-Security-Policy", value: "frame-ancestors 'none'; base-uri 'self'; object-src 'none'; form-action 'self'" },
+        { key: "X-Frame-Options", value: "DENY" },
+        { key: "X-Content-Type-Options", value: "nosniff" },
+        { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+        { key: "Strict-Transport-Security", value: "max-age=31536000" },
+      ],
+    }];
+  },
   // Build shared previews separately so the running app stays available.
   distDir: process.env.ARTIQ_LOCAL_BUILD === "true" ? ".next-local" : process.env.ARTIQ_SHARED_BUILD === "true"
     ? (process.env.ARTIQ_SHARED_BUILD_SLOT === "b" ? ".next-preview-b" : ".next-preview")

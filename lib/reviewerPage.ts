@@ -7,7 +7,7 @@ import { EMAIL_SESSION_COOKIE } from "@/lib/emailAuth";
 
 /** Page permission comes from the HttpOnly session and current reviewer allowlist. */
 export async function requireReviewerPage() {
-  const jar = cookies();
+  const jar = await cookies();
   if (!jar.get(PRIVY_SESSION_COOKIE)?.value && !jar.get(EMAIL_SESSION_COOKIE)?.value) notFound();
   // This request is only an adapter for existing cookie verification; no HTTP
   // request is sent and no browser account/role headers are trusted.

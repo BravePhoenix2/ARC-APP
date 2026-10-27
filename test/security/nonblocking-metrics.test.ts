@@ -32,6 +32,7 @@ test("a stalled metrics batch does not delay responses and requests aggregate be
       metricsRequests++;
       return batch;
     }
+    if (String(command[1]).includes("redis.call('INCR',")) return Response.json({ result: [1, 60] });
     assert.ok(String(command[1]).includes("HGETALL"));
     return Response.json({ result: Array.from({ length: 60 }, () => []) });
   });

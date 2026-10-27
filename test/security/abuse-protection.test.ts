@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 import { test } from "node:test";
 import { NextRequest } from "next/server";
 import { protectAccount, protectionClientIp, securitySnapshot, withAbuseProtection } from "../../lib/abuseProtection";
+
+const { NextRequestAdapter } = createRequire(import.meta.url)("next/dist/server/web/spec-extension/adapters/next-request.js");
 
 const fixedNow = 1_900_000_020_001;
 const envKeys = ["ARTIQ_TRUSTED_PROXY", "ARTIQ_SECURITY_REDIS_URL", "ARTIQ_SECURITY_REDIS_TOKEN", "ARTIQ_RATE_LIMIT_SECRET"] as const;
@@ -28,14 +31,20 @@ function request(ip?: string, path = "/api/test", extra: Record<string, string> 
   });
 }
 
+function nodeRequest(headers: Record<string, string> = {}): NextRequest {
+  return NextRequestAdapter.fromNodeNextRequest({
+    method: "GET", url: "http://localhost:3000/api/test", headers, body: null,
+  }, new AbortController().signal);
+}
+
 test("only configured ingress headers are trusted and IPv6 aliases share a canonical identity", async () => {
   await environment({}, async () => {
     assert.equal(protectionClientIp(request(undefined, "/", {
       "x-forwarded-for": "203.0.113.1", "cf-connecting-ip": "203.0.113.2", "x-vercel-forwarded-for": "203.0.113.3",
     })), null);
-    assert.equal(protectionClientIp(new NextRequest("http://localhost/", {
-      ip: "192.0.2.10", headers: { "x-forwarded-for": "203.0.113.99" },
-    })), "192.0.2.10");
+    const direct = new NextRequest("http://localhost/", { headers: { "x-forwarded-for": "203.0.113.99" } });
+    Object.defineProperty(direct, "ip", { value: "192.0.2.10" });
+    assert.equal(protectionClientIp(direct), "192.0.2.10");
   });
   await environment({ ARTIQ_TRUSTED_PROXY: "cloudflare" }, async () => {
     for (const [input, expected] of [
@@ -54,6 +63,81 @@ test("only configured ingress headers are trusted and IPv6 aliases share a canon
     assert.equal(protectionClientIp(request("203.0.113.8", "/", {
       "x-vercel-forwarded-for": "203.0.113.9", "x-forwarded-for": "203.0.113.99",
     })), "203.0.113.9");
+  });
+});
+
+test("Node requests without a verified IP share a bounded quota despite spoofed header churn", async (t) => {
+  t.mock.method(Date, "now", () => fixedNow + 300_000);
+  await environment({}, async () => {
+    let calls = 0;
+    const handler = withAbuseProtection("test.challenge.unknown-ip", "challenge", async () => {
+      calls++;
+      return new Response(null, { status: 204 });
+    });
+    assert.equal(protectionClientIp(nodeRequest()), null);
+    for (let index = 0; index < 60; index++) {
+      assert.equal((await handler(nodeRequest({
+        "x-forwarded-for": `192.0.2.${index + 1}`,
+        "cf-connecting-ip": `198.51.100.${index + 1}`,
+        "x-vercel-forwarded-for": `203.0.113.${index + 1}`,
+      }))).status, 204);
+    }
+    const blocked = await handler(nodeRequest({ "x-forwarded-for": "203.0.113.200" }));
+    assert.equal(blocked.status, 429);
+    assert.equal((await blocked.json()).code, "RATE_LIMITED");
+    assert.ok(Number(blocked.headers.get("retry-after")) > 0);
+    assert.equal(calls, 60, "the unidentified request must stop before handler work");
+  });
+});
+
+test("missing and malformed configured ingress metadata cannot bypass the unknown-client quota", async (t) => {
+  t.mock.method(Date, "now", () => fixedNow + 360_000);
+  await environment({ ARTIQ_TRUSTED_PROXY: "cloudflare" }, async () => {
+    const handler = withAbuseProtection("test.challenge.invalid-ingress", "challenge", async () => new Response(null, { status: 204 }));
+    for (let index = 0; index < 60; index++) {
+      const headers: Record<string, string> = index % 2 ? { "cf-connecting-ip": `invalid-${index}` } : {};
+      assert.equal((await handler(nodeRequest(headers))).status, 204);
+    }
+    assert.equal((await handler(nodeRequest())).status, 429);
+    assert.equal((await handler(nodeRequest({ "cf-connecting-ip": "not-an-ip" }))).status, 429);
+    assert.equal((await handler(nodeRequest({ "cf-connecting-ip": "198.51.100.201" }))).status, 204,
+      "a verified ingress identity keeps its own quota");
+    const row = (await securitySnapshot()).routes.find(({ route }) => route === "test.challenge.invalid-ingress");
+    assert.equal(row?.rateLimited, 2);
+  });
+});
+
+test("unidentified clients cannot fill global challenge capacity and release their slots", async (t) => {
+  t.mock.method(Date, "now", () => fixedNow + 420_000);
+  await environment({}, async () => {
+    const releases: Array<() => void> = [];
+    const started: Array<() => void> = [];
+    const gates = Array.from({ length: 6 }, (_, index) => new Promise<void>((resolve) => { releases[index] = resolve; }));
+    const ready = Array.from({ length: 6 }, (_, index) => new Promise<void>((resolve) => { started[index] = resolve; }));
+    let admitted = 0;
+    const handler = withAbuseProtection("test.challenge.unknown-concurrency", "challenge", async (_input, index?: number) => {
+      admitted++;
+      if (index !== undefined) { started[index](); await gates[index]; }
+      return new Response(null, { status: 204 });
+    });
+    const pending = gates.map((_, index) => handler(nodeRequest({ "x-forwarded-for": `192.0.2.${index + 1}` }), index));
+    try {
+      await Promise.all(ready);
+      const blocked = await handler(nodeRequest());
+      assert.equal(blocked.status, 429);
+      assert.equal((await blocked.json()).code, "REQUEST_CAPACITY_REACHED");
+      assert.equal(admitted, 6);
+      await environment({ ARTIQ_TRUSTED_PROXY: "cloudflare" }, async () => {
+        assert.equal((await handler(nodeRequest({ "cf-connecting-ip": "192.0.2.202" }))).status, 204,
+          "a verified network retains capacity while unidentified slots are occupied");
+      });
+      releases[0]();
+      await pending[0];
+      assert.equal((await handler(nodeRequest())).status, 204);
+    } finally {
+      releases.forEach((release) => release());
+      await Promise.allSettled(pending);
+    }
   });
 });
 

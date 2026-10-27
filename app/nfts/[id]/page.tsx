@@ -1,2 +1,2 @@
 import CollectionDetail from "@/components/CollectionDetail";
-export default function NftDetailPage({ params }: { params: { id: string } }) { return <CollectionDetail id={params.id} />; }
+export default async function NftDetailPage({ params }: { params: Promise<{ id: string }> }) { return <CollectionDetail id={(await params).id} />; }

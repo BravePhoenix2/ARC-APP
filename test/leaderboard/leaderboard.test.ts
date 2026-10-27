@@ -314,13 +314,13 @@ test("creator milestone is awarded only after approval and cannot be farmed with
   assert.equal((await mine(login)).points, 10);
   const rejection = request(`/api/admin/submissions/${rejected.id}`, { decision: "REJECTED", reviewNote: "Please provide clearer metadata." }, admin);
   const rejectRequest = new NextRequest(rejection.url, { method: "PATCH", headers: rejection.headers, body: await rejection.text() });
-  assert.equal((await reviewRoute.PATCH(rejectRequest, { params: { id: rejected.id } })).status, 200);
+  assert.equal((await reviewRoute.PATCH(rejectRequest, { params: Promise.resolve({ id: rejected.id }) })).status, 200);
   assert.equal((await mine(login)).points, 10);
   for (const title of ["Approved study one", "Approved study two"]) {
     const pending = await submission(title);
     const approval = request(`/api/admin/submissions/${pending.id}`, { decision: "APPROVED" }, admin);
     const approveRequest = new NextRequest(approval.url, { method: "PATCH", headers: approval.headers, body: await approval.text() });
-    assert.equal((await reviewRoute.PATCH(approveRequest, { params: { id: pending.id } })).status, 200);
+    assert.equal((await reviewRoute.PATCH(approveRequest, { params: Promise.resolve({ id: pending.id }) })).status, 200);
   }
   assert.equal((await mine(login)).points, 35);
   assert.deepEqual(await milestoneKinds(login.userId), ["APPROVED_CREATOR", "SIGN_IN"]);

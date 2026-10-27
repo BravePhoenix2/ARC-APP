@@ -11,9 +11,10 @@ import { AssetAuctionVerificationError, readVerifiedAssetAuction } from "@/lib/a
 export const dynamic = "force-dynamic";
 const headers = { "Cache-Control": "private, no-store" };
 const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers });
-type Context = { params: { id: string } };
+type Context = { params: Promise<{ id: string }> };
 
-async function fulfillment(request: NextRequest, { params }: Context, save: boolean) {
+async function fulfillment(request: NextRequest, { params: routeParams }: Context, save: boolean) {
+  const params = await routeParams;
   if (save && !sameOrigin(request)) return json({ error: "Invalid request origin." }, 403);
   const session = await getCreatorSession(request);
   if (!session) return json({ error: "Sign in to access private fulfillment details." }, 401);

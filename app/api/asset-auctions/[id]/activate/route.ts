@@ -12,7 +12,8 @@ export const dynamic = "force-dynamic";
 const headers = { "Cache-Control": "private, no-store" };
 const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers });
 
-async function handlePOST(request: NextRequest, { params }: { params: { id: string } }) {
+async function handlePOST(request: NextRequest, { params: routeParams }: { params: Promise<{ id: string }> }) {
+  const params = await routeParams;
   if (!sameOrigin(request)) return json({ error: "Invalid request origin." }, 403);
   const session = await getCreatorSession(request);
   if (!session) return json({ error: "Sign in before publishing your auction." }, 401);

@@ -628,7 +628,7 @@ test("an old unverified contact email cannot transfer ownership of its account",
   const signed = await login([emailAccount("contact-only@example.com")]);
   assert.notEqual(signed.user.id, old.id);
   assert.equal((await db.user.findUniqueOrThrow({ where: { id: old.id } })).privyId, null);
-  assert.equal((await imageRoute.GET(request(`/api/uploads/${image.id}`, "GET", undefined, signed), { params: { id: image.id } })).status, 404);
+  assert.equal((await imageRoute.GET(request(`/api/uploads/${image.id}`, "GET", undefined, signed), { params: Promise.resolve({ id: image.id }) })).status, 404);
   assert.equal(await db.user.count(), 2);
 });
 
@@ -689,9 +689,9 @@ test("protects private uploads and applications with the stable account ID and r
   assert.equal((await db.uploadedImage.findUniqueOrThrow({ where: { id: imageId } })).ownerUserId, owner.user.id);
   const imageRequest = request(url, "GET", undefined, owner);
   imageRequest.headers.delete("x-artiq-account-id");
-  assert.equal((await imageRoute.GET(imageRequest, { params: { id: imageId } })).status, 200);
-  assert.equal((await imageRoute.GET(request(url, "GET", undefined, other), { params: { id: imageId } })).status, 404);
-  assert.equal((await imageRoute.GET(request(url), { params: { id: imageId } })).status, 404);
+  assert.equal((await imageRoute.GET(imageRequest, { params: Promise.resolve({ id: imageId }) })).status, 200);
+  assert.equal((await imageRoute.GET(request(url, "GET", undefined, other), { params: Promise.resolve({ id: imageId }) })).status, 404);
+  assert.equal((await imageRoute.GET(request(url), { params: Promise.resolve({ id: imageId }) })).status, 404);
   const application = { itemType: "NFT", creationMethod: "AI_GENERATED", creatorName: "Privy artist", title: "Privy NFT", description: "A work submitted through verified Privy authentication.", imageUrl: url, priceUsdc: "2", maxSupply: 10, creatorId: other.user.id, email: other.user.email, walletAddress: reviewerWallet, isAdmin: true };
   const missingHeader = request("/api/submissions", "POST", application, owner);
   missingHeader.headers.delete("x-artiq-account-id");
@@ -723,7 +723,7 @@ test("a verified allowlisted email reviews private applications without connecti
   const headerlessSession = await route.GET(new NextRequest(`${origin}/api/auth/privy/session`, { headers: { Cookie: signed.cookie } }));
   assert.equal(headerlessSession.status, 200);
   assert.equal((await headerlessSession.json()).user.isAdmin, true);
-  const reviewerImage = await imageRoute.GET(new NextRequest(`${origin}${imagePath}`, { headers: { Cookie: signed.cookie } }), { params: { id: image.id } });
+  const reviewerImage = await imageRoute.GET(new NextRequest(`${origin}${imagePath}`, { headers: { Cookie: signed.cookie } }), { params: Promise.resolve({ id: image.id }) });
   assert.equal(reviewerImage.status, 200, "browser image requests authenticate the verified reviewer email through its HttpOnly cookie");
   assert.equal(reviewerImage.headers.get("cache-control"), "private, no-store");
   assert.deepEqual(Buffer.from(await reviewerImage.arrayBuffer()), png);
@@ -739,19 +739,19 @@ test("a verified allowlisted email reviews private applications without connecti
   assert.equal((await adminQueue.GET(accountSpoof)).status, 401);
   const pending = await db.submission.create({ data: { creatorId: privateOwner.id, itemType: "NFT", creationMethod: "AI_GENERATED", creatorName: "Artist", title: "Email-reviewed NFT", description: "A collection reviewed with an email account.", imageUrl: imagePath, priceUsdc: 1, maxSupply: 5, nftKind: "COLLECTIBLE" } });
   const foreign = request(`/api/admin/submissions/${pending.id}`, "PATCH", { decision: "APPROVED" }, signed, undefined, "https://attacker.example");
-  assert.equal((await reviewRoute.PATCH(foreign, { params: { id: pending.id } })).status, 403);
+  assert.equal((await reviewRoute.PATCH(foreign, { params: Promise.resolve({ id: pending.id }) })).status, 403);
   assert.equal(await db.item.count(), 0);
-  const approved = await reviewRoute.PATCH(request(`/api/admin/submissions/${pending.id}`, "PATCH", { decision: "APPROVED", reviewedBy: "spoofed-reviewer", email: "claimed@example.com" }, signed), { params: { id: pending.id } });
+  const approved = await reviewRoute.PATCH(request(`/api/admin/submissions/${pending.id}`, "PATCH", { decision: "APPROVED", reviewedBy: "spoofed-reviewer", email: "claimed@example.com" }, signed), { params: Promise.resolve({ id: pending.id }) });
   assert.equal(approved.status, 200);
   const reviewed = await db.submission.findUniqueOrThrow({ where: { id: pending.id } });
   assert.equal(reviewed.status, "APPROVED");
   assert.equal(reviewed.reviewedBy, `user:${signed.user.id}`);
   assert.ok(reviewed.itemId);
-  assert.equal((await reviewRoute.PATCH(request(`/api/admin/submissions/${pending.id}`, "PATCH", { decision: "APPROVED" }, signed), { params: { id: pending.id } })).status, 409);
+  assert.equal((await reviewRoute.PATCH(request(`/api/admin/submissions/${pending.id}`, "PATCH", { decision: "APPROVED" }, signed), { params: Promise.resolve({ id: pending.id }) })).status, 409);
   assert.equal(await db.item.count(), 1, "repeat review cannot publish a duplicate listing");
   const rejected = await db.submission.create({ data: { creatorId: privateOwner.id, creatorName: "Artist", itemType: "NFT", title: "Rejected NFT", description: "An application requiring revised details.", imageUrl: imagePath, priceUsdc: 1, maxSupply: 5 } });
-  assert.equal((await reviewRoute.PATCH(request(`/api/admin/submissions/${rejected.id}`, "PATCH", { decision: "REJECTED" }, signed), { params: { id: rejected.id } })).status, 400);
-  assert.equal((await reviewRoute.PATCH(request(`/api/admin/submissions/${rejected.id}`, "PATCH", { decision: "REJECTED", reviewNote: "Please provide clearer ownership details." }, signed), { params: { id: rejected.id } })).status, 200);
+  assert.equal((await reviewRoute.PATCH(request(`/api/admin/submissions/${rejected.id}`, "PATCH", { decision: "REJECTED" }, signed), { params: Promise.resolve({ id: rejected.id }) })).status, 400);
+  assert.equal((await reviewRoute.PATCH(request(`/api/admin/submissions/${rejected.id}`, "PATCH", { decision: "REJECTED", reviewNote: "Please provide clearer ownership details." }, signed), { params: Promise.resolve({ id: rejected.id }) })).status, 200);
   assert.equal((await db.submission.findUniqueOrThrow({ where: { id: rejected.id } })).reviewedBy, `user:${signed.user.id}`);
   assert.equal(await db.item.count(), 1, "rejection does not publish artwork");
 });
@@ -808,7 +808,7 @@ test("wallet grants, unverified emails, contact fields and lookalike addresses n
     const signed = await login(accounts);
     assert.equal(signed.user.isAdmin, false);
     assert.equal((await adminQueue.GET(request("/api/admin/submissions", "GET", undefined, signed))).status, 403);
-    assert.equal((await imageRoute.GET(new NextRequest(`${origin}/api/uploads/${image.id}`, { headers: { Cookie: signed.cookie } }), { params: { id: image.id } })).status, 404);
+    assert.equal((await imageRoute.GET(new NextRequest(`${origin}/api/uploads/${image.id}`, { headers: { Cookie: signed.cookie } }), { params: Promise.resolve({ id: image.id }) })).status, 404);
   }
   const contactOwner = await db.user.findUniqueOrThrow({ where: { walletAddress: reviewerWallet } });
   await db.user.update({ where: { id: contactOwner.id }, data: { email: reviewerEmail, emailVerifiedAt: new Date() } });
@@ -830,7 +830,7 @@ test("removing a reviewer email immediately revokes an existing session, includi
     assert.equal(refreshed.status, 200);
     assert.equal((await refreshed.json()).user.isAdmin, false);
     assert.equal((await adminQueue.GET(request("/api/admin/submissions", "GET", undefined, signed))).status, 403);
-    assert.equal((await imageRoute.GET(new NextRequest(`${origin}/api/uploads/${image.id}`, { headers: { Cookie: signed.cookie } }), { params: { id: image.id } })).status, 404);
+    assert.equal((await imageRoute.GET(new NextRequest(`${origin}/api/uploads/${image.id}`, { headers: { Cookie: signed.cookie } }), { params: Promise.resolve({ id: image.id }) })).status, 404);
   } finally { process.env.ARTIQ_ADMIN_EMAILS = previous; }
   const unlinked = await login([walletAccount(ownerWallet)], { privyDid: signed.privyDid, legacyCookie: signed.cookie });
   assert.equal(unlinked.user.id, signed.user.id);

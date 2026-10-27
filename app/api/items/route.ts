@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/lib/generated/prisma/client";
 import { catalogPagination, catalogCursor } from "@/lib/catalogPagination";
-import { publicCatalogSelect } from "@/lib/publicCatalog";
+import { publicCatalogSelect, publicItemWhere } from "@/lib/publicCatalog";
 import { isNftKind } from "@/lib/nftTypes";
 
 // GET /api/items?itemType=NFT|WEB2_ART&status=LIVE&category=PAINTING&creator=0x...
@@ -29,6 +29,7 @@ async function handleGET(request: NextRequest) {
   if (category && !["PAINTING", "RUG", "COSMETIC", "OTHER"].includes(category)) return NextResponse.json({ error: "Invalid art category." }, { status: 400 });
 
   const where: Prisma.ItemWhereInput = {
+    AND: [publicItemWhere],
     ...(itemType ? { itemType: itemType as "NFT" | "WEB2_ART" } : {}),
     ...(nftKind && isNftKind(nftKind) ? {
       // Pre-upgrade NFT entries are ordinary collectibles.

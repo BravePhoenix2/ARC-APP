@@ -1,6 +1,9 @@
-const { expect } = require("chai");
-const { ethers, artifacts } = require("hardhat");
-const { time } = require("@nomicfoundation/hardhat-network-helpers");
+import { expect } from "chai";
+import hre from "hardhat";
+
+const { ethers, networkHelpers } = await hre.network.create();
+const { time } = networkHelpers;
+const { artifacts } = hre;
 const leaf = (key, wallet, tier) => ethers.keccak256(ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(["bytes32", "address", "uint8"], [key, wallet, tier])));
 const pair = (a, b) => ethers.keccak256(ethers.concat([a, b].sort()));
 describe("Phased mint access", function () {

@@ -1,0 +1,20 @@
+{
+  "proof": "existing-contract import bypass",
+  "submissionStatus": 201,
+  "approvalStatus": 200,
+  "publicStatus": 200,
+  "rpcCalls": 0,
+  "duplicateContractRecords": 2,
+  "publishedClaim": {
+    "creator": "Attacker",
+    "nftKind": "SOULBOUND",
+    "royaltyBps": 0,
+    "contractAddress": "0x3333333333333333333333333333333333333333"
+  },
+  "existingFixture": {
+    "creator": "Actual creator",
+    "nftKind": "COLLECTIBLE",
+    "royaltyBps": 900
+  },
+  "limitations": "Contract is a local fixture, not a deployed chain contract; handler publishing is real and UI registry guard is reviewed separately."
+}

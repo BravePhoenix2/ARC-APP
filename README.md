@@ -122,9 +122,7 @@ older NFT claims, refunds, and rewards.
 For an existing installation, back up the database, then run:
 
 ```sh
-npm run db:generate
-npm run db:push
-npm run studio:pin-factories
+
 ```
 
 This adds the `AssetAuction` table without replacing existing records. Existing
@@ -134,6 +132,17 @@ then rebuild and restart. The exported bytecode includes digital/physical suppor
 the setup verifies this capability before offering configuration to copy. Current
 and previous auction-house addresses remain in the generated configuration.
 All these payments still use Arc Testnet USDC with no monetary value.
+
+## My NFTs
+
+Open **My NFTs** (`/my-nfts`) from the marketplace navigation or profile menu.
+Select the wallet you used to mint to see your Artiq mint history, grouped by
+collection, with the total you minted and your current on-chain wallet balance.
+This includes ERC-721 collectibles, memberships, soulbound NFTs, and ERC-1155
+editions. Transferred mints remain in the history. Use **Refresh NFTs** after a
+new mint or transfer. The view covers deployed collections in the Artiq catalog
+on Arc Testnet; NFTs from other platforms are not included. Failed collection
+reads are shown as an incomplete result with a retry action.
 
 ## Discovery and watchlists
 

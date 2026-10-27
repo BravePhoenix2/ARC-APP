@@ -1,6 +1,8 @@
-const { expect } = require("chai");
-const { ethers } = require("hardhat");
-const { time, loadFixture } = require("@nomicfoundation/hardhat-network-helpers");
+import { expect } from "chai";
+import hre from "hardhat";
+
+const { ethers, networkHelpers } = await hre.network.create();
+const { time, loadFixture } = networkHelpers;
 
 const PRICE = ethers.parseUnits("2", 18);
 const CREATOR_FEE_BPS = 250n;
@@ -83,7 +85,7 @@ describe("NFT Studio", function () {
     expect(await factory.pendingPlatformFees()).to.equal(platformRevenue);
     expect(await ethers.provider.getBalance(await collection.getAddress())).to.equal(creatorProceeds);
     await expect(collection.connect(minter).withdraw(minter.address)).to.be.revertedWithCustomError(collection, "OwnableUnauthorizedAccount");
-    await expect(collection.withdraw(creator.address)).to.changeEtherBalances([collection, creator], [-creatorProceeds, creatorProceeds]);
+    await expect(collection.withdraw(creator.address)).to.changeEtherBalances(ethers, [collection, creator], [-creatorProceeds, creatorProceeds]);
   });
 
   it("enforces supply, wallet and batch limits without granting eligibility on failed mints", async function () {
@@ -147,10 +149,10 @@ describe("NFT Studio", function () {
     const { factory, creator, minter } = await loadFixture(deployStudio);
     await expect(factory.connect(minter).notifyMint(minter.address)).to.be.revertedWithCustomError(factory, "NotRegisteredCollection");
     const invalid = ["Test", "TST", "ipfs://data", PRICE, 0, 0, 1, 0, false];
-    await expect(factory.connect(creator).create721(...invalid)).to.be.reverted;
-    await expect(factory.connect(creator).create721("Test", "TST", "ipfs://data", PRICE, 0, 10, 1, 1001, false)).to.be.reverted;
-    await expect(factory.connect(creator).create721("Test", "TST", "x".repeat(4097), PRICE, 0, 10, 1, 0, false)).to.be.reverted;
-    await expect(factory.connect(creator).createEdition("x".repeat(481), "TST", "ipfs://data", PRICE, 0, 10, 1, 0)).to.be.reverted;
+    await expect(factory.connect(creator).create721(...invalid)).to.revert(ethers);
+    await expect(factory.connect(creator).create721("Test", "TST", "ipfs://data", PRICE, 0, 10, 1, 1001, false)).to.revert(ethers);
+    await expect(factory.connect(creator).create721("Test", "TST", "x".repeat(4097), PRICE, 0, 10, 1, 0, false)).to.revert(ethers);
+    await expect(factory.connect(creator).createEdition("x".repeat(481), "TST", "ipfs://data", PRICE, 0, 10, 1, 0)).to.revert(ethers);
     expect(await factory.hasMinted(minter.address)).to.equal(false);
   });
 

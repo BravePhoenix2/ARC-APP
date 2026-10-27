@@ -5,6 +5,7 @@ import { afterEach, beforeEach, test } from "node:test";
 import React from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import * as reactQuery from "@tanstack/react-query";
 import { formatUnits, parseAbi, type Address } from "viem";
 import ts from "typescript";
 
@@ -37,6 +38,8 @@ const tx = {
       reads.push(args);
       const state = snapshots.get(args.address as Address)!;
       if (state.unavailable) throw new Error("Arc RPC timed out.");
+      if (args.functionName === "supportsMintSurcharge") return true;
+      if (args.functionName === "mintSurchargeBps") return BigInt(200);
       if (args.functionName === "pendingPlatformFees") return state.pending;
       if (args.functionName === "totalPlatformFees") return state.total;
       throw new Error(`Unexpected read: ${args.functionName}`);
@@ -53,6 +56,8 @@ const tx = {
   },
 };
 const deps: Record<string, unknown> = {
+  // Keep component hooks and this test's provider on the same ESM context.
+  "@tanstack/react-query": reactQuery,
   "@/hooks/useProtocolTransaction": { useProtocolTransaction: () => tx },
   "@/components/TransactionStatus": { default: () => null, __esModule: true },
   "@/lib/arcConfig": { arcChain: { id: 5042002, blockExplorers: { default: { url: "https://explorer.testnet.arc.io" } } } },
@@ -94,7 +99,10 @@ test("shows actual accrued and withdrawable fees without losing bigint precision
   assert.match(text, /Test USDC has no monetary value/);
   assert.match(text, /2\.5/);
   assert.equal(withdrawalButtons().length, 3);
-  assert.ok(reads.length === 6 && reads.every((read) => read.blockNumber === BigInt(500)));
+  assert.match(text, /Collector mint surcharge/);
+  assert.match(text, /4\.5/);
+  assert.equal(reads.filter((read) => read.functionName === "pendingPlatformFees" || read.functionName === "totalPlatformFees").length, 6);
+  assert.ok(reads.every((read) => read.blockNumber === BigInt(500)));
 });
 
 test("fee recipient withdraws only platform fees to the connected wallet and refreshes accounting", async () => {

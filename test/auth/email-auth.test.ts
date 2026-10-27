@@ -295,11 +295,11 @@ test("email creators own private uploads and applications without acquiring revi
   const storedImage = await db.uploadedImage.findUniqueOrThrow({ where: { id } });
   assert.equal(storedImage.ownerUserId, owner.user.id);
   assert.equal(storedImage.ownerWallet, null);
-  assert.equal((await imageRoute.GET(request(imageUrl), { params: { id } })).status, 404);
-  assert.equal((await imageRoute.GET(request(imageUrl, "GET", undefined, other), { params: { id } })).status, 404);
+  assert.equal((await imageRoute.GET(request(imageUrl), { params: Promise.resolve({ id }) })).status, 404);
+  assert.equal((await imageRoute.GET(request(imageUrl, "GET", undefined, other), { params: Promise.resolve({ id }) })).status, 404);
   const ownerImageRequest = request(imageUrl, "GET", undefined, owner);
   ownerImageRequest.headers.delete("x-artiq-account-id");
-  const image = await imageRoute.GET(ownerImageRequest, { params: { id } });
+  const image = await imageRoute.GET(ownerImageRequest, { params: Promise.resolve({ id }) });
   assert.equal(image.status, 200, "image elements authenticate using their HttpOnly cookie without custom headers");
   assert.equal(image.headers.get("cache-control"), "private, no-store");
   assert.deepEqual(Buffer.from(await image.arrayBuffer()), png);
@@ -313,12 +313,12 @@ test("email creators own private uploads and applications without acquiring revi
   const legacyWallet = "0x1111111111111111111111111111111111111111";
   const legacyImage = await db.uploadedImage.create({ data: { ownerWallet: legacyWallet, ownerUserId: null, mimeType: "image/png", data: new Uint8Array(png) } });
   const legacyUrl = `/api/uploads/${legacyImage.id}`;
-  assert.equal((await imageRoute.GET(request(legacyUrl, "GET", undefined, owner), { params: { id: legacyImage.id } })).status, 404, "email sessions cannot inherit legacy wallet-only uploads");
+  assert.equal((await imageRoute.GET(request(legacyUrl, "GET", undefined, owner), { params: Promise.resolve({ id: legacyImage.id }) })).status, 404, "email sessions cannot inherit legacy wallet-only uploads");
   assert.equal((await submissions.POST(request("/api/submissions", "POST", { ...application, imageUrl: legacyUrl, creatorWalletAddress: legacyWallet, walletAddress: legacyWallet }, owner))).status, 400, "claiming a wallet in the body cannot assign its old uploads to an email account");
   const legacyOwnerToken = randomBytes(32).toString("hex");
   await db.walletSession.create({ data: { walletAddress: legacyWallet, tokenHash: createHash("sha256").update(legacyOwnerToken).digest("hex"), expiresAt: new Date(Date.now() + 60_000) } });
   const legacyOwnerRequest = new NextRequest(`${origin}${legacyUrl}`, { headers: { Cookie: `artiq_wallet_session=${legacyOwnerToken}` } });
-  assert.equal((await imageRoute.GET(legacyOwnerRequest, { params: { id: legacyImage.id } })).status, 200, "the signed owner wallet retains access to its legacy upload");
+  assert.equal((await imageRoute.GET(legacyOwnerRequest, { params: Promise.resolve({ id: legacyImage.id }) })).status, 200, "the signed owner wallet retains access to its legacy upload");
   const missingAccount = request("/api/submissions", "POST", application, owner);
   missingAccount.headers.delete("x-artiq-account-id");
   assert.equal((await submissions.POST(missingAccount)).status, 401);
@@ -341,7 +341,7 @@ test("email creators own private uploads and applications without acquiring revi
   const impersonation = request("/api/admin/submissions", "GET", undefined, owner);
   impersonation.headers.set("x-wallet-address", reviewerWallet);
   assert.equal((await adminQueue.GET(impersonation)).status, 403);
-  assert.equal((await reviewRoute.PATCH(request("/api/admin/submissions/x", "PATCH", { decision: "APPROVED", reviewedBy: reviewerWallet }, owner), { params: { id: submission.id } })).status, 403);
+  assert.equal((await reviewRoute.PATCH(request("/api/admin/submissions/x", "PATCH", { decision: "APPROVED", reviewedBy: reviewerWallet }, owner), { params: Promise.resolve({ id: submission.id }) })).status, 403);
   assert.equal((await walletSessionRoute.GET(request("/api/auth/session", "GET", undefined, owner))).status, 401, "email login never grants a wallet session");
 
   const token = randomBytes(32).toString("hex");
@@ -351,10 +351,10 @@ test("email creators own private uploads and applications without acquiring revi
     headers: { Origin: origin, "Content-Type": "application/json", Cookie: `artiq_wallet_session=${token}`, "X-Wallet-Address": reviewerWallet },
     body: JSON.stringify({ decision: "APPROVED" }),
   });
-  assert.equal((await reviewRoute.PATCH(walletReviewer, { params: { id: submission.id } })).status, 403, "the old wallet allowlist no longer grants reviewer access");
+  assert.equal((await reviewRoute.PATCH(walletReviewer, { params: Promise.resolve({ id: submission.id }) })).status, 403, "the old wallet allowlist no longer grants reviewer access");
   const reviewer = await login(reviewerEmail);
   assert.equal((await adminQueue.GET(request("/api/admin/submissions", "GET", undefined, reviewer))).status, 200);
-  assert.equal((await reviewRoute.PATCH(request("/api/admin/submissions/x", "PATCH", { decision: "APPROVED", reviewedBy: reviewerWallet }, reviewer), { params: { id: submission.id } })).status, 200);
+  assert.equal((await reviewRoute.PATCH(request("/api/admin/submissions/x", "PATCH", { decision: "APPROVED", reviewedBy: reviewerWallet }, reviewer), { params: Promise.resolve({ id: submission.id }) })).status, 200);
   assert.equal((await db.submission.findUniqueOrThrow({ where: { id: submission.id } })).reviewedBy, `user:${reviewer.user.id}`, "review history stores the authenticated account, ignoring the request body");
   const publicItems = (await (await catalog.GET(request("/api/items?itemType=NFT"))).json()).items;
   assert.equal(publicItems.length, 1);
@@ -362,7 +362,7 @@ test("email creators own private uploads and applications without acquiring revi
   assert.equal(publicItems[0].creator.walletAddress, null);
   assert.equal(publicItems[0].creator.email, undefined, "verified creator email is never published");
   assert.equal(publicItems[0].contactEmail, undefined);
-  assert.equal((await imageRoute.GET(request(imageUrl), { params: { id } })).status, 200, "approved artwork images become public");
+  assert.equal((await imageRoute.GET(request(imageUrl), { params: Promise.resolve({ id }) })).status, 200, "approved artwork images become public");
 });
 
 test("legacy verified email reviewer access requires a bound account and is revoked by allowlist changes", async () => {

@@ -8,7 +8,8 @@ import { limitedJson } from "@/lib/requestBody";
 // PATCH /api/items/[id]/mint-time
 // Body: { mintStartTime: string (ISO date) }; creator comes from the signed session.
 // A deployed collection's schedule is immutable, including before minting opens.
-async function handlePATCH(request: NextRequest, { params }: { params: { id: string } }) {
+async function handlePATCH(request: NextRequest, { params: routeParams }: { params: Promise<{ id: string }> }) {
+  const params = await routeParams;
   if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
   const session = await getCreatorSession(request);
   if (!session) return NextResponse.json({ error: "Sign in with email or your wallet." }, { status: 401 });

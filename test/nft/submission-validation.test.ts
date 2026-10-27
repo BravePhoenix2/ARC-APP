@@ -18,6 +18,13 @@ test("legacy NFT applications remain valid and default to collectibles", () => {
   assert.deepEqual(input.attributes, []);
 });
 
+test("NFT applications cannot attach a supplied contract before deployment verification", () => {
+  for (const contractAddress of ["0x1111111111111111111111111111111111111111", "not-an-address", 1, {}]) {
+    assert.throws(() => parseSubmission({ ...application, contractAddress }), /without an existing contract address/);
+  }
+  for (const contractAddress of [undefined, null, ""]) assert.equal(parseSubmission({ ...application, contractAddress }).contractAddress, null);
+});
+
 test("image series require owned-upload URLs, ordered covers and one image per token", () => {
   const images = [{ imageUrl: "/api/uploads/abcdefghijklmnopqrstuvwx", filename: "001.png" }, { imageUrl: "/api/uploads/zyxwvutsrqponmlkjihgfedc", filename: "002.png" }];
   const body = { ...application, imageUrl: images[0].imageUrl, maxSupply: 2, images };

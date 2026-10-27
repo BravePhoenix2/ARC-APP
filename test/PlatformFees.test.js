@@ -1,6 +1,8 @@
-const { expect } = require("chai");
-const { ethers } = require("hardhat");
-const { time, loadFixture } = require("@nomicfoundation/hardhat-network-helpers");
+import { expect } from "chai";
+import hre from "hardhat";
+
+const { ethers, networkHelpers } = await hre.network.create();
+const { time, loadFixture } = networkHelpers;
 
 const USDC = value => ethers.parseUnits(String(value), 18);
 const creatorFee = (base, bps = 250n) => base * bps / 10_000n;
@@ -58,10 +60,10 @@ describe("Platform revenue", function () {
     expect(await factory.totalPlatformFees()).to.equal(platformRevenue);
     expect(await ethers.provider.getBalance(await factory.getAddress())).to.equal(platformRevenue);
     expect(await ethers.provider.getBalance(await collection.getAddress())).to.equal(creatorProceeds);
-    await expect(collection.connect(creator).withdraw(creator.address)).to.changeEtherBalances([collection, creator], [-creatorProceeds, creatorProceeds]);
+    await expect(collection.connect(creator).withdraw(creator.address)).to.changeEtherBalances(ethers, [collection, creator], [-creatorProceeds, creatorProceeds]);
     expect(await ethers.provider.getBalance(await factory.getAddress())).to.equal(platformRevenue);
     await expect(factory.connect(creator).withdrawPlatformFees(creator.address)).to.be.revertedWithCustomError(factory, "NotFeeRecipient");
-    await expect(factory.connect(treasury).withdrawPlatformFees(other.address)).to.changeEtherBalances([factory, other], [-platformRevenue, platformRevenue]);
+    await expect(factory.connect(treasury).withdrawPlatformFees(other.address)).to.changeEtherBalances(ethers, [factory, other], [-platformRevenue, platformRevenue]);
     expect(await factory.pendingPlatformFees()).to.equal(0);
     expect(await factory.totalPlatformFees()).to.equal(platformRevenue);
     await expect(factory.connect(treasury).withdrawPlatformFees(other.address)).to.be.revertedWithCustomError(factory, "NoPlatformFees");
@@ -247,7 +249,7 @@ describe("Platform revenue", function () {
       expect(await contract.pendingPlatformFees()).to.equal(expectedFee);
       await expect(treasury.withdrawFees(await contract.getAddress(), recipient)).to.be.revertedWithCustomError(contract, "PlatformFeePayoutFailed");
       expect(await contract.pendingPlatformFees()).to.equal(expectedFee);
-      await expect(treasury.withdrawFees(await contract.getAddress(), other.address)).to.changeEtherBalance(other, expectedFee);
+      await expect(treasury.withdrawFees(await contract.getAddress(), other.address)).to.changeEtherBalance(ethers, other, expectedFee);
       expect(await contract.pendingPlatformFees()).to.equal(0);
     }
   });

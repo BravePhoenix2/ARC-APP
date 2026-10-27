@@ -7,7 +7,8 @@ import { limitedJson } from "@/lib/requestBody";
 import type { Prisma } from "@/lib/generated/prisma/client";
 import { awardTesterMilestone } from "@/lib/testerLeaderboard";
 
-async function handlePATCH(request: NextRequest, { params }: { params: { id: string } }) {
+async function handlePATCH(request: NextRequest, context: { params: Promise<{ id: string }> }) {
+  const params = await context.params;
   if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
   const session = await getCreatorSession(request);
   if (!session) return NextResponse.json({ error: "Sign in to review applications." }, { status: 401 });
@@ -32,6 +33,7 @@ async function handlePATCH(request: NextRequest, { params }: { params: { id: str
       const application = await tx.submission.findUnique({ where: { id: params.id }, include: { collectionImages: { orderBy: { position: "asc" } } } });
       if (!application) throw new Error("NOT_FOUND");
       if (application.status !== "PENDING") throw new Error("ALREADY_REVIEWED");
+      if (decision === "APPROVED" && application.itemType === "NFT" && application.contractAddress) throw new Error("NFT_DEPLOYMENT_REQUIRED");
       if (decision === "APPROVED" && application.itemType === "WEB2_ART") {
         if (!application.humanMadeDeclaration || application.creationMethod !== "HUMAN" || !application.creationProcess || application.creationProcess.trim().length < 30 || !application.screening || !application.imageUrl.startsWith("/api/uploads/")) throw new Error("ART_EVIDENCE_REQUIRED");
         if (artReviewConfirmed !== true || !note || note.length < 20) throw new Error("ART_REVIEW_REQUIRED");
@@ -57,7 +59,7 @@ async function handlePATCH(request: NextRequest, { params }: { params: { id: str
             royaltyBps: application.nftKind === "SOULBOUND" ? 0 : application.royaltyBps,
             ...(application.attributes !== null ? { attributes: application.attributes as Prisma.InputJsonValue } : {}),
             mintPriceUsdc: application.priceUsdc, maxSupply: application.maxSupply,
-            mintStartTime: application.mintStartTime, contractAddress: application.contractAddress,
+            mintStartTime: application.mintStartTime, contractAddress: null,
             mintedCount: 0, status: "UPCOMING",
           } : { priceUsdc: application.priceUsdc, category: application.category, quantityAvailable: 1, sold: false }),
         } });
@@ -68,6 +70,7 @@ async function handlePATCH(request: NextRequest, { params }: { params: { id: str
     });
     return NextResponse.json({ submission }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
+    if (error instanceof Error && error.message === "NFT_DEPLOYMENT_REQUIRED") return NextResponse.json({ error: "This application includes an unverified existing contract. Ask the creator to resubmit without it, then deploy from the approved collection page." }, { status: 409 });
     if (error instanceof Error && error.message === "ART_EVIDENCE_REQUIRED") return NextResponse.json({ error: "This art application needs the creator's human-made declaration, process details, and a screened upload. Ask the creator to submit it again." }, { status: 409 });
     if (error instanceof Error && error.message === "ART_REVIEW_REQUIRED") return NextResponse.json({ error: "Review the creation details, confirm sufficient evidence of human authorship, and explain your decision in at least 20 characters." }, { status: 400 });
     if (error instanceof Error && error.message === "NOT_FOUND") return NextResponse.json({ error: "Application not found." }, { status: 404 });

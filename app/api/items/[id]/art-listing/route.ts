@@ -11,7 +11,8 @@ import { deploymentClient } from "@/lib/deploymentVerification";
 export const dynamic = "force-dynamic";
 const headers = { "Cache-Control": "private, no-store" };
 
-async function handlePOST(request: NextRequest, { params }: { params: { id: string } }) {
+async function handlePOST(request: NextRequest, { params: routeParams }: { params: Promise<{ id: string }> }) {
+  const params = await routeParams;
   if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403, headers });
   const session = await getCreatorSession(request);
   if (!session) return NextResponse.json({ error: "Sign in before linking a listing." }, { status: 401, headers });

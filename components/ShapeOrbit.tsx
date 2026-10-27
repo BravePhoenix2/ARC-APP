@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement } from "react";
 import { motion } from "framer-motion";
 import {
   OrbitCircle,
@@ -13,7 +13,7 @@ import {
 
 const SHAPES: {
   id: string;
-  Component: (props: OrbitShapeProps) => JSX.Element;
+  Component: (props: OrbitShapeProps) => ReactElement;
   color: string;
   sizeRatio: number;
   aspect: number;

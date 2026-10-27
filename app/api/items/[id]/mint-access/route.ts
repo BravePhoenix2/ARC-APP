@@ -6,10 +6,12 @@ import { sameOrigin } from "@/lib/walletAuth";
 import { getCreatorSession } from "@/lib/creatorSession";
 import { limitedJson } from "@/lib/requestBody";
 import { guaranteedUltimateAllocation, mintTree, tierNumber, validateMintConfig, type MintPhaseConfig } from "@/lib/mintAccess";
+import { publicItemWhere } from "@/lib/publicCatalog";
 export const dynamic = "force-dynamic";
 const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: { "Cache-Control": "private, no-store" } });
-async function handleGET(request: NextRequest, { params }: { params: { id: string } }) {
-  const item = await prisma.item.findUnique({ where: { id: params.id }, select: { creatorId: true, mintAccessPlan: { include: { entries: true } } } });
+async function handleGET(request: NextRequest, { params: routeParams }: { params: Promise<{ id: string }> }) {
+  const params = await routeParams;
+  const item = await prisma.item.findFirst({ where: { id: params.id, AND: [publicItemWhere] }, select: { creatorId: true, mintAccessPlan: { include: { entries: true } } } });
   if (!item) return json({ error: "Collection not found." }, 404);
   const session = await getCreatorSession(request);
   const manage = request.nextUrl.searchParams.get("manage") === "1";
@@ -22,7 +24,8 @@ async function handleGET(request: NextRequest, { params }: { params: { id: strin
     proof: plan.root && entry && tierNumber(entry.tier) ? mintTree(params.id, plan.entries).proof(entry.walletAddress, entry.tier) : null,
     ...(manage ? { entries: plan.entries.map(({ walletAddress, requestedTier, tier }) => ({ walletAddress, requestedTier, tier })) } : {}) });
 }
-async function handlePOST(request: NextRequest, { params }: { params: { id: string } }) {
+async function handlePOST(request: NextRequest, { params: routeParams }: { params: Promise<{ id: string }> }) {
+  const params = await routeParams;
   if (!sameOrigin(request)) return json({ error: "Invalid request origin." }, 403);
   const session = await getCreatorSession(request);
   if (!session) return json({ error: "Sign in first." }, 401);
@@ -34,7 +37,7 @@ async function handlePOST(request: NextRequest, { params }: { params: { id: stri
   const input = body as Record<string, unknown>;
   try {
     await prisma.$transaction(async (tx) => {
-      const item = await tx.item.findUnique({ where: { id: params.id }, include: { mintAccessPlan: { include: { entries: true } } } });
+      const item = await tx.item.findFirst({ where: { id: params.id, AND: [publicItemWhere] }, include: { mintAccessPlan: { include: { entries: true } } } });
       if (!item || item.itemType !== "NFT") throw new Error("NFT collection not found.");
       const plan = item.mintAccessPlan;
       if (item.contractAddress || plan?.frozenAt) throw new Error("Mint access is locked. Prices, registrations, and tier changes cannot be edited.");

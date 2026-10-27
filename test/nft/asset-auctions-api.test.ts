@@ -50,7 +50,7 @@ function request(path: string, body?: unknown, wallet: string | null = seller, r
     ...(body === undefined ? {} : { "Content-Type": "application/json" }),
   }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
 }
-const context = (id: string) => ({ params: { id } });
+const context = (id: string) => ({ params: Promise.resolve({ id }) });
 function payload(kind = "DIGITAL", changes: Record<string, unknown> = {}) {
   return { kind, title: "A signed original study", description: "A complete original work from my studio.", imageUrl: `/api/uploads/${cover}`, deliveryTerms: kind === "DIGITAL" ? "Download includes the source file and personal display rights." : "Ships to Nigeria; postage is included in the winning bid.", reservePrice: "2.500000", endsAt: new Date(Date.now() + 3_600_000).toISOString(), ...(kind === "DIGITAL" ? { digitalDeliveryUrl: privateDownload } : {}), ...changes };
 }

@@ -1,0 +1,3 @@
+{"scenario":"default self-hosted Node adapter","clientIp":null,"configuredLimit":60,"requests":65,"statuses":{"204":65}}
+{"scenario":"configured trusted IP control","clientIp":"192.0.2.151","configuredLimit":60,"requests":65,"statuses":{"204":60,"429":5}}
+{"scenario":"trusted ingress header missing or malformed","clientIp":null,"configuredLimit":60,"requests":65,"statuses":{"204":65}}

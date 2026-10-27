@@ -1,19 +1,21 @@
-const hre = require("hardhat");
+import hre from "hardhat";
 
 async function main() {
-  const [deployer] = await hre.ethers.getSigners();
-  const network = hre.network.name;
+  const connection = await hre.network.create();
+  const { ethers } = connection;
+  const [deployer] = await ethers.getSigners();
+  const network = connection.networkName;
 
   console.log(`Deploying to network "${network}" from ${deployer.address}`);
 
   const feeRecipient = process.env.FEE_RECIPIENT_ADDRESS || deployer.address;
 
-  const Factory = await hre.ethers.getContractFactory("ArticFactory");
+  const Factory = await ethers.getContractFactory("ArticFactory");
   const factory = await Factory.deploy();
   await factory.waitForDeployment();
   console.log(`ArticFactory deployed to: ${await factory.getAddress()}`);
 
-  const Marketplace = await hre.ethers.getContractFactory("ArticMarketplace");
+  const Marketplace = await ethers.getContractFactory("ArticMarketplace");
   const marketplace = await Marketplace.deploy(feeRecipient, deployer.address);
   await marketplace.waitForDeployment();
   console.log(`ArticMarketplace deployed to: ${await marketplace.getAddress()}`);

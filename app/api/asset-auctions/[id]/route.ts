@@ -5,7 +5,8 @@ import { withAbuseProtection } from "@/lib/abuseProtection";
 import { assetAuctionPublicSelect, publicAssetAuction } from "@/lib/assetAuctions";
 
 export const dynamic = "force-dynamic";
-async function handleGET(request: NextRequest, { params }: { params: { id: string } }) {
+async function handleGET(request: NextRequest, { params: routeParams }: { params: Promise<{ id: string }> }) {
+  const params = await routeParams;
   const session = await getCreatorSession(request);
   const auction = await prisma.assetAuction.findUnique({ where: { id: params.id }, select: { ...assetAuctionPublicSelect, sellerId: true } });
   const isOwner = !!session && auction?.sellerId === session.userId;

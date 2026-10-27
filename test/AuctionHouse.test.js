@@ -1,6 +1,8 @@
-const { expect } = require("chai");
-const { ethers } = require("hardhat");
-const { time, loadFixture } = require("@nomicfoundation/hardhat-network-helpers");
+import { expect } from "chai";
+import hre from "hardhat";
+
+const { ethers, networkHelpers } = await hre.network.create();
+const { time, loadFixture } = networkHelpers;
 
 const USDC = value => ethers.parseUnits(String(value), 18);
 
@@ -37,7 +39,7 @@ describe("ArticAuctionHouse auctions", function () {
     await expect(auction.connect(other).bid(1, { value: USDC("1.049") })).to.be.revertedWithCustomError(auction, "BidTooLow");
     await auction.connect(other).bid(1, { value: USDC("1.05") });
     expect(await auction.pendingReturns(bidder.address)).to.equal(USDC(1));
-    await expect(auction.connect(bidder).withdraw(other.address)).to.changeEtherBalances([auction, other], [-USDC(1), USDC(1)]);
+    await expect(auction.connect(bidder).withdraw(other.address)).to.changeEtherBalances(ethers, [auction, other], [-USDC(1), USDC(1)]);
     expect(await auction.pendingReturns(bidder.address)).to.equal(0);
   });
 
@@ -98,7 +100,7 @@ describe("ArticAuctionHouse auctions", function () {
     expect(await auction.pendingReturns(bidder.address)).to.equal(USDC(1));
     await time.increaseTo(ends);
     await auction.settle(1);
-    await expect(auction.connect(other).claimNFT(1, await factory.getAddress())).to.be.reverted;
+    await expect(auction.connect(other).claimNFT(1, await factory.getAddress())).to.revert(ethers);
     expect((await auction.auctions(1)).nftClaimed).to.equal(false);
     expect(await auction.pendingReturns(seller.address)).to.equal(USDC("1.85"));
     await auction.connect(other).claimNFT(1, other.address);
@@ -231,9 +233,9 @@ describe("ArticAuctionHouse digital and physical asset auctions", function () {
       await expect(auction.connect(seller).claimNFT(1, seller.address)).to.be.revertedWithCustomError(auction, "AuctionUnavailable");
       expect((await auction.auctions(1)).nftClaimed).to.equal(false);
       await expect(auction.settle(1)).to.be.revertedWithCustomError(auction, "AuctionUnavailable");
-      await expect(auction.connect(bidder).withdraw(bidder.address)).to.changeEtherBalances([auction, bidder], [-USDC(1), USDC(1)]);
-      await expect(auction.connect(seller).withdraw(seller.address)).to.changeEtherBalances([auction, seller], [-USDC("1.95"), USDC("1.95")]);
-      await expect(auction.connect(treasury).withdrawPlatformFees(treasury.address)).to.changeEtherBalances([auction, treasury], [-USDC("0.05"), USDC("0.05")]);
+      await expect(auction.connect(bidder).withdraw(bidder.address)).to.changeEtherBalances(ethers, [auction, bidder], [-USDC(1), USDC(1)]);
+      await expect(auction.connect(seller).withdraw(seller.address)).to.changeEtherBalances(ethers, [auction, seller], [-USDC("1.95"), USDC("1.95")]);
+      await expect(auction.connect(treasury).withdrawPlatformFees(treasury.address)).to.changeEtherBalances(ethers, [auction, treasury], [-USDC("0.05"), USDC("0.05")]);
       expect(await ethers.provider.getBalance(await auction.getAddress())).to.equal(0);
     });
   }
@@ -271,7 +273,7 @@ describe("Artic community rewards and original-art checkout", function () {
     expect(await auction.isRewardEligible(bidder.address)).to.equal(true);
     expect(await art.pendingReturns(other.address)).to.equal(USDC("1.95"));
     expect(await art.pendingPlatformFees()).to.equal(USDC("0.05"));
-    await expect(art.connect(other).withdraw(other.address)).to.changeEtherBalances([art, other], [-USDC("1.95"), USDC("1.95")]);
+    await expect(art.connect(other).withdraw(other.address)).to.changeEtherBalances(ethers, [art, other], [-USDC("1.95"), USDC("1.95")]);
     await auction.connect(seller).joinRewardRound(1);
     await expect(auction.connect(seller).joinRewardRound(1)).to.be.revertedWithCustomError(auction, "AlreadyJoined");
     await auction.connect(bidder).joinRewardRound(1);
@@ -290,7 +292,7 @@ describe("Artic community rewards and original-art checkout", function () {
     await expect(auction.settleRewardRound(1)).to.be.revertedWithCustomError(auction, "RewardStillOpen");
     await time.increaseTo(close);
     await expect(auction.connect(other).joinRewardRound(1)).to.be.revertedWithCustomError(auction, "RewardUnavailable");
-    await expect(auction.connect(seller).claimReward(1, other.address)).to.changeEtherBalances([auction, other], [-USDC(10), USDC(10)]);
+    await expect(auction.connect(seller).claimReward(1, other.address)).to.changeEtherBalances(ethers, [auction, other], [-USDC(10), USDC(10)]);
     expect((await auction.rewardRounds(1)).sharePerParticipant).to.equal(USDC(10));
     expect(await auction.rewardClaimed(1, seller.address)).to.equal(true);
     await expect(auction.connect(seller).claimReward(1, seller.address)).to.be.revertedWithCustomError(auction, "CannotClaimReward");

@@ -4,9 +4,9 @@ import { createHash, randomBytes } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { after, before, test } from "node:test";
+import { after, afterEach, before, beforeEach, test } from "node:test";
 import { NextRequest } from "next/server";
-import { encodeAbiParameters, encodeEventTopics, keccak256, parseAbi, parseUnits, toHex, type Address, type Hash } from "viem";
+import { encodeAbiParameters, encodeEventTopics, getAddress, keccak256, parseAbi, parseUnits, toHex, type Address, type Hash } from "viem";
 
 const directory = mkdtempSync(join(tmpdir(), "artiq-deployment-"));
 const origin = "http://localhost:3000";
@@ -42,11 +42,12 @@ const receipts = new Map<string, Record<string, unknown>>();
 const settings = new Map<string, Record<string, unknown>>();
 const factoryEvent = parseAbi(["event CollectionCreated(address indexed creator,address indexed collection,uint8 standard,bool soulbound,string name,string symbol)"]);
 const listingEvent = parseAbi(["event ArtListed(uint256 indexed listingId,address indexed seller,bytes32 indexed artId,uint256 price)"]);
+let testTime = Date.now();
 
 function hash(): Hash { return `0x${randomBytes(32).toString("hex")}`; }
 async function cookie(walletAddress: string) {
   const token = randomBytes(32).toString("hex");
-  await db.walletSession.create({ data: { walletAddress, tokenHash: createHash("sha256").update(token).digest("hex"), expiresAt: new Date(Date.now() + 600_000) } });
+  await db.walletSession.create({ data: { walletAddress, tokenHash: createHash("sha256").update(token).digest("hex"), expiresAt: new Date(Date.now() + 86_400_000) } });
   return `artiq_wallet_session=${token}`;
 }
 function request(path: string, body?: unknown, authentication = "owner", browserOrigin = origin, method = body === undefined ? "GET" : "POST") {
@@ -91,7 +92,7 @@ before(async () => {
   ownerCookie = await cookie(owner); otherCookie = await cookie(other);
   emailUserId = (await db.user.create({ data: { email: "email.creator@example.com", emailVerifiedAt: new Date() } })).id;
   const token = randomBytes(32).toString("hex");
-  await db.emailSession.create({ data: { userId: emailUserId, tokenHash: createHash("sha256").update(token).digest("hex"), expiresAt: new Date(Date.now() + 600_000) } });
+  await db.emailSession.create({ data: { userId: emailUserId, tokenHash: createHash("sha256").update(token).digest("hex"), expiresAt: new Date(Date.now() + 86_400_000) } });
   emailCookie = `artiq_email_session=${token}`;
   const { deploymentClient } = await import("../../lib/deploymentVerification");
   const originalReceipt = deploymentClient.getTransactionReceipt;
@@ -117,20 +118,30 @@ before(async () => {
   orderRoute = await import("../../app/api/items/[id]/order/route");
 });
 after(async () => { restore?.(); await db?.$disconnect(); rmSync(directory, { recursive: true, force: true }); });
+beforeEach((t) => {
+  // Each scenario has its own quota window; shared fixture sessions last a day.
+  testTime += 60_000;
+  t.mock.timers.enable({ apis: ["Date"], now: testTime });
+});
+afterEach(async () => {
+  // Contract fixtures are reused between tests; attached catalog entries must
+  // not leak into another test's uniqueness checks.
+  await db.item.updateMany({ where: { itemType: "NFT" }, data: { contractAddress: null, deploymentFactory: null } });
+});
 
 test("public detail and token metadata omit private identity and use the configured canonical origin", async () => {
   const item = await nft();
-  const anonymous = await detail.GET(request(`/api/items/${item.id}`, undefined, "anonymous"), { params: { id: item.id } });
+  const anonymous = await detail.GET(request(`/api/items/${item.id}`, undefined, "anonymous"), { params: Promise.resolve({ id: item.id }) });
   assert.equal(anonymous.headers.get("cache-control"), "private, no-store");
   const publicBody = await anonymous.json();
   assert.equal(publicBody.isOwner, false);
   assert.deepEqual(publicBody.item.creator, { id: ownerUserId, walletAddress: owner, username: "Nia" });
-  const ownerBody = await (await detail.GET(request(`/api/items/${item.id}`), { params: { id: item.id } })).json();
+  const ownerBody = await (await detail.GET(request(`/api/items/${item.id}`), { params: Promise.resolve({ id: item.id }) })).json();
   assert.equal(ownerBody.isOwner, true);
   const metadataRequest = request(`/api/items/${item.id}/metadata`, undefined, "anonymous");
   metadataRequest.headers.set("host", "attacker.example");
   metadataRequest.headers.set("x-forwarded-host", "attacker.example");
-  const token = await metadata.GET(metadataRequest, { params: { id: item.id } });
+  const token = await metadata.GET(metadataRequest, { params: Promise.resolve({ id: item.id }) });
   assert.deepEqual(await token.json(), { name: item.title, description: item.description, image: `${canonicalOrigin}${item.imageUrl}`, attributes: [{ trait_type: "Palette", value: "Blue" }] });
 });
 
@@ -138,42 +149,48 @@ test("deployment rejects wrong origins, anonymous requests, other accounts, and 
   const item = await nft();
   const before = reads;
   const payload = { txHash: hash() };
-  assert.equal((await deployment.POST(request(`/api/items/${item.id}/deployment`, payload, "owner", "https://attacker.example"), { params: { id: item.id } })).status, 403);
-  assert.equal((await deployment.POST(request(`/api/items/${item.id}/deployment`, payload, "anonymous"), { params: { id: item.id } })).status, 401);
-  assert.equal((await deployment.POST(request(`/api/items/${item.id}/deployment`, payload, "other"), { params: { id: item.id } })).status, 403);
+  assert.equal((await deployment.POST(request(`/api/items/${item.id}/deployment`, payload, "owner", "https://attacker.example"), { params: Promise.resolve({ id: item.id }) })).status, 403);
+  assert.equal((await deployment.POST(request(`/api/items/${item.id}/deployment`, payload, "anonymous"), { params: Promise.resolve({ id: item.id }) })).status, 401);
+  assert.equal((await deployment.POST(request(`/api/items/${item.id}/deployment`, payload, "other"), { params: Promise.resolve({ id: item.id }) })).status, 403);
   const unbound = request(`/api/items/${item.id}/deployment`, payload);
   unbound.headers.set("X-Wallet-Address", other);
-  assert.equal((await deployment.POST(unbound, { params: { id: item.id } })).status, 401);
-  assert.equal((await deployment.POST(request(`/api/items/${item.id}/deployment`, { txHash: "invalid" }), { params: { id: item.id } })).status, 400);
+  assert.equal((await deployment.POST(unbound, { params: Promise.resolve({ id: item.id }) })).status, 401);
+  assert.equal((await deployment.POST(request(`/api/items/${item.id}/deployment`, { txHash: "invalid" }), { params: Promise.resolve({ id: item.id }) })).status, 400);
   assert.equal(reads, before);
 });
 
 test("deployment checks successful factory receipts, metadata, mint settings, creator, and royalties", async () => {
   const item = await nft();
+  rpcChainId = 1;
+  try {
+    const response = await deployment.POST(request(`/api/items/${item.id}/deployment`, { txHash: collectionReceipt(item) }), { params: Promise.resolve({ id: item.id }) });
+    assert.equal(response.status, 400);
+    assert.match((await response.json()).error, /Arc Testnet/);
+  } finally { rpcChainId = 5042002; }
   for (const changes of [{ status: "reverted" }, { to: market }, { logs: [] }]) {
     const txHash = collectionReceipt(item, contract, owner, changes);
-    assert.equal((await deployment.POST(request(`/api/items/${item.id}/deployment`, { txHash }), { params: { id: item.id } })).status, 400);
+    assert.equal((await deployment.POST(request(`/api/items/${item.id}/deployment`, { txHash }), { params: Promise.resolve({ id: item.id }) })).status, 400);
   }
   for (const txHash of [
     collectionReceipt({ ...item, title: "A different collection" }),
     collectionReceipt({ ...item, symbol: "WRONG" }),
     collectionReceipt({ ...item, nftKind: "EDITION" }),
     collectionReceipt({ ...item, nftKind: "SOULBOUND" }),
-  ]) assert.equal((await deployment.POST(request(`/api/items/${item.id}/deployment`, { txHash }), { params: { id: item.id } })).status, 400, "the factory event must identify the approved NFT kind, name, and symbol");
+  ]) assert.equal((await deployment.POST(request(`/api/items/${item.id}/deployment`, { txHash }), { params: Promise.resolve({ id: item.id }) })).status, 400, "the factory event must identify the approved NFT kind, name, and symbol");
   const spoofedFactoryHash = collectionReceipt(item);
   (receipts.get(spoofedFactoryHash)!.logs as Array<{ address: Address }>)[0].address = other;
-  assert.equal((await deployment.POST(request(`/api/items/${item.id}/deployment`, { txHash: spoofedFactoryHash }), { params: { id: item.id } })).status, 400);
+  assert.equal((await deployment.POST(request(`/api/items/${item.id}/deployment`, { txHash: spoofedFactoryHash }), { params: Promise.resolve({ id: item.id }) })).status, 400);
   for (const [field, value] of [["metadataURI", "https://attacker.example/metadata.json"], ["mintPrice", BigInt(1)], ["maxSupply", BigInt(51)], ["maxPerWallet", BigInt(3)], ["mintStartTime", BigInt(123)], ["owner", other], ["royaltyInfo", [owner, BigInt(900)]], ["supportsMintSurcharge", false]] as const) {
     const txHash = collectionReceipt(item);
     settings.get(contract.toLowerCase())![field] = value;
-    assert.equal((await deployment.POST(request(`/api/items/${item.id}/deployment`, { txHash }), { params: { id: item.id } })).status, 400, field);
+    assert.equal((await deployment.POST(request(`/api/items/${item.id}/deployment`, { txHash }), { params: Promise.resolve({ id: item.id }) })).status, 400, field);
   }
   const oldFactoryHash = collectionReceipt(item);
   settings.get(factory.toLowerCase())!.supportsMintSurcharge = false;
-  assert.equal((await deployment.POST(request(`/api/items/${item.id}/deployment`, { txHash: oldFactoryHash }), { params: { id: item.id } })).status, 400, "the configured factory must support buyer-paid mint fees");
+  assert.equal((await deployment.POST(request(`/api/items/${item.id}/deployment`, { txHash: oldFactoryHash }), { params: Promise.resolve({ id: item.id }) })).status, 400, "the configured factory must support buyer-paid mint fees");
   settings.get(factory.toLowerCase())!.supportsMintSurcharge = true;
   const foreignWalletTx = collectionReceipt(item, contract, other);
-  assert.equal((await deployment.POST(request(`/api/items/${item.id}/deployment`, { txHash: foreignWalletTx }), { params: { id: item.id } })).status, 403);
+  assert.equal((await deployment.POST(request(`/api/items/${item.id}/deployment`, { txHash: foreignWalletTx }), { params: Promise.resolve({ id: item.id }) })).status, 403);
   assert.equal((await db.item.findUniqueOrThrow({ where: { id: item.id } })).contractAddress, null);
 });
 
@@ -181,35 +198,63 @@ test("verified deployment is idempotent, protects existing contracts, and resolv
   const item = await nft();
   const firstHash = collectionReceipt(item, contract);
   const secondHash = collectionReceipt(item, anotherContract);
-  const responses = await Promise.all([firstHash, secondHash].map((txHash) => deployment.POST(request(`/api/items/${item.id}/deployment`, { txHash }), { params: { id: item.id } })));
+  const responses = await Promise.all([firstHash, secondHash].map((txHash) => deployment.POST(request(`/api/items/${item.id}/deployment`, { txHash }), { params: Promise.resolve({ id: item.id }) })));
   assert.deepEqual(responses.map((response) => response.status).sort(), [200, 409]);
   const current = await db.item.findUniqueOrThrow({ where: { id: item.id } });
   assert.equal(current.status, "LIVE");
   const winningHash = current.contractAddress?.toLowerCase() === contract.toLowerCase() ? firstHash : secondHash;
-  assert.equal((await deployment.POST(request(`/api/items/${item.id}/deployment`, { txHash: winningHash }), { params: { id: item.id } })).status, 200);
+  assert.equal((await deployment.POST(request(`/api/items/${item.id}/deployment`, { txHash: winningHash }), { params: Promise.resolve({ id: item.id }) })).status, 200);
   const existing = await nft({ contractAddress: market });
   const replacementHash = collectionReceipt(existing);
-  assert.equal((await deployment.POST(request(`/api/items/${existing.id}/deployment`, { txHash: replacementHash }), { params: { id: existing.id } })).status, 409);
+  assert.equal((await deployment.POST(request(`/api/items/${existing.id}/deployment`, { txHash: replacementHash }), { params: Promise.resolve({ id: existing.id }) })).status, 409);
   assert.equal((await db.item.findUniqueOrThrow({ where: { id: existing.id } })).contractAddress, market);
 });
 
-test("verified email creators can link a real deployment without inventing a wallet identity", async () => {
+test("email sessions cannot attach another wallet's receipt without verified wallet ownership", async () => {
   const item = await nft({ creatorId: emailUserId, nftKind: "SOULBOUND", royaltyBps: 0, mintPriceUsdc: 0, maxPerWallet: 1 });
   const txHash = collectionReceipt(item, contract, other);
-  const response = await deployment.POST(request(`/api/items/${item.id}/deployment`, { txHash }, "email"), { params: { id: item.id } });
-  assert.equal(response.status, 200);
+  const response = await deployment.POST(request(`/api/items/${item.id}/deployment`, { txHash }, "email"), { params: Promise.resolve({ id: item.id }) });
+  assert.equal(response.status, 403);
+  assert.match((await response.json()).error, /verified wallet/);
+  assert.equal((await db.item.findUniqueOrThrow({ where: { id: item.id } })).contractAddress, null);
   assert.equal((await db.user.findUniqueOrThrow({ where: { id: emailUserId } })).walletAddress, null);
+});
+
+test("verified attachment rejects a contract already cataloged under another item regardless of address case", async () => {
+  const collection = getAddress("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+  const existing = await nft({ contractAddress: collection.toLowerCase() });
+  const candidate = await nft({ metadataUri: "ipfs://shared-approved-metadata/" });
+  const txHash = collectionReceipt(candidate, collection);
+  const response = await deployment.POST(request(`/api/items/${candidate.id}/deployment`, { txHash }), { params: Promise.resolve({ id: candidate.id }) });
+  assert.equal(response.status, 409);
+  assert.match((await response.json()).error, /already linked to another collection/);
+  assert.equal((await db.item.findUniqueOrThrow({ where: { id: candidate.id } })).contractAddress, null);
+  assert.equal((await db.item.findUniqueOrThrow({ where: { id: existing.id } })).contractAddress, collection.toLowerCase());
+});
+
+test("simultaneous receipt claims can attach a contract to only one catalog item", async () => {
+  const collection = getAddress("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+  const first = await nft({ metadataUri: "ipfs://shared-approved-metadata/" });
+  const second = await nft({ metadataUri: "ipfs://shared-approved-metadata/" });
+  const firstHash = collectionReceipt(first, collection);
+  const secondHash = collectionReceipt(second, collection);
+  const responses = await Promise.all([
+    deployment.POST(request(`/api/items/${first.id}/deployment`, { txHash: firstHash }), { params: Promise.resolve({ id: first.id }) }),
+    deployment.POST(request(`/api/items/${second.id}/deployment`, { txHash: secondHash }), { params: Promise.resolve({ id: second.id }) }),
+  ]);
+  assert.deepEqual(responses.map((response) => response.status).sort(), [200, 409]);
+  assert.equal(await db.item.count({ where: { contractAddress: collection } }), 1);
 });
 
 test("only the creator can reschedule an undeployed collection before its opening", async () => {
   const item = await nft({ mintStartTime: new Date(Date.now() + 3_600_000) });
   const payload = { mintStartTime: new Date(Date.now() + 7_200_000).toISOString() };
   const path = `/api/items/${item.id}/mint-time`;
-  assert.equal((await mintTime.PATCH(request(path, payload, "anonymous", origin, "PATCH"), { params: { id: item.id } })).status, 401);
-  assert.equal((await mintTime.PATCH(request(path, payload, "other", origin, "PATCH"), { params: { id: item.id } })).status, 403);
-  assert.equal((await mintTime.PATCH(request(path, payload, "owner", "https://attacker.example", "PATCH"), { params: { id: item.id } })).status, 403);
+  assert.equal((await mintTime.PATCH(request(path, payload, "anonymous", origin, "PATCH"), { params: Promise.resolve({ id: item.id }) })).status, 401);
+  assert.equal((await mintTime.PATCH(request(path, payload, "other", origin, "PATCH"), { params: Promise.resolve({ id: item.id }) })).status, 403);
+  assert.equal((await mintTime.PATCH(request(path, payload, "owner", "https://attacker.example", "PATCH"), { params: Promise.resolve({ id: item.id }) })).status, 403);
   assert.equal((await db.item.findUniqueOrThrow({ where: { id: item.id } })).mintStartTime?.getTime(), item.mintStartTime?.getTime());
-  const response = await mintTime.PATCH(request(path, payload, "owner", origin, "PATCH"), { params: { id: item.id } });
+  const response = await mintTime.PATCH(request(path, payload, "owner", origin, "PATCH"), { params: Promise.resolve({ id: item.id }) });
   assert.equal(response.status, 200);
   const current = await db.item.findUniqueOrThrow({ where: { id: item.id } });
   assert.equal(current.mintStartTime?.toISOString(), payload.mintStartTime);
@@ -224,7 +269,7 @@ test("deployed and already opened collections keep their mint schedule unchanged
     { status: "LIVE", mintStartTime: new Date(Date.now() + 3_600_000) },
   ]) {
     const item = await nft(overrides);
-    const response = await mintTime.PATCH(request(`/api/items/${item.id}/mint-time`, payload, "owner", origin, "PATCH"), { params: { id: item.id } });
+    const response = await mintTime.PATCH(request(`/api/items/${item.id}/mint-time`, payload, "owner", origin, "PATCH"), { params: Promise.resolve({ id: item.id }) });
     assert.equal(response.status, 409);
     const current = await db.item.findUniqueOrThrow({ where: { id: item.id } });
     assert.equal(current.mintStartTime?.getTime(), item.mintStartTime?.getTime());
@@ -240,7 +285,7 @@ test("mint schedules require a bounded request with a valid future date string",
     { mintStartTime: new Date(Date.now() - 60_000).toISOString() },
     { mintStartTime: "x".repeat(4096) },
   ]) {
-    const response = await mintTime.PATCH(request(`/api/items/${item.id}/mint-time`, payload, "owner", origin, "PATCH"), { params: { id: item.id } });
+    const response = await mintTime.PATCH(request(`/api/items/${item.id}/mint-time`, payload, "owner", origin, "PATCH"), { params: Promise.resolve({ id: item.id }) });
     assert.equal(response.status, 400);
   }
   assert.equal((await db.item.findUniqueOrThrow({ where: { id: item.id } })).mintStartTime, null);
@@ -258,7 +303,7 @@ test("a deployment linked during rescheduling prevents the stale schedule write"
     return originalUpdateMany(args);
   } });
   try {
-    const response = await mintTime.PATCH(request(`/api/items/${item.id}/mint-time`, { mintStartTime: new Date(Date.now() + 7_200_000).toISOString() }, "owner", origin, "PATCH"), { params: { id: item.id } });
+    const response = await mintTime.PATCH(request(`/api/items/${item.id}/mint-time`, { mintStartTime: new Date(Date.now() + 7_200_000).toISOString() }, "owner", origin, "PATCH"), { params: Promise.resolve({ id: item.id }) });
     assert.equal(response.status, 409);
   } finally { Object.assign(db.item, { updateMany: originalUpdateMany }); }
   assert.equal(interleaved, true);
@@ -271,20 +316,22 @@ test("a schedule changed during deployment verification prevents linking the sta
   const item = await nft({ mintStartTime: new Date(Date.now() + 3_600_000) });
   const txHash = collectionReceipt(item);
   const changedTime = new Date(Date.now() + 7_200_000);
-  const originalUpdateMany = db.item.updateMany;
+  const { deploymentClient } = await import("../../lib/deploymentVerification");
+  const originalReceipt = deploymentClient.getTransactionReceipt;
   let interleaved = false;
-  Object.assign(db.item, { updateMany: async (args: Parameters<typeof originalUpdateMany>[0]) => {
+  Object.assign(deploymentClient, { getTransactionReceipt: async (args: Parameters<typeof originalReceipt>[0]) => {
+    const receipt = await originalReceipt(args);
     if (!interleaved) {
       interleaved = true;
       await db.item.update({ where: { id: item.id }, data: { mintStartTime: changedTime, updatedAt: new Date(item.updatedAt.getTime() + 1000) } });
     }
-    return originalUpdateMany(args);
+    return receipt;
   } });
   try {
-    const response = await deployment.POST(request(`/api/items/${item.id}/deployment`, { txHash }), { params: { id: item.id } });
+    const response = await deployment.POST(request(`/api/items/${item.id}/deployment`, { txHash }), { params: Promise.resolve({ id: item.id }) });
     assert.equal(response.status, 409);
     assert.match((await response.json()).error, /settings changed/i);
-  } finally { Object.assign(db.item, { updateMany: originalUpdateMany }); }
+  } finally { Object.assign(deploymentClient, { getTransactionReceipt: originalReceipt }); }
   assert.equal(interleaved, true);
   const current = await db.item.findUniqueOrThrow({ where: { id: item.id } });
   assert.equal(current.contractAddress, null);
@@ -294,22 +341,22 @@ test("a schedule changed during deployment verification prevents linking the sta
 test("Art listing links require approved artwork, native USDC price, seller ownership, and cannot be replaced", async () => {
   const item = await db.item.create({ data: { creatorId: ownerUserId, itemType: "WEB2_ART", title: "Woven study", priceUsdc: 25, category: "RUG" } });
   const payload = { txHash: hash() };
-  assert.equal((await artListing.POST(request(`/api/items/${item.id}/art-listing`, payload, "anonymous"), { params: { id: item.id } })).status, 401);
-  assert.equal((await artListing.POST(request(`/api/items/${item.id}/art-listing`, payload, "other"), { params: { id: item.id } })).status, 403);
-  assert.equal((await artListing.POST(request(`/api/items/${item.id}/art-listing`, payload, "owner", "https://attacker.example"), { params: { id: item.id } })).status, 403);
+  assert.equal((await artListing.POST(request(`/api/items/${item.id}/art-listing`, payload, "anonymous"), { params: Promise.resolve({ id: item.id }) })).status, 401);
+  assert.equal((await artListing.POST(request(`/api/items/${item.id}/art-listing`, payload, "other"), { params: Promise.resolve({ id: item.id }) })).status, 403);
+  assert.equal((await artListing.POST(request(`/api/items/${item.id}/art-listing`, payload, "owner", "https://attacker.example"), { params: Promise.resolve({ id: item.id }) })).status, 403);
   for (const changes of [{ status: "reverted" }, { to: factory }]) {
     const txHash = listingReceipt(item.id);
     Object.assign(receipts.get(txHash)!, changes);
-    assert.equal((await artListing.POST(request(`/api/items/${item.id}/art-listing`, { txHash }), { params: { id: item.id } })).status, 400);
+    assert.equal((await artListing.POST(request(`/api/items/${item.id}/art-listing`, { txHash }), { params: Promise.resolve({ id: item.id }) })).status, 400);
   }
-  for (const txHash of [listingReceipt("different-art"), listingReceipt(item.id, BigInt(25_000_000))]) assert.equal((await artListing.POST(request(`/api/items/${item.id}/art-listing`, { txHash }), { params: { id: item.id } })).status, 400);
+  for (const txHash of [listingReceipt("different-art"), listingReceipt(item.id, BigInt(25_000_000))]) assert.equal((await artListing.POST(request(`/api/items/${item.id}/art-listing`, { txHash }), { params: Promise.resolve({ id: item.id }) })).status, 400);
   const foreignSeller = listingReceipt(item.id, parseUnits("25", 18), other);
-  assert.equal((await artListing.POST(request(`/api/items/${item.id}/art-listing`, { txHash: foreignSeller }), { params: { id: item.id } })).status, 403);
+  assert.equal((await artListing.POST(request(`/api/items/${item.id}/art-listing`, { txHash: foreignSeller }), { params: Promise.resolve({ id: item.id }) })).status, 403);
   const txHash = listingReceipt(item.id);
-  assert.equal((await artListing.POST(request(`/api/items/${item.id}/art-listing`, { txHash }), { params: { id: item.id } })).status, 200);
-  assert.equal((await artListing.POST(request(`/api/items/${item.id}/art-listing`, { txHash }), { params: { id: item.id } })).status, 200);
+  assert.equal((await artListing.POST(request(`/api/items/${item.id}/art-listing`, { txHash }), { params: Promise.resolve({ id: item.id }) })).status, 200);
+  assert.equal((await artListing.POST(request(`/api/items/${item.id}/art-listing`, { txHash }), { params: Promise.resolve({ id: item.id }) })).status, 200);
   const second = listingReceipt(item.id, parseUnits("25", 18), owner, BigInt(2));
-  assert.equal((await artListing.POST(request(`/api/items/${item.id}/art-listing`, { txHash: second }), { params: { id: item.id } })).status, 409);
+  assert.equal((await artListing.POST(request(`/api/items/${item.id}/art-listing`, { txHash: second }), { params: Promise.resolve({ id: item.id }) })).status, 409);
   const current = await db.item.findUniqueOrThrow({ where: { id: item.id } });
   assert.equal(current.artListingId, "1");
   assert.equal(current.artListingSeller?.toLowerCase(), owner.toLowerCase());
@@ -325,7 +372,7 @@ async function purchasedArt() {
   const price = parseUnits("25", 18);
   receipts.set(txHash, { status: "success", to: market, from: other, logs: [{ address: market, topics: encodeEventTopics({ abi: purchaseEvent, eventName: "ArtPurchased", args: { listingId: BigInt(42), buyer: other } }), data: encodeAbiParameters([{ type: "uint256" }], [price]) }] });
   settings.set(market.toLowerCase(), { listings: [owner, keccak256(toHex(item.id)), price, other, false] });
-  return { item, txHash, params: { params: { id: item.id } } };
+  return { item, txHash, params: { params: Promise.resolve({ id: item.id }) } };
 }
 
 test("pinned art markets preserve old purchases after the configured market changes", async () => {
@@ -405,7 +452,7 @@ test("confirmed orders are idempotent and delivery stays private to buyer and cr
 
 test("mint allowlist registration binds to signed wallets, protects the roster and locks assignments", async () => {
   const access = await import("../../app/api/items/[id]/mint-access/route");
-  const item = await nft(); const context = { params: { id: item.id } }; const path = `/api/items/${item.id}/mint-access`;
+  const item = await nft(); const context = { params: Promise.resolve({ id: item.id }) }; const path = `/api/items/${item.id}/mint-access`;
   const config = { ultimateStart: new Date(Date.now() + 3600000).toISOString(), fcfsStart: new Date(Date.now() + 7200000).toISOString(), publicStart: new Date(Date.now() + 10800000).toISOString(), ultimateLimit: 1, fcfsLimit: 1, publicLimit: 2, ultimatePrice: "0", fcfsPrice: "1" };
   assert.equal((await access.POST(request(path, { action: "configure", config }, "other"), context)).status, 400);
   assert.equal((await access.POST(request(path, { action: "configure", config }, "anonymous"), context)).status, 401);
@@ -440,7 +487,7 @@ async function mintPriceFixture(state: "unlocked" | "missing" | "frozen" | "depl
   const item = await nft({ creatorId: creator.id, mintStartTime: new Date(config.ultimateStart), contractAddress: state === "deployed" ? contract : null });
   const plan = state === "missing" ? null : await db.mintAccessPlan.create({ data: { itemId: item.id, config, ...(state === "frozen" ? { frozenAt: new Date(), root: hash() } : {}) } });
   const path = `/api/items/${item.id}/mint-access`;
-  const context = { params: { id: item.id } };
+  const context = { params: Promise.resolve({ id: item.id }) };
   const ownerRequest = (body: unknown, browserOrigin = origin) => new NextRequest(`${origin}${path}`, {
     method: "POST",
     headers: { Origin: browserOrigin, Cookie: `artiq_email_session=${token}`, "X-Artiq-Account-ID": creator.id, "Content-Type": "application/json" },
@@ -512,11 +559,11 @@ test("phase prices require an existing unlocked and undeployed mint plan before 
 test("deployment requires the exact locked allowlist and phase settings on-chain", async () => {
   const { onchainMintConfig, mintTree } = await import("../../lib/mintAccess");
   const config = { ultimateStart: new Date(Date.now() + 3600000).toISOString(), fcfsStart: new Date(Date.now() + 7200000).toISOString(), publicStart: new Date(Date.now() + 10800000).toISOString(), ultimateLimit: 1, fcfsLimit: 1, publicLimit: 2, ultimatePrice: "0", fcfsPrice: "1" };
-  const item = await nft({ mintStartTime: new Date(config.ultimateStart) }); const path = `/api/items/${item.id}/deployment`; const context = { params: { id: item.id } };
+  const item = await nft({ mintStartTime: new Date(config.ultimateStart) }); const path = `/api/items/${item.id}/deployment`; const context = { params: Promise.resolve({ id: item.id }) };
   const root = mintTree(item.id, [{ walletAddress: other, tier: "ULTIMATE" }]).root;
   const plan = await db.mintAccessPlan.create({ data: { itemId: item.id, config, root, frozenAt: new Date() } });
   const txHash = collectionReceipt(item);
-  settings.set(factory.toLowerCase(), { supportsMintPhases: true });
+  settings.set(factory.toLowerCase(), { ...settings.get(factory.toLowerCase()), supportsMintPhases: true });
   settings.get(contract.toLowerCase())!.phasesEnabled = false;
   const expected = Object.values(onchainMintConfig(item.id, root, config));
   settings.get(contract.toLowerCase())!.mintPhases = expected;
@@ -536,7 +583,7 @@ test("deployment requires the exact locked allowlist and phase settings on-chain
 
 test("locking rejects oversubscribed Ultimate guarantees and allows a fully backed allocation", async () => {
   const access = await import("../../app/api/items/[id]/mint-access/route");
-  const item = await nft({ maxSupply: 2, maxPerWallet: 2 }); const context = { params: { id: item.id } }; const path = `/api/items/${item.id}/mint-access`;
+  const item = await nft({ maxSupply: 2, maxPerWallet: 2 }); const context = { params: Promise.resolve({ id: item.id }) }; const path = `/api/items/${item.id}/mint-access`;
   const config = { ultimateStart: new Date(Date.now() + 3600000).toISOString(), fcfsStart: new Date(Date.now() + 7200000).toISOString(), publicStart: new Date(Date.now() + 10800000).toISOString(), ultimateLimit: 2, fcfsLimit: 1, publicLimit: 1, ultimatePrice: "0", fcfsPrice: "1" };
   assert.equal((await access.POST(request(path, { action: "configure", config }), context)).status, 200);
   assert.equal((await access.POST(request(path, { action: "assign", wallets: [owner, other], tier: "ULTIMATE" }), context)).status, 200);

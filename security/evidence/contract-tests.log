@@ -1,0 +1,92 @@
+
+> artic@0.1.0 test
+> hardhat test test/*.js
+
+◇ injected env (37) from .env.local // tip: ◈ encrypted .env [www.dotenvx.com]
+
+
+  ArticNFT
+    mint timing
+      ✔ fails to mint before the mint start time (1165ms)
+      ✔ mints successfully once the start time has passed (42ms)
+      ✔ rejects incorrect payment amounts
+      ✔ forwards mint payments to the creator
+      ✔ enforces max supply and per-wallet limits
+    rescheduling the mint start time
+      ✔ lets the creator reschedule before minting begins
+      ✔ blocks anyone other than the creator from rescheduling
+      ✔ refuses to reschedule once minting has already started
+
+  ArticFactory
+    ✔ deploys a collection owned by the caller and indexes it (42ms)
+
+  ArticMarketplace
+    ✔ lists and buys an NFT, paying the seller and the marketplace fee in USDC (51ms)
+    ✔ rejects buying at the wrong price (43ms)
+    ✔ lets the seller delist and update price, and blocks non-sellers (42ms)
+    ✔ requires marketplace approval before listing (55ms)
+
+  ArticAuctionHouse auctions
+    ✔ escrows an approved ERC-721 and requires the reserve then a five-percent increase (103ms)
+    ✔ settles permissionlessly after the deadline, credits royalties and lets only the winner retrieve the NFT
+    ✔ allows cancellation only before bids and returns unsold tokens to their seller
+    ✔ rejects soulbound tokens, unsupported assets and accidental safe transfers
+    ✔ keeps failed refund and NFT deliveries retryable without preventing settlement
+    ✔ lets sellers recover auctions that end without bids
+
+  ArticAuctionHouse digital and physical asset auctions
+    ✔ creates both asset types alongside NFTs without changing existing auction fields (49ms)
+    ✔ keeps one recoverable auction per seller and asset key while isolating other sellers
+    ✔ rejects missing identifiers, unsupported kinds, zero reserves and invalid deadlines
+    ✔ accepts repeated bids until the final second and rejects bids at the exact deadline
+    ✔ settles digital sales at the deadline and conserves refunds, proceeds and platform fees (39ms)
+    ✔ settles physical sales at the deadline and conserves refunds, proceeds and platform fees (39ms)
+    ✔ cancels or settles unsold assets without inventing an NFT claim or charging a fee
+
+  Artic community rewards and original-art checkout
+    ✔ requires a verified on-chain mint or art purchase and limits the first eligible wallets (38ms)
+    ✔ splits the funded pool among actual participants only after waiting ends, with one claim each
+    ✔ returns only rounding dust to the sponsor and refunds the entire pool if nobody joins
+    ✔ preserves a participant's reward if the chosen receiver rejects native USDC
+    ✔ rejects unfunded or invalid rounds and prevents purchasing cancelled or already sold art
+
+  Phased mint access
+    ✔ enforces phase windows, proofs, payments and cumulative wallet caps for 721 (102ms)
+    ✔ enforces phase windows, proofs, payments and cumulative wallet caps for 1155 (71ms)
+    ✔ keeps factory and deployers under chain code limits
+
+  Guaranteed Ultimate allocations
+    ✔ protects the entire Ultimate supply from other tiers until every selected wallet can claim (43ms)
+
+  NFT Studio
+    ✔ assigns a different metadata URI to each token in a numbered image series (53ms)
+    ✔ creates creator-owned ERC-721 and ERC-1155 collections and indexes their standard (41ms)
+    ✔ uses native USDC at 18 decimals, fixed metadata and withdrawable creator proceeds
+    ✔ enforces supply, wallet and batch limits without granting eligibility on failed mints
+    ✔ permanently locks soulbound tokens and disallows transfer approvals
+    ✔ keeps standard and membership tokens transferable and returns ERC-2981 royalties
+    ✔ mints transferable ERC-1155 editions and authenticates their mint activity
+    ✔ rejects invalid configurations and spoofed mint notifications
+    ✔ accepts a 120-character Unicode title for both NFT standards
+
+  Platform revenue
+    ✔ rejects zero treasury addresses and rates above 10%, and supports zero fees (142ms)
+    ✔ charges buyers above the creator price for ERC-721 and prevents creator withdrawal bypass
+    ✔ charges buyers above the creator price for ERC-1155 and prevents creator withdrawal bypass (38ms)
+    ✔ charges $5.10, reserves $0.225 and leaves $4.875 for the creator at the standard rates
+    ✔ applies the creator deduction and buyer surcharge independently (73ms)
+    ✔ rounds each ERC-721 mint fee down once on the full batch base price
+    ✔ rounds each ERC-1155 mint fee down once on the full batch base price
+    ✔ charges the actual allowlist price and public price for phased ERC-721 mints
+    ✔ charges the actual allowlist price and public price for phased ERC-1155 mints
+    ✔ does not charge free mints, zero-rate paid mints or zero-rate art sales (59ms)
+    ✔ supports a 10% creator mint fee, 2% buyer surcharge and 1% marketplace fee with exact amounts (84ms)
+    ✔ keeps art seller balances separate from treasury fees and rolls failed withdrawals back
+    ✔ preserves every refund and reward while charging only a settled winning sale (48ms)
+    ✔ lets a rejecting treasury accrue and later direct fees without blocking any sales (100ms)
+    ✔ settles safely when a royalty hook requests more than the sale proceeds
+    ✔ settles safely when a royalty hook reverts
+
+
+  60 passing (3s)
+

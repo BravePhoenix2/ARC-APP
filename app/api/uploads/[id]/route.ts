@@ -2,13 +2,15 @@ import { withAbuseProtection } from "@/lib/abuseProtection";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCreatorSession } from "@/lib/creatorSession";
+import { publicItemWhere } from "@/lib/publicCatalog";
 
-async function handleGET(request: NextRequest, { params }: { params: { id: string } }) {
+async function handleGET(request: NextRequest, { params: routeParams }: { params: Promise<{ id: string }> }) {
+  const params = await routeParams;
   if (!/^[a-z0-9]{20,40}$/.test(params.id)) return new Response("Not found", { status: 404 });
   const image = await prisma.uploadedImage.findUnique({ where: { id: params.id } });
   if (!image) return new Response("Not found", { status: 404 });
   const [publishedItem, publishedAuction] = await Promise.all([
-    prisma.item.findFirst({ where: { OR: [{ imageUrl: `/api/uploads/${params.id}` }, { collectionImages: { some: { imageUrl: `/api/uploads/${params.id}` } } }] }, select: { id: true } }),
+    prisma.item.findFirst({ where: { AND: [publicItemWhere], OR: [{ imageUrl: `/api/uploads/${params.id}` }, { collectionImages: { some: { imageUrl: `/api/uploads/${params.id}` } } }] }, select: { id: true } }),
     prisma.assetAuction.findFirst({ where: { imageUrl: `/api/uploads/${params.id}`, auctionId: { not: null } }, select: { id: true } }),
   ]);
   const published = publishedItem || publishedAuction;
