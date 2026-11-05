@@ -9,8 +9,10 @@ export type ArtworkScreeningReport = ImageScreeningReport & {
 };
 
 /** External pixel analysis is opt-in and never replaces human review. */
-export async function screenArtwork(data: Uint8Array, mimeType: string): Promise<ArtworkScreeningReport> {
-  const local = screenImage(data, mimeType);
+export async function screenArtwork(data: Uint8Array, mimeType: string, originalMetadata?: ImageScreeningReport): Promise<ArtworkScreeningReport> {
+  // Public bytes have been stripped of metadata. Preserve the report captured
+  // from the original upload so stripping cannot clear a generation flag.
+  const local = originalMetadata ?? screenImage(data, mimeType);
   const apiUser = process.env.SIGHTENGINE_API_USER;
   const apiSecret = process.env.SIGHTENGINE_API_SECRET;
   if (process.env.ARTIQ_AI_PIXEL_SCREENING !== "true" || !apiUser || !apiSecret) {

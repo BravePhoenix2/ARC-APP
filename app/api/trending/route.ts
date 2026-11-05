@@ -3,6 +3,7 @@ import { unstable_cache } from "next/cache";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { publicItemWhere } from "@/lib/publicCatalog";
+import { catalogAvailability } from "@/lib/catalogAvailability";
 
 export const dynamic = "force-dynamic";
 const HOUR = 3_600_000;
@@ -13,7 +14,7 @@ const loadDrops = (cutoff: number) => prisma.item.findMany({
   where: { itemType: "NFT", createdAt: { lte: new Date(cutoff) }, AND: [publicItemWhere] },
   orderBy: [{ createdAt: "desc" }, { id: "desc" }],
   take: 4,
-  select: { id: true, title: true, imageUrl: true, status: true },
+  select: { id: true, itemType: true, title: true, imageUrl: true, status: true, contractAddress: true, mintStartTime: true },
 });
 const hourlyDrops = process.env.NODE_ENV === "production"
   ? unstable_cache(loadDrops, ["hourly-trending-drops-v2"], { revalidate: 3600 })
@@ -24,7 +25,10 @@ async function handleGET() {
   const cutoff = Math.floor(now / HOUR) * HOUR;
   const nextAt = cutoff + HOUR;
   try {
-    const items = await hourlyDrops(cutoff);
+    const items = (await hourlyDrops(cutoff)).map((item) => {
+      const available = catalogAvailability(item);
+      return { id: available.id, title: available.title, imageUrl: available.imageUrl, status: available.status };
+    });
     return NextResponse.json({ items, nextAt: new Date(nextAt).toISOString() }, {
       headers: { "Cache-Control": `public, max-age=0, s-maxage=${Math.max(1, Math.floor((nextAt - Date.now()) / 1000))}` },
     });

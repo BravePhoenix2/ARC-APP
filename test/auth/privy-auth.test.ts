@@ -22,7 +22,7 @@ const reviewerWallet = "0x9999999999999999999999999999999999999999" as Address;
 const reviewerEmail = "reviewer@example.com";
 const market = "0x3333333333333333333333333333333333333333" as Address;
 const cookieName = "artiq_privy_session";
-const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=", "base64");
+const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWOwr9jyHwAE0AJrq3udBQAAAABJRU5ErkJggg==", "base64");
 process.env.DATABASE_URL = `file:${join(directory, "auth.db")}`;
 process.env.ARTIQ_APP_ORIGIN = origin;
 process.env.NEXT_PUBLIC_PRIVY_APP_ID = appId;

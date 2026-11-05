@@ -1,0 +1,107 @@
+{
+  "reviewDate": "2026-11-05",
+  "origin": "http://127.0.0.1:3217",
+  "scope": "Anonymous local production-server HTTP smoke test; no authenticated/live-provider transactions",
+  "results": [
+    {
+      "path": "/",
+      "status": 200,
+      "csp": true,
+      "nosniff": "nosniff",
+      "cache": "s-maxage=31536000"
+    },
+    {
+      "path": "/nfts",
+      "status": 200,
+      "csp": true,
+      "nosniff": "nosniff",
+      "cache": "s-maxage=31536000"
+    },
+    {
+      "path": "/marketplace",
+      "status": 200,
+      "csp": true,
+      "nosniff": "nosniff",
+      "cache": "s-maxage=31536000"
+    },
+    {
+      "path": "/settings",
+      "status": 200,
+      "csp": true,
+      "nosniff": "nosniff",
+      "cache": "s-maxage=31536000"
+    },
+    {
+      "path": "/apply",
+      "status": 200,
+      "csp": true,
+      "nosniff": "nosniff",
+      "cache": "private, no-cache, no-store, max-age=0, must-revalidate"
+    },
+    {
+      "path": "/auctions",
+      "status": 200,
+      "csp": true,
+      "nosniff": "nosniff",
+      "cache": "s-maxage=31536000"
+    },
+    {
+      "path": "/api/items",
+      "status": 200,
+      "csp": true,
+      "nosniff": "nosniff",
+      "cache": "public, max-age=0, s-maxage=15, stale-while-revalidate=30"
+    },
+    {
+      "path": "/api/auth/session",
+      "status": 401,
+      "csp": true,
+      "nosniff": "nosniff",
+      "cache": "no-store"
+    },
+    {
+      "path": "/api/watchlist",
+      "status": 401,
+      "csp": true,
+      "nosniff": "nosniff",
+      "cache": "private, no-store"
+    },
+    {
+      "path": "/api/admin/submissions",
+      "status": 401,
+      "csp": true,
+      "nosniff": "nosniff",
+      "cache": null
+    },
+    {
+      "path": "/admin/submissions",
+      "status": 200,
+      "csp": true,
+      "nosniff": "nosniff",
+      "cache": "private, no-cache, no-store, max-age=0, must-revalidate"
+    },
+    {
+      "path": "/settings/protocol",
+      "status": 200,
+      "csp": true,
+      "nosniff": "nosniff",
+      "cache": "private, no-cache, no-store, max-age=0, must-revalidate"
+    }
+  ],
+  "anonymousReviewerPages": [
+    {
+      "path": "/admin/submissions",
+      "status": 200,
+      "notFound": true,
+      "noIndex": false,
+      "privateHeadingPresent": false
+    },
+    {
+      "path": "/settings/protocol",
+      "status": 200,
+      "notFound": true,
+      "noIndex": false,
+      "privateHeadingPresent": false
+    }
+  ]
+}

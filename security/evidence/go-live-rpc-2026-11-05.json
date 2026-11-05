@@ -1,0 +1,302 @@
+{
+  "checkedAtUTC": "2026-11-05T08:43:24.711Z",
+  "releaseReviewDate": "2026-11-05",
+  "checksAreReadOnly": true,
+  "source": "Configured public Arc JSON-RPC endpoint; endpoint URL omitted to avoid recording potential provider credentials.",
+  "chainId": 5042002,
+  "contracts": [
+    {
+      "label": "studioFactory",
+      "address": "0xa3ce01b728e82bf6fd28ec5908638bb5388ad5ff",
+      "hasCode": true,
+      "calls": {
+        "supportsMintPhases": {
+          "status": "success",
+          "value": true
+        },
+        "supportsMintSurcharge": {
+          "status": "failed",
+          "causes": [
+            {
+              "name": "ContractFunctionExecutionError"
+            },
+            {
+              "name": "ContractFunctionRevertedError",
+              "reason": "execution reverted"
+            },
+            {
+              "name": "CallExecutionError"
+            },
+            {
+              "name": "ExecutionRevertedError"
+            },
+            {
+              "name": "RpcRequestError",
+              "code": 3
+            },
+            {
+              "code": 3
+            }
+          ]
+        },
+        "feeRecipient": {
+          "status": "failed",
+          "causes": [
+            {
+              "name": "ContractFunctionExecutionError"
+            },
+            {
+              "name": "ContractFunctionRevertedError",
+              "reason": "execution reverted"
+            },
+            {
+              "name": "CallExecutionError"
+            },
+            {
+              "name": "ExecutionRevertedError"
+            },
+            {
+              "name": "RpcRequestError",
+              "code": 3
+            },
+            {
+              "code": 3
+            }
+          ]
+        },
+        "mintSurchargeBps": {
+          "status": "failed",
+          "causes": [
+            {
+              "name": "ContractFunctionExecutionError"
+            },
+            {
+              "name": "ContractFunctionRevertedError",
+              "reason": "execution reverted"
+            },
+            {
+              "name": "CallExecutionError"
+            },
+            {
+              "name": "ExecutionRevertedError"
+            },
+            {
+              "name": "RpcRequestError",
+              "code": 3
+            },
+            {
+              "code": 3
+            }
+          ]
+        },
+        "platformFeeBps": {
+          "status": "failed",
+          "causes": [
+            {
+              "name": "ContractFunctionExecutionError"
+            },
+            {
+              "name": "ContractFunctionRevertedError",
+              "reason": "execution reverted"
+            },
+            {
+              "name": "CallExecutionError"
+            },
+            {
+              "name": "ExecutionRevertedError"
+            },
+            {
+              "name": "RpcRequestError",
+              "code": 3
+            },
+            {
+              "code": 3
+            }
+          ]
+        },
+        "supportsImageSeries": {
+          "status": "success",
+          "value": true
+        }
+      }
+    },
+    {
+      "label": "artMarket",
+      "address": "0x5172f3397edcd6c28a9f450da09192c29e076e64",
+      "hasCode": true,
+      "calls": {
+        "feeRecipient": {
+          "status": "failed",
+          "causes": [
+            {
+              "name": "ContractFunctionExecutionError"
+            },
+            {
+              "name": "ContractFunctionRevertedError",
+              "reason": "execution reverted"
+            },
+            {
+              "name": "CallExecutionError"
+            },
+            {
+              "name": "ExecutionRevertedError"
+            },
+            {
+              "name": "RpcRequestError",
+              "code": 3
+            },
+            {
+              "code": 3
+            }
+          ]
+        },
+        "platformFeeBps": {
+          "status": "failed",
+          "causes": [
+            {
+              "name": "ContractFunctionExecutionError"
+            },
+            {
+              "name": "ContractFunctionRevertedError",
+              "reason": "execution reverted"
+            },
+            {
+              "name": "CallExecutionError"
+            },
+            {
+              "name": "ExecutionRevertedError"
+            },
+            {
+              "name": "RpcRequestError",
+              "code": 3
+            },
+            {
+              "code": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "label": "auctionHouse",
+      "address": "0x1661cc7d3e009fa53b1d8ad7be6c9048ec5bdb5f",
+      "hasCode": true,
+      "calls": {
+        "platformFeeBps": {
+          "status": "failed",
+          "causes": [
+            {
+              "name": "ContractFunctionExecutionError"
+            },
+            {
+              "name": "ContractFunctionRevertedError",
+              "reason": "execution reverted"
+            },
+            {
+              "name": "CallExecutionError"
+            },
+            {
+              "name": "ExecutionRevertedError"
+            },
+            {
+              "name": "RpcRequestError",
+              "code": 3
+            },
+            {
+              "code": 3
+            }
+          ]
+        },
+        "feeRecipient": {
+          "status": "failed",
+          "causes": [
+            {
+              "name": "ContractFunctionExecutionError"
+            },
+            {
+              "name": "ContractFunctionRevertedError",
+              "reason": "execution reverted"
+            },
+            {
+              "name": "CallExecutionError"
+            },
+            {
+              "name": "ExecutionRevertedError"
+            },
+            {
+              "name": "RpcRequestError",
+              "code": 3
+            },
+            {
+              "code": 3
+            }
+          ]
+        },
+        "artMarket": {
+          "status": "success",
+          "value": "0x5172F3397EDCd6C28a9F450Da09192C29e076e64"
+        },
+        "supportsAssetAuctions": {
+          "status": "failed",
+          "causes": [
+            {
+              "name": "ContractFunctionExecutionError"
+            },
+            {
+              "name": "ContractFunctionRevertedError",
+              "reason": "execution reverted"
+            },
+            {
+              "name": "CallExecutionError"
+            },
+            {
+              "name": "ExecutionRevertedError"
+            },
+            {
+              "name": "RpcRequestError",
+              "code": 3
+            },
+            {
+              "code": 3
+            }
+          ]
+        },
+        "studioFactory": {
+          "status": "success",
+          "value": "0xa3Ce01B728e82BF6Fd28Ec5908638Bb5388AD5FF"
+        }
+      }
+    }
+  ],
+  "assessment": {
+    "studioSurchargeSupported": false,
+    "assetAuctionsSupported": false,
+    "requiredFeeGettersAvailable": false,
+    "limitation": "No state-changing transactions were sent. These calls verify current configured addresses and do not establish end-to-end user flow success."
+  },
+  "deployedCollectionMetadata": {
+    "checkedAtUTC": "2026-11-05T08:44:09.957Z",
+    "databaseReadOnly": true,
+    "collections": [
+      {
+        "itemId": "cmvhtp4zq000639l3hgk17kvi",
+        "contractAddress": "0x70d8F1860Cda289Ce711939fC70AA316695a72fe",
+        "storedMetadataHost": null,
+        "imageCount": 1,
+        "onchainMetadataHost": "comment-announcements-var-plate.trycloudflare.com",
+        "onchainMetadataProtocol": "https:",
+        "temporaryCloudflareHost": true
+      },
+      {
+        "itemId": "cmvjekuva000c8hl3xcujnexa",
+        "contractAddress": "0xBD6d9821C5B5604a157a6435d4Ef4eCFef92D92e",
+        "storedMetadataHost": null,
+        "imageCount": 1,
+        "onchainMetadataHost": "comment-announcements-var-plate.trycloudflare.com",
+        "onchainMetadataProtocol": "https:",
+        "temporaryCloudflareHost": true
+      }
+    ],
+    "limitation": "Only hosts are recorded; metadata URLs are contract-stored and current contracts expose no metadata update function."
+  }
+}

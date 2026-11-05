@@ -93,7 +93,8 @@ before(async () => {
     await db.walletSession.create({ data: { walletAddress: wallet, tokenHash: createHash("sha256").update(token).digest("hex"), expiresAt: new Date(Date.now() + 600_000) } });
     cookies.set(wallet, `artiq_wallet_session=${token}`);
   }
-  const image = { mimeType: "image/png", data: new Uint8Array([137, 80, 78, 71]), byteSize: 4 };
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWOwr9jyHwAE0AJrq3udBQAAAABJRU5ErkJggg==", "base64");
+  const image = { mimeType: "image/png", data: new Uint8Array(png), byteSize: png.length };
   cover = (await db.uploadedImage.create({ data: { ...image, ownerUserId: sellerUser, ownerWallet: seller } })).id;
   foreignCover = (await db.uploadedImage.create({ data: { ...image, ownerUserId: winnerUser, ownerWallet: winner } })).id;
   const { deploymentClient } = await import("../../lib/deploymentVerification");

@@ -121,6 +121,7 @@ after(async () => { restore?.(); await db?.$disconnect(); rmSync(directory, { re
 beforeEach((t) => {
   // Each scenario has its own quota window; shared fixture sessions last a day.
   testTime += 60_000;
+  assert.ok("mock" in t, "This hook runs for individual tests.");
   t.mock.timers.enable({ apis: ["Date"], now: testTime });
 });
 afterEach(async () => {

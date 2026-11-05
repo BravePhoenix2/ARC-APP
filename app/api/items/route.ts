@@ -5,6 +5,7 @@ import type { Prisma } from "@/lib/generated/prisma/client";
 import { catalogPagination, catalogCursor } from "@/lib/catalogPagination";
 import { publicCatalogSelect, publicItemWhere } from "@/lib/publicCatalog";
 import { isNftKind } from "@/lib/nftTypes";
+import { catalogAvailability, catalogStatusWhere } from "@/lib/catalogAvailability";
 
 // GET /api/items?itemType=NFT|WEB2_ART&status=LIVE&category=PAINTING&creator=0x...
 async function handleGET(request: NextRequest) {
@@ -18,6 +19,7 @@ async function handleGET(request: NextRequest) {
   const category = params.get("category");
   const creatorWallet = params.get("creator");
   const nftKind = params.get("nftKind");
+  const now = new Date();
 
   if (itemType && itemType !== "NFT" && itemType !== "WEB2_ART") {
     return NextResponse.json({ error: "itemType must be NFT or WEB2_ART" }, { status: 400 });
@@ -29,14 +31,13 @@ async function handleGET(request: NextRequest) {
   if (category && !["PAINTING", "RUG", "COSMETIC", "OTHER"].includes(category)) return NextResponse.json({ error: "Invalid art category." }, { status: 400 });
 
   const where: Prisma.ItemWhereInput = {
-    AND: [publicItemWhere],
+    AND: [publicItemWhere, ...(status ? [catalogStatusWhere(status, now)] : [])],
     ...(itemType ? { itemType: itemType as "NFT" | "WEB2_ART" } : {}),
     ...(nftKind && isNftKind(nftKind) ? {
       // Pre-upgrade NFT entries are ordinary collectibles.
       itemType: "NFT" as const,
       ...(nftKind === "COLLECTIBLE" ? { OR: [{ nftKind }, { nftKind: null }] } : { nftKind }),
     } : {}),
-    ...(status ? { status: status as Prisma.ItemWhereInput["status"] } : {}),
     ...(category ? { category: category as Prisma.ItemWhereInput["category"] } : {}),
     ...(creatorWallet ? { creator: { walletAddress: creatorWallet } } : {}),
   };
@@ -52,7 +53,7 @@ async function handleGET(request: NextRequest) {
   });
 
   const hasMore = items.length > limit;
-  const page = items.slice(0, limit);
+  const page = items.slice(0, limit).map((item) => catalogAvailability(item, now));
   return NextResponse.json({ items: page, nextCursor: hasMore ? catalogCursor(page[page.length - 1]) : null }, {
     headers: { "Cache-Control": "public, max-age=0, s-maxage=15, stale-while-revalidate=30" },
   });

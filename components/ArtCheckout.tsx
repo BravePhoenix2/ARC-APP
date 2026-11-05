@@ -13,10 +13,13 @@ import CreatorLink from "@/components/CreatorLink";
 import WatchlistButton from "@/components/WatchlistButton";
 import ShareItemButton from "@/components/ShareItemButton";
 import TransactionStatus from "@/components/TransactionStatus";
+import RegistrationRecovery from "@/components/RegistrationRecovery";
 import PlatformFeeBreakdown from "@/components/PlatformFeeBreakdown";
 import { usePlatformFees } from "@/hooks/usePlatformFees";
 import { useProtocolTransaction } from "@/hooks/useProtocolTransaction";
 import { useArtiqAccount } from "@/hooks/useArtiqAccount";
+import { useTransactionRecovery } from "@/hooks/useTransactionRecovery";
+import { registrationReceipt } from "@/lib/transactionRecovery";
 import { arcChain } from "@/lib/arcConfig";
 import { artMarketAbi, artMarketForItem, displayUsdc, protocol, usdcAmount } from "@/lib/protocol";
 import { emptyArtDelivery, validateArtDelivery, type ArtDelivery } from "@/lib/artDelivery";
@@ -37,6 +40,9 @@ export default function ArtCheckout({ id }: { id: string }) {
   const [delivery, setDelivery] = useState<ArtDelivery>({ ...emptyArtDelivery });
   const [purchaseHash, setPurchaseHash] = useState("");
   const [saving, setSaving] = useState(false);
+  const [registering, setRegistering] = useState(false);
+  const recovery = useTransactionRecovery(account.authenticated && account.identity && account.walletAddress ? { accountId: account.identity, walletAddress: account.walletAddress, chainId: arcChain.id, itemId: id, operation: "art-listing" } : null);
+  useEffect(() => { setRegistering(false); }, [recovery.key]);
   const identity = account.identity || "guest";
   useEffect(() => { setDelivery({ ...emptyArtDelivery }); setPurchaseHash(""); }, [id, identity]);
   const path = `/api/items/${encodeURIComponent(id)}`;
@@ -49,6 +55,8 @@ export default function ArtCheckout({ id }: { id: string }) {
     if (!response.ok) throw new Error(data.error || "Delivery details unavailable."); return data;
   } });
   const art = artQuery.data?.item; const owner = artQuery.data?.isOwner;
+  const clearRecovery = recovery.clear;
+  useEffect(() => { if (art?.artListingId && owner) clearRecovery(); }, [art?.artListingId, owner, clearRecovery]);
   const market = artMarketForItem(art || {});
   const fees = usePlatformFees(tx.client, market);
   const chain = useQuery({ queryKey: ["art-checkout", art?.artListingId, market, tx.address], enabled: !!art && !!tx.client && !!market && protocol.isTestnet, refetchInterval: 12_000, queryFn: async () => {
@@ -68,8 +76,38 @@ export default function ArtCheckout({ id }: { id: string }) {
   const refresh = async () => { await chain.refetch(); await tx.refetchBalance(); await artQuery.refetch(); };
   function connect() { if (!account.authenticated) account.login(); else account.connectWallet(); }
   async function saveListing(txHash: Hash) {
-    const response = await fetch(`${path}/art-listing`, { method: "POST", headers: { "Content-Type": "application/json", ...account.headers }, body: JSON.stringify({ txHash }) });
-    const data = await response.json(); if (!response.ok) throw new Error(data.error || "The listing confirmed but could not be saved. Retry below."); await refresh();
+    const response = await fetch(`${path}/art-listing`, { method: "POST", headers: { "Content-Type": "application/json", ...account.headers }, body: JSON.stringify({ txHash }), signal: AbortSignal.timeout(30_000) });
+    const data = await response.json(); if (!response.ok) throw new Error(data.error || "The listing confirmed but could not be saved. Retry below.");
+    if (market) recovery.capture(txHash, market);
+    await refresh();
+  }
+  async function recoverListing(value: string) {
+    if (registering || tx.pending) return;
+    tx.setError("");
+    try {
+      if (!/^0x[a-fA-F0-9]{64}$/.test(value)) throw new Error("Enter the complete listing activation transaction hash.");
+      if (!owner || !account.walletAddress || !tx.client || !market || tx.isWrongNetwork) throw new Error("Sign in with the creator wallet on Arc Testnet to recover this listing.");
+      setRegistering(true);
+      const hash = value as Hash;
+      if (recovery.record && recovery.record.hash.toLowerCase() !== hash.toLowerCase()) throw new Error("Verify the saved listing transaction before recovering a different transaction.");
+      const target = recovery.record?.hash.toLowerCase() === hash.toLowerCase() ? recovery.record.contractAddress : market;
+      const receipt = await registrationReceipt(tx.client, hash, account.walletAddress, target);
+      if (receipt.status !== "success") { recovery.clear(hash); throw new Error("This listing transaction reverted. You can activate checkout again."); }
+      await saveListing(hash);
+    } catch (error) {
+      if (recovery.isCurrent()) tx.setError(error instanceof Error ? error.message : "The transaction could not be verified. Keep its hash and try recovery again; do not activate checkout again.");
+    }
+    finally { if (recovery.isCurrent()) setRegistering(false); }
+  }
+  function activateListing() {
+    if (!market || !art) return;
+    try { recovery.assertCanStart(); } catch (error) { tx.setError((error as Error).message); return; }
+    void tx.run(async (write) => {
+      recovery.assertCanStart();
+      const hash = await write({ address: market, abi: artMarketAbi, functionName: "createListing", args: [keccak256(toHex(id)), usdcAmount(String(art.priceUsdc))], chainId: arcChain.id });
+      recovery.capture(hash, market);
+      return hash;
+    }, saveListing);
   }
   async function saveOrder(txHash: Hash, address: ArtDelivery) {
     setPurchaseHash(txHash);
@@ -84,7 +122,12 @@ export default function ArtCheckout({ id }: { id: string }) {
     if (!account.authenticated || !account.walletAddress) { connect(); return; }
     if (!canAct || !listing || !art?.artListingId || purchased || owner || seller || cancelled) return;
     if (!fees.data || fees.isError) { tx.setError("Wait for the platform fee check before paying."); return; }
-    void tx.run((write) => write({ address: market!, abi: artMarketAbi, functionName: "buyListing", args: [BigInt(art.artListingId!)], value: listing[2], chainId: arcChain.id }), async (hash) => { setPurchaseHash(hash); await saveOrder(hash, address); });
+    void tx.run((write) => write({ address: market!, abi: artMarketAbi, functionName: "buyListing", args: [BigInt(art.artListingId!)], value: listing[2], chainId: arcChain.id }), async (hash) => {
+      setPurchaseHash(hash);
+      const sync = fetch(`${path}/sync`, { method: "POST", headers: { "Content-Type": "application/json", ...account.headers }, body: JSON.stringify({ txHash: hash }), signal: AbortSignal.timeout(10_000) }).catch(() => undefined);
+      await saveOrder(hash, address);
+      await sync;
+    });
   }
   async function retryOrder(event: FormEvent) {
     event.preventDefault(); tx.setError("");
@@ -103,13 +146,13 @@ export default function ArtCheckout({ id }: { id: string }) {
         <div className="gallery-card relative aspect-square self-start overflow-hidden">{art.imageUrl && <Image src={art.imageUrl} alt={art.title} fill unoptimized sizes="(min-width:1024px) 50vw,100vw" className="object-cover" />}</div>
         <div><p className="text-xs font-semibold text-[#b55fbe]">Reviewed ART BAZZAR</p><h1 className="mt-5 text-4xl sm:text-5xl">{art.title}</h1><p className="mt-3 text-xs text-[var(--muted-text)]">By <CreatorLink creator={art.creator} /></p><div className="mt-4 flex flex-wrap gap-3"><WatchlistButton itemId={id} /><ShareItemButton title={art.title} /></div><p className="mt-6 whitespace-pre-wrap text-sm leading-7 text-[var(--muted-text)]">{art.description}</p><p className="mt-6 text-3xl">{listing ? displayUsdc(listing[2]) : art.priceUsdc} <span className="text-sm">USDC</span></p>
           <section className="mt-6 rounded-2xl border border-[var(--border-soft)] bg-[var(--glass-bg)] p-5" aria-label="Art checkout">
-            <h2 className="text-sm font-semibold">Purchase & delivery</h2><p className="mt-3 text-xs leading-6 text-[var(--muted-text)]">Pay with Arc Testnet USDC. Your delivery details are shared privately with the creator after payment confirmation. Agree shipping costs and availability with the creator before paying. Delivery is arranged by the creator. Test USDC has no monetary value.</p>
+            <h2 className="text-sm font-semibold">Purchase & delivery</h2><p className="mt-3 text-xs leading-6 text-[var(--muted-text)]">This public Testnet uses simulated purchases and delivery. Use fictional names, phone numbers, and addresses. No real goods or physical delivery are included in this test phase. Test USDC has no monetary value. Test delivery details are shared privately with the creator after payment confirmation.</p>
             {market && <PlatformFeeBreakdown terms={fees.data} gross={listing?.[2] ?? (art.priceUsdc != null ? usdcAmount(String(art.priceUsdc), true) : undefined)} isError={fees.isError} onRetry={() => void fees.refetch()} />}
             {!market && <p className="mt-4 text-sm leading-6">Payments are temporarily unavailable. Please check back later. <ReviewerOnly><Link href="/settings/protocol" className="font-semibold text-[#b55fbe] underline">Set up Arc Testnet payments →</Link></ReviewerOnly></p>}
             {market && !art.artListingId && <p className="mt-4 text-xs leading-6">{owner ? "Activate checkout from your linked wallet so collectors can purchase this artwork." : "The creator needs to activate checkout before this artwork can be purchased."}</p>}
             {!account.authenticated || !account.walletAddress || !tx.isConnected ? <button type="button" className={`${button} mt-4`} disabled={!account.ready || tx.pending} onClick={connect}>{!account.authenticated ? "Sign in to purchase" : "Connect a wallet to continue"}</button> : tx.isWrongNetwork ? <button type="button" className={`${button} mt-4`} onClick={() => void tx.switchToArc()}>Switch to Arc Testnet</button> : null}
-            {owner && market && !art.artListingId && <button type="button" className={`${button} mt-4`} disabled={!canAct || !fees.data || fees.isError} onClick={() => void tx.run((write) => write({ address: market, abi: artMarketAbi, functionName: "createListing", args: [keccak256(toHex(id)), usdcAmount(String(art.priceUsdc))], chainId: arcChain.id }), saveListing)}>Activate artwork checkout</button>}
-            {owner && tx.hash && tx.error && !art.artListingId && <button type="button" className="mt-3 block text-xs font-semibold underline" onClick={() => void saveListing(tx.hash!).catch((error) => tx.setError(error.message))}>Retry saving confirmed listing</button>}
+            {owner && market && !art.artListingId && <button type="button" className={`${button} mt-4`} disabled={!canAct || registering || !recovery.ready || !!recovery.record || !fees.data || fees.isError} onClick={activateListing}>Activate artwork checkout</button>}
+            {owner && !art.artListingId && <RegistrationRecovery key={recovery.key || "guest"} operation="listing" hash={recovery.record?.hash || null} busy={registering || tx.pending} disabled={!account.authenticated || !account.walletAddress || !tx.isConnected || tx.isWrongNetwork || !recovery.ready} storageUnavailable={recovery.storageUnavailable} onRecover={recoverListing} />}
             {chain.isError && <p role="alert" className="mt-4 text-xs text-rose-500">Couldn’t verify this listing. <button type="button" className="underline" onClick={() => void chain.refetch()}>Retry before paying</button></p>}
             {art.artListingId && !listing && !chain.isError && <p role="status" className="mt-4 text-xs">Checking the on-chain listing…</p>}
             {purchased && <p className="mt-4 text-sm font-semibold text-emerald-600 dark:text-emerald-300">{purchasedByWallet ? "Payment confirmed. Do not pay again." : "This artwork has been purchased."}</p>}
@@ -117,7 +160,7 @@ export default function ArtCheckout({ id }: { id: string }) {
             {owner && listing && !purchased && !cancelled && <p className="mt-4 text-sm">Your artwork is available to collectors.</p>}
             {order ? <div className="mt-5 rounded-xl border border-[var(--border-soft)] p-4"><h3 className="text-sm font-semibold">{owner ? "Buyer delivery details" : "Your delivery address is saved"}</h3><address className="mt-3 whitespace-pre-line text-sm not-italic leading-6">{[order.delivery.recipient, order.delivery.addressLine1, order.delivery.addressLine2, [order.delivery.city, order.delivery.region, order.delivery.postalCode].filter(Boolean).join(", "), order.delivery.country, order.delivery.phone].filter(Boolean).join("\n")}</address>{order.delivery.instructions && <p className="mt-3 text-xs">{order.delivery.instructions}</p>}<p className="mt-3 break-all text-xs text-[var(--muted-text)]">Order {order.id}</p></div> : !owner && !seller && (!purchased || purchasedByWallet) && !cancelled ?
               <form onSubmit={purchasedByWallet || purchaseHash ? retryOrder : buy} className="mt-5 space-y-4"><h3 className="text-sm font-semibold">Delivery address</h3><p className="text-xs leading-6 text-[var(--muted-text)]">Saved after a verified purchase. Only you and the creator can view it.</p>
-                {fields.map(([key, label, autoComplete, required, max]) => <label key={key} className="block text-xs font-semibold" htmlFor={`delivery-${key}`}>{label}<input id={`delivery-${key}`} name={key} type={key === "phone" ? "tel" : "text"} autoComplete={autoComplete} required={required} maxLength={max} value={delivery[key]} disabled={tx.pending || saving} onChange={(event) => setDelivery((current) => ({ ...current, [key]: event.target.value }))} className="mt-2 block w-full rounded-xl border border-[var(--border-soft)] bg-[var(--chip-bg)] px-4 py-3 text-sm font-normal" /></label>)}
+                {fields.map(([key, label, autoComplete, required, max]) => <label key={key} className="block text-xs font-semibold" htmlFor={`delivery-${key}`}>{label}<input id={`delivery-${key}`} name={key} type={key === "phone" ? "tel" : "text"} autoComplete={protocol.isTestnet ? "off" : autoComplete} required={required} maxLength={max} value={delivery[key]} disabled={tx.pending || saving} onChange={(event) => setDelivery((current) => ({ ...current, [key]: event.target.value }))} className="mt-2 block w-full rounded-xl border border-[var(--border-soft)] bg-[var(--chip-bg)] px-4 py-3 text-sm font-normal" /></label>)}
                 {(purchasedByWallet || purchaseHash) && <label className="block text-xs font-semibold" htmlFor="purchase-hash">Confirmed purchase transaction hash<input id="purchase-hash" value={purchaseHash} onChange={(event) => setPurchaseHash(event.target.value.trim())} required pattern="0x[a-fA-F0-9]{64}" className="mt-2 block w-full rounded-xl border border-[var(--border-soft)] bg-[var(--chip-bg)] px-4 py-3 font-mono text-xs" /></label>}
                 <button type="submit" className={`${button} w-full`} disabled={purchasedByWallet || purchaseHash ? !account.walletAddress || saving || tx.pending : !canAct || !listing || !fees.data || fees.isError || art.sold || chain.isError || orderQuery.isLoading || orderQuery.isError}>{saving ? "Saving delivery details…" : tx.pending ? "Confirming payment…" : purchasedByWallet || purchaseHash ? "Save delivery details — no new payment" : !market ? "Payments temporarily unavailable" : !art.artListingId ? "Awaiting creator checkout activation" : "Purchase art with test USDC"}</button>
               </form> : null}

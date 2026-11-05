@@ -69,7 +69,7 @@ after(async () => { await db?.$disconnect(); rmSync(directory, { recursive: true
 
 test("a folder series stays private until review and publishes distinct ordered token images", async () => {
   const images = [];
-  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=", "base64");
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWOwr9jyHwAE0AJrq3udBQAAAABJRU5ErkJggg==", "base64");
   for (let index = 1; index <= 3; index++) {
     const form = new FormData(); form.set("file", new File([png], `${index}.png`, { type: "image/png" })); form.set("itemType", "NFT");
     const uploaded = await uploads.POST(new NextRequest(`${origin}/api/uploads`, { method: "POST", headers: { Origin: origin, Cookie: ownerCookie, "X-Wallet-Address": owner }, body: form }));
@@ -180,7 +180,7 @@ test("submission authentication, AI policy, privacy, approval, rejection, and im
   assert.equal(await db.item.count(), 1, "repeat approvals cannot create duplicate items");
 
   const form = new FormData();
-  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=", "base64");
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWOwr9jyHwAE0AJrq3udBQAAAABJRU5ErkJggg==", "base64");
   form.set("file", new File([png], "art.png", { type: "image/png" }));
   const imageRequest = new NextRequest(`${origin}/api/uploads`, { method: "POST", headers: { Origin: origin, Cookie: ownerCookie, "X-Wallet-Address": owner }, body: form });
   const uploaded = await uploads.POST(imageRequest);

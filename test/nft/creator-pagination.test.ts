@@ -45,7 +45,8 @@ before(async () => {
   const other = await db.user.create({ data: { username: "Another creator" } });
   await db.item.createMany({ data: records.map((record) => ({ ...record, creatorId, imageUrl: record.id === "creator_work_000" ? "https://example.invalid/approved.png" : null })) });
   await db.item.create({ data: { creatorId: other.id, title: "Other creator's work", itemType: "NFT" } });
-  const image = await db.uploadedImage.create({ data: { ownerUserId: creatorId, ownerWallet: wallet, mimeType: "image/png", data: new Uint8Array([137, 80, 78, 71]), byteSize: 4 } });
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWOwr9jyHwAE0AJrq3udBQAAAABJRU5ErkJggg==", "base64");
+  const image = await db.uploadedImage.create({ data: { ownerUserId: creatorId, ownerWallet: wallet, mimeType: "image/png", data: new Uint8Array(png), byteSize: png.length } });
   privateImageId = image.id;
   const imageUrl = `/api/uploads/${privateImageId}`;
   const factory = "0x2222222222222222222222222222222222222222";

@@ -7,6 +7,7 @@ import Link from "next/link";
 import ArticLogo from "@/components/ArticLogo";
 import Eyebrow from "@/components/Eyebrow";
 import { LaunchAppButton } from "@/components/AppEntry";
+import TestnetNotice from "@/components/TestnetNotice";
 import { OrbitCircle, OrbitOval, OrbitSquare, OrbitTriangle } from "@/components/orbit-shapes";
 
 const FEATURES = [
@@ -29,8 +30,8 @@ const FEATURES = [
     color: "#362A67",
   },
   {
-    title: "Sell physical art too",
-    description: "Pair a digital collectible with a real-world piece and ship it straight to the buyer.",
+    title: "Test art checkout too",
+    description: "Try an original-art purchase and delivery form with test USDC and fictional delivery details.",
     Icon: OrbitOval,
     color: "#F49BC5",
   },
@@ -45,17 +46,17 @@ const HOW_IT_WORKS = [
   {
     step: "02",
     title: "Browse or mint",
-    description: "Explore live drops and the secondary market, or launch your own collection in minutes.",
+    description: "Explore reviewed Testnet drops, or submit your own collection for approval.",
   },
   {
     step: "03",
     title: "Pay in USDC",
-    description: "Every mint, bid, and purchase is priced in dollars — what you see is what you pay.",
+    description: "Try mints, bids, and purchases with faucet USDC. Test tokens have no monetary value.",
   },
   {
     step: "04",
-    title: "Own it or ship it",
-    description: "Hold and resell your NFT, or claim the physical piece behind it and have it shipped to you.",
+    title: "Check the result",
+    description: "Confirm your Testnet NFT in your wallet and report any issue. Delivery flows are simulations during this phase.",
   },
 ] as const;
 
@@ -80,6 +81,7 @@ export default function Home() {
   return (
     <main className="gallery-page min-h-screen w-full text-[var(--page-text)]">
       <Atmosphere />
+      <TestnetNotice />
       <div className="grid lg:min-h-screen lg:grid-cols-2">
         <div className="hero-copy relative flex min-h-[420px] flex-col px-6 py-6 sm:px-10 lg:px-16 xl:px-20">
           <header className="flex flex-wrap items-center justify-between gap-3">
@@ -255,7 +257,7 @@ export default function Home() {
           <div className="flex flex-col gap-8 sm:flex-row sm:items-center sm:justify-between">
             <ArticLogo className="text-lg" />
 
-            <p className="text-sm text-[var(--faint-text)]">© {new Date().getFullYear()} Artic. Built on Arc.</p>
+            <div className="space-y-3 text-sm text-[var(--faint-text)]"><Link href="/testnet" className="underline underline-offset-4">Testnet guide, privacy & support</Link><p>© {new Date().getFullYear()} Artic. Built on Arc.</p></div>
           </div>
         </div>
       </footer>

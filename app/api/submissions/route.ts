@@ -5,6 +5,8 @@ import { sameOrigin } from "@/lib/walletAuth";
 import { getCreatorSession } from "@/lib/creatorSession";
 import { parseSubmission, SubmissionValidationError } from "@/lib/submissionValidation";
 import { screenArtwork } from "@/lib/artworkScreening";
+import { savedImageScreening } from "@/lib/imageScreening";
+import { loadUploadBytes } from "@/lib/uploadStorage";
 import type { Prisma } from "@/lib/generated/prisma/client";
 import { limitedJson } from "@/lib/requestBody";
 
@@ -44,8 +46,9 @@ async function handlePOST(request: NextRequest) {
       const image = await prisma.uploadedImage.findFirst({ where: { id: input.imageUrl.split("/").pop(), OR: [{ ownerUserId: session.userId }, ...(session.walletAddress ? [{ ownerWallet: session.walletAddress }] : [])] } });
       if (!image) return NextResponse.json({ error: "Upload your artwork image again." }, { status: 400 });
       if (input.itemType === "WEB2_ART") {
-        // Always derive the result from the immutable stored image, never the request.
-        screening = await screenArtwork(image.data, image.mimeType);
+        // Reuse only the server's original metadata report. Public image bytes
+        // are stripped, so recomputing metadata from them would erase flags.
+        screening = await screenArtwork(await loadUploadBytes(image), image.mimeType, savedImageScreening(image.screening));
         await prisma.uploadedImage.update({ where: { id: image.id }, data: { screening } });
       } else if (image.screening) screening = image.screening;
     }

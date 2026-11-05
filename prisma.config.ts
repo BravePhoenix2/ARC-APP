@@ -4,12 +4,14 @@ import "dotenv/config";
 import { config as loadEnv } from "dotenv";
 import { defineConfig } from "prisma/config";
 import { resolve } from "node:path";
+import { databaseConfiguration } from "./lib/databaseConfig";
 
 // The rest of the project keeps secrets in .env.local (see hardhat.config.js) —
 // load it here too so DATABASE_URL only has to be set in one place.
-loadEnv({ path: ".env.local" });
+loadEnv({ path: ".env.local", quiet: true });
 
-const databaseUrl = process.env.DATABASE_URL ?? "file:./prisma/dev.db";
+const database = databaseConfiguration();
+const databaseUrl = database.cliUrl;
 // The CLI resolves relative SQLite URLs from the schema directory, while
 // better-sqlite3 resolves them from the working directory. Use an absolute
 // path so schema setup, seeding, and the app all open the same database.
@@ -18,9 +20,9 @@ const datasourceUrl = databaseUrl.startsWith("file:")
   : databaseUrl;
 
 export default defineConfig({
-  schema: "prisma/schema.prisma",
+  schema: database.schema,
   migrations: {
-    path: "prisma/migrations",
+    path: database.provider === "postgresql" ? "prisma/migrations" : "prisma/sqlite-migrations",
     seed: "tsx prisma/seed.ts",
   },
   datasource: {

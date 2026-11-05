@@ -31,6 +31,12 @@ async function handlePATCH(request: NextRequest, { params: routeParams }: { para
     return NextResponse.json({ error: "Only the creator can update this item." }, { status: 403 });
   }
 
+  // Published contract state is authoritative, including for reviewers. A
+  // creator cannot advertise sold-out NFTs as live or reopen purchased art.
+  if ((item.itemType === "NFT" && item.contractAddress) || (item.itemType === "WEB2_ART" && item.artListingId)) {
+    return NextResponse.json({ error: "Availability for deployed collections and checkout listings is verified on-chain and cannot be changed manually." }, { status: 409 });
+  }
+
   if (item.itemType === "NFT") {
     if (!NFT_STATUSES.includes(body.status as typeof NFT_STATUSES[number])) {
       return NextResponse.json({ error: `status must be one of ${NFT_STATUSES.join(", ")}` }, { status: 400 });

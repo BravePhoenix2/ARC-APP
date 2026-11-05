@@ -6,7 +6,20 @@ export type ImageScreeningReport = {
   signals: Array<{ code: string; label: string }>;
   summary: string;
   checkedAt: string;
+  publicImage?: { version: 1; sha256: string; width: number; height: number };
 };
+
+/** Only reuse a bounded server-stored metadata report, never a request field. */
+export function savedImageScreening(value: unknown): ImageScreeningReport | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return;
+  const report = value as Partial<ImageScreeningReport>;
+  if (report.version !== 1 || !["FLAGGED", "REVIEW_REQUIRED"].includes(report.status ?? "") || typeof report.summary !== "string" || report.summary.length > 500 || typeof report.checkedAt !== "string" || !Number.isFinite(Date.parse(report.checkedAt)) || !Array.isArray(report.signals) || report.signals.length > 32 || report.signals.some((entry) => !entry || typeof entry.code !== "string" || entry.code.length > 80 || typeof entry.label !== "string" || entry.label.length > 300)) return;
+  const marker = report.publicImage;
+  return {
+    version: 1, status: report.status as ImageScreeningReport["status"], signals: report.signals, summary: report.summary, checkedAt: report.checkedAt,
+    ...(marker?.version === 1 && /^[a-f0-9]{64}$/.test(marker.sha256) && Number.isSafeInteger(marker.width) && Number.isSafeInteger(marker.height) ? { publicImage: marker } : {}),
+  };
+}
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const MAX_METADATA_BYTES = 1024 * 1024;

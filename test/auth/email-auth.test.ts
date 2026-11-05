@@ -284,7 +284,7 @@ test("email creators own private uploads and applications without acquiring revi
   const owner = await login("art-owner@example.com");
   const other = await login("other-owner@example.com");
   const walletUser = await db.user.create({ data: { walletAddress: reviewerWallet, email: "wallet-contact@example.com" } });
-  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=", "base64");
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWOwr9jyHwAE0AJrq3udBQAAAABJRU5ErkJggg==", "base64");
   const form = new FormData();
   form.set("file", new File([png], "art.png", { type: "image/png" }));
   const uploadRequest = new NextRequest(`${origin}/api/uploads`, { method: "POST", headers: { Origin: origin, Cookie: owner.cookie, "X-Artiq-Account-ID": owner.user.id }, body: form });

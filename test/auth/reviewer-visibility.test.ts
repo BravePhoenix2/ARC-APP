@@ -56,7 +56,7 @@ const pageGuard = compile<{ requireReviewerPage: () => Promise<CreatorSession> }
   "@/lib/privyAuth": { PRIVY_SESSION_COOKIE: "artiq_privy_session" },
   "@/lib/emailAuth": { EMAIL_SESSION_COOKIE: "artiq_email_session" },
 });
-type GuardedLayout = { default: (props: React.PropsWithChildren) => Promise<React.ReactElement>; dynamic: string };
+type GuardedLayout = { default: (props: React.PropsWithChildren) => Promise<React.ReactElement<React.PropsWithChildren>>; dynamic: string };
 const layouts = ["../../app/admin/layout.tsx", "../../app/settings/protocol/layout.tsx"].map((path) => compile<GuardedLayout>(path, { ...dependencies, "@/components/ConnectWalletButton": empty, "@/lib/reviewerPage": pageGuard }));
 
 beforeEach(() => {

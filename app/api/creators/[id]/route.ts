@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { publicCatalogSelect, publicItemWhere } from "@/lib/publicCatalog";
 import { catalogCursor, catalogPagination } from "@/lib/catalogPagination";
 import type { Prisma } from "@/lib/generated/prisma/client";
+import { catalogAvailability } from "@/lib/catalogAvailability";
 
 export const dynamic = "force-dynamic";
 
@@ -41,7 +42,7 @@ async function handleGET(request: NextRequest, { params }: { params: Promise<{ i
     prisma.item.findMany({ where, select: publicCatalogSelect, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: limit + 1 }),
     prisma.item.groupBy({ by: ["itemType"], where: { creatorId: id, AND: [publicItemWhere] }, _count: { _all: true } }),
   ]);
-  const items = rows.slice(0, limit);
+  const items = rows.slice(0, limit).map((item) => catalogAvailability(item));
   const count = (type: "NFT" | "WEB2_ART") => totals.find((entry) => entry.itemType === type)?._count._all || 0;
   return NextResponse.json({
     creator: { ...creator, items },
