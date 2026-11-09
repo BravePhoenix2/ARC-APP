@@ -4,8 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { getCreatorSession } from "@/lib/creatorSession";
 import { sameOrigin } from "@/lib/walletAuth";
 import { limitedJson } from "@/lib/requestBody";
-import type { Prisma } from "@/lib/generated/prisma/client";
-import { awardTesterMilestone } from "@/lib/testerLeaderboard";
+import { publishSubmission } from "@/lib/publishSubmission";
 
 async function handlePATCH(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   const params = await context.params;
@@ -46,25 +45,7 @@ async function handlePATCH(request: NextRequest, context: { params: Promise<{ id
       } });
       if (claimed.count !== 1) throw new Error("ALREADY_REVIEWED");
       if (decision === "APPROVED") {
-        const creator = await tx.user.update({ where: { id: application.creatorId }, data: { isCreator: true } });
-        if (!creator.username) await tx.user.update({ where: { id: creator.id }, data: { username: application.creatorName } });
-        const item = await tx.item.create({ data: {
-          creatorId: application.creatorId, creationMethod: application.creationMethod, itemType: application.itemType, title: application.title,
-          description: application.description, imageUrl: application.imageUrl,
-          ...(application.itemType === "NFT" ? {
-            nftKind: application.nftKind ?? "COLLECTIBLE", symbol: application.symbol,
-            imageCount: application.imageCount,
-            collectionImages: { create: application.collectionImages.map(({ position, filename, imageUrl }) => ({ position, filename, imageUrl })) },
-            metadataUri: application.metadataUri, maxPerWallet: application.maxPerWallet,
-            royaltyBps: application.nftKind === "SOULBOUND" ? 0 : application.royaltyBps,
-            ...(application.attributes !== null ? { attributes: application.attributes as Prisma.InputJsonValue } : {}),
-            mintPriceUsdc: application.priceUsdc, maxSupply: application.maxSupply,
-            mintStartTime: application.mintStartTime, contractAddress: null,
-            mintedCount: 0, status: "UPCOMING",
-          } : { priceUsdc: application.priceUsdc, category: application.category, quantityAvailable: 1, sold: false }),
-        } });
-        await tx.submission.update({ where: { id: params.id }, data: { itemId: item.id } });
-        await awardTesterMilestone(tx, application.creatorId, "APPROVED_CREATOR");
+        await publishSubmission(tx, application);
       }
       return tx.submission.findUniqueOrThrow({ where: { id: params.id } });
     });

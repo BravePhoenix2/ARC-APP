@@ -38,6 +38,8 @@ const tx = {
       reads.push(args);
       const state = snapshots.get(args.address as Address)!;
       if (state.unavailable) throw new Error("Arc RPC timed out.");
+      if (args.functionName === "supportsCollectionCreationFee") return true;
+      if (args.functionName === "collectionCreationFee") return BigInt("5000000000000000000");
       if (args.functionName === "supportsMintSurcharge") return true;
       if (args.functionName === "mintSurchargeBps") return BigInt(200);
       if (args.functionName === "pendingPlatformFees") return state.pending;
@@ -98,6 +100,8 @@ test("shows actual accrued and withdrawable fees without losing bigint precision
   assert.match(text, /Available to withdraw/);
   assert.match(text, /Test USDC has no monetary value/);
   assert.match(text, /2\.5/);
+  assert.match(text, /Collection creation fee/);
+  assert.match(text, /5 test USDC/);
   assert.equal(withdrawalButtons().length, 3);
   assert.match(text, /Collector mint surcharge/);
   assert.match(text, /4\.5/);

@@ -5,6 +5,7 @@ const { ethers, networkHelpers } = await hre.network.create();
 const { time, loadFixture } = networkHelpers;
 
 const PRICE = ethers.parseUnits("2", 18);
+const CREATION_FEE = ethers.parseUnits("5", 18);
 const CREATOR_FEE_BPS = 250n;
 const MINT_SURCHARGE_BPS = 200n;
 const mintPayment = base => base + base * MINT_SURCHARGE_BPS / 10_000n;
@@ -21,8 +22,8 @@ async function createCollection(factory, creator, options = {}) {
   const args = ["Test Collection", "TEST", options.metadataURI ?? "ipfs://metadata.json", options.price ?? PRICE, start,
     options.supply ?? 10, options.perWallet ?? 3, options.royalty ?? 500];
   const tx = options.edition
-    ? await factory.connect(creator).createEdition(...args)
-    : await factory.connect(creator).create721(...args, options.soulbound ?? false);
+    ? await factory.connect(creator).createEdition(...args, { value: CREATION_FEE })
+    : await factory.connect(creator).create721(...args, options.soulbound ?? false, { value: CREATION_FEE });
   const receipt = await tx.wait();
   const event = receipt.logs.map(log => { try { return factory.interface.parseLog(log); } catch { return null; } })
     .find(event => event?.name === "CollectionCreated");
@@ -82,7 +83,7 @@ describe("NFT Studio", function () {
     expect(await collection.ownerOf(1)).to.equal(minter.address);
     expect(await collection.ownerOf(2)).to.equal(minter.address);
     expect(await collection.tokenURI(2)).to.equal("ipfs://metadata.json");
-    expect(await factory.pendingPlatformFees()).to.equal(platformRevenue);
+    expect(await factory.pendingPlatformFees()).to.equal(CREATION_FEE + platformRevenue);
     expect(await ethers.provider.getBalance(await collection.getAddress())).to.equal(creatorProceeds);
     await expect(collection.connect(minter).withdraw(minter.address)).to.be.revertedWithCustomError(collection, "OwnableUnauthorizedAccount");
     await expect(collection.withdraw(creator.address)).to.changeEtherBalances(ethers, [collection, creator], [-creatorProceeds, creatorProceeds]);
@@ -149,18 +150,18 @@ describe("NFT Studio", function () {
     const { factory, creator, minter } = await loadFixture(deployStudio);
     await expect(factory.connect(minter).notifyMint(minter.address)).to.be.revertedWithCustomError(factory, "NotRegisteredCollection");
     const invalid = ["Test", "TST", "ipfs://data", PRICE, 0, 0, 1, 0, false];
-    await expect(factory.connect(creator).create721(...invalid)).to.revert(ethers);
-    await expect(factory.connect(creator).create721("Test", "TST", "ipfs://data", PRICE, 0, 10, 1, 1001, false)).to.revert(ethers);
-    await expect(factory.connect(creator).create721("Test", "TST", "x".repeat(4097), PRICE, 0, 10, 1, 0, false)).to.revert(ethers);
-    await expect(factory.connect(creator).createEdition("x".repeat(481), "TST", "ipfs://data", PRICE, 0, 10, 1, 0)).to.revert(ethers);
+    await expect(factory.connect(creator).create721(...invalid, { value: CREATION_FEE })).to.revert(ethers);
+    await expect(factory.connect(creator).create721("Test", "TST", "ipfs://data", PRICE, 0, 10, 1, 1001, false, { value: CREATION_FEE })).to.revert(ethers);
+    await expect(factory.connect(creator).create721("Test", "TST", "x".repeat(4097), PRICE, 0, 10, 1, 0, false, { value: CREATION_FEE })).to.revert(ethers);
+    await expect(factory.connect(creator).createEdition("x".repeat(481), "TST", "ipfs://data", PRICE, 0, 10, 1, 0, { value: CREATION_FEE })).to.revert(ethers);
     expect(await factory.hasMinted(minter.address)).to.equal(false);
   });
 
   it("accepts a 120-character Unicode title for both NFT standards", async function () {
     const { factory, creator } = await loadFixture(deployStudio);
     const title = "🎨".repeat(120);
-    await factory.connect(creator).create721(title, "ART", "ipfs://data", 0, 0, 10, 1, 0, false);
-    await factory.connect(creator).createEdition(title, "ART", "ipfs://data", 0, 0, 10, 1, 0);
+    await factory.connect(creator).create721(title, "ART", "ipfs://data", 0, 0, 10, 1, 0, false, { value: CREATION_FEE });
+    await factory.connect(creator).createEdition(title, "ART", "ipfs://data", 0, 0, 10, 1, 0, { value: CREATION_FEE });
     const [nftAddress, editionAddress] = await factory.getCollectionsByCreator(creator.address);
     expect(await (await ethers.getContractAt("ArticStudioCollection", nftAddress)).name()).to.equal(title);
     expect(await (await ethers.getContractAt("ArticEdition", editionAddress)).name()).to.equal(title);

@@ -1,6 +1,6 @@
 import { protectAccount, withAbuseProtection } from "@/lib/abuseProtection";
 import { NextRequest, NextResponse } from "next/server";
-import type { Hash } from "viem";
+import type { Address, Hash } from "viem";
 import { prisma } from "@/lib/prisma";
 import { sameOrigin } from "@/lib/walletAuth";
 import { getCreatorSession } from "@/lib/creatorSession";
@@ -27,8 +27,9 @@ async function handlePOST(request: NextRequest, context: { params: Promise<{ id:
   let body;
   try { body = await limitedJson(request, 4096); } catch { return NextResponse.json({ error: "Invalid deployment request." }, { status: 400, headers }); }
   if (!body || typeof body !== "object" || !("txHash" in body) || typeof body.txHash !== "string" || !/^0x[a-fA-F0-9]{64}$/.test(body.txHash)) return NextResponse.json({ error: "Provide a valid deployment transaction hash." }, { status: 400, headers });
+  const factory = item.contractAddress && item.deploymentFactory ? item.deploymentFactory as Address : protocol.factory;
   try {
-    const deployed = await verifiedCollection(item, body.txHash as Hash, protocol.factory);
+    const deployed = await verifiedCollection(item, body.txHash as Hash, factory);
     if (session.walletAddress.toLowerCase() !== deployed.creator.toLowerCase()) return NextResponse.json({ error: "The deployment wallet must match your signed-in wallet." }, { status: 403, headers });
     if (item.contractAddress && item.contractAddress.toLowerCase() !== deployed.address.toLowerCase()) return NextResponse.json({ error: "This collection already has a different contract. Its address cannot be replaced." }, { status: 409, headers });
     const current = await prisma.$transaction(async (tx) => {
@@ -40,7 +41,7 @@ async function handlePOST(request: NextRequest, context: { params: Promise<{ id:
         LIMIT 1
       `;
       if (duplicate.length) throw new Error("DUPLICATE_COLLECTION");
-      await tx.item.updateMany({ where: { id: item.id, creatorId: session.userId, contractAddress: null, updatedAt: item.updatedAt, mintStartTime: item.mintStartTime }, data: { contractAddress: deployed.address, deploymentFactory: protocol.factory, status: item.mintStartTime && item.mintStartTime > new Date() ? "UPCOMING" : "LIVE" } });
+      await tx.item.updateMany({ where: { id: item.id, creatorId: session.userId, contractAddress: null, updatedAt: item.updatedAt, mintStartTime: item.mintStartTime }, data: { contractAddress: deployed.address, deploymentFactory: factory, status: item.mintStartTime && item.mintStartTime > new Date() ? "UPCOMING" : "LIVE" } });
       return tx.item.findUniqueOrThrow({ where: { id: item.id } });
     }, { isolationLevel: "Serializable" });
     if (!current.contractAddress) return NextResponse.json({ error: "Collection settings changed while verifying deployment. Refresh before trying again." }, { status: 409, headers });

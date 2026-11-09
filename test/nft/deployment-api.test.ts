@@ -41,6 +41,8 @@ let restore: () => void;
 const receipts = new Map<string, Record<string, unknown>>();
 const settings = new Map<string, Record<string, unknown>>();
 const factoryEvent = parseAbi(["event CollectionCreated(address indexed creator,address indexed collection,uint8 standard,bool soulbound,string name,string symbol)"]);
+const creationFeeEvent = parseAbi(["event CollectionCreationFeePaid(address indexed creator,address indexed collection,uint256 amount)"]);
+const creationFee = parseUnits("5", 18);
 const listingEvent = parseAbi(["event ArtListed(uint256 indexed listingId,address indexed seller,bytes32 indexed artId,uint256 price)"]);
 let testTime = Date.now();
 
@@ -60,11 +62,16 @@ async function nft(overrides: Record<string, unknown> = {}) {
 function collectionReceipt(item: Awaited<ReturnType<typeof nft>>, address = contract, creator = owner, changes: Record<string, unknown> = {}): Hash {
   const factorySettings = settings.get(factory.toLowerCase()) || {};
   factorySettings.supportsMintSurcharge ??= true;
+  factorySettings.supportsCollectionCreationFee ??= true;
+  factorySettings.collectionCreationFee ??= creationFee;
   settings.set(factory.toLowerCase(), factorySettings);
   const txHash = hash();
   receipts.set(txHash, {
     status: "success", to: factory, from: creator,
-    logs: [{ address: factory, topics: encodeEventTopics({ abi: factoryEvent, eventName: "CollectionCreated", args: { creator, collection: address } }), data: encodeAbiParameters([{ type: "uint8" }, { type: "bool" }, { type: "string" }, { type: "string" }], [item.nftKind === "EDITION" ? 2 : 1, item.nftKind === "SOULBOUND", item.title, item.symbol || "ARTIQ"]) }],
+    logs: [
+      { address: factory, topics: encodeEventTopics({ abi: factoryEvent, eventName: "CollectionCreated", args: { creator, collection: address } }), data: encodeAbiParameters([{ type: "uint8" }, { type: "bool" }, { type: "string" }, { type: "string" }], [item.nftKind === "EDITION" ? 2 : 1, item.nftKind === "SOULBOUND", item.title, item.symbol || "ARTIQ"]) },
+      { address: factory, topics: encodeEventTopics({ abi: creationFeeEvent, eventName: "CollectionCreationFeePaid", args: { creator, collection: address } }), data: encodeAbiParameters([{ type: "uint256" }], [creationFee]) },
+    ],
     ...changes,
   });
   settings.set(address.toLowerCase(), {
@@ -209,6 +216,59 @@ test("verified deployment is idempotent, protects existing contracts, and resolv
   const replacementHash = collectionReceipt(existing);
   assert.equal((await deployment.POST(request(`/api/items/${existing.id}/deployment`, { txHash: replacementHash }), { params: Promise.resolve({ id: existing.id }) })).status, 409);
   assert.equal((await db.item.findUniqueOrThrow({ where: { id: existing.id } })).contractAddress, market);
+});
+
+test("new collections require an exact fee proof from the same creation transaction", async () => {
+  const item = await nft();
+  const path = `/api/items/${item.id}/deployment`;
+  const context = { params: Promise.resolve({ id: item.id }) };
+  for (const scenario of ["missing", "duplicate", "foreign-factory", "foreign-creator", "foreign-collection", "underpaid", "overpaid"] as const) {
+    const txHash = collectionReceipt(item);
+    const receipt = receipts.get(txHash)!;
+    const logs = receipt.logs as Array<{ address: Address; topics: unknown; data: unknown }>;
+    if (scenario === "missing") logs.pop();
+    if (scenario === "duplicate") logs.push({ ...logs[1] });
+    if (scenario === "foreign-factory") logs[1].address = other;
+    if (scenario === "foreign-creator" || scenario === "foreign-collection") {
+      logs[1].topics = encodeEventTopics({ abi: creationFeeEvent, eventName: "CollectionCreationFeePaid", args: {
+        creator: scenario === "foreign-creator" ? other : owner,
+        collection: scenario === "foreign-collection" ? anotherContract : contract,
+      } });
+    }
+    if (scenario === "underpaid" || scenario === "overpaid") logs[1].data = encodeAbiParameters([{ type: "uint256" }], [creationFee + (scenario === "underpaid" ? -BigInt(1) : BigInt(1))]);
+    const response = await deployment.POST(request(path, { txHash }), context);
+    assert.equal(response.status, 400, scenario);
+    assert.match((await response.json()).error, /5 test USDC collection creation fee/);
+    assert.equal((await db.item.findUniqueOrThrow({ where: { id: item.id } })).contractAddress, null);
+  }
+  for (const settingsOverride of [{ supportsCollectionCreationFee: false }, { collectionCreationFee: creationFee - BigInt(1) }]) {
+    const txHash = collectionReceipt(item);
+    Object.assign(settings.get(factory.toLowerCase())!, settingsOverride);
+    const response = await deployment.POST(request(path, { txHash }), context);
+    assert.equal(response.status, 400);
+    Object.assign(settings.get(factory.toLowerCase())!, { supportsCollectionCreationFee: true, collectionCreationFee: creationFee });
+  }
+  const freeMint = await nft({ mintPriceUsdc: 0 });
+  const response = await deployment.POST(request(`/api/items/${freeMint.id}/deployment`, { txHash: collectionReceipt(freeMint) }), { params: Promise.resolve({ id: freeMint.id }) });
+  assert.equal(response.status, 200, "free minting still requires the one-time collection creation fee");
+});
+
+test("previously linked collections retain their original factory and do not repay creation fees", async () => {
+  const item = await nft({ contractAddress: contract, deploymentFactory: factory });
+  const txHash = collectionReceipt(item);
+  (receipts.get(txHash)!.logs as unknown[]).pop();
+  const { protocol } = await import("../../lib/protocol");
+  const currentFactory = protocol.factory;
+  try {
+    protocol.factory = anotherContract;
+    Object.assign(settings.get(factory.toLowerCase())!, { supportsCollectionCreationFee: false, collectionCreationFee: BigInt(0) });
+    const response = await deployment.POST(request(`/api/items/${item.id}/deployment`, { txHash }), { params: Promise.resolve({ id: item.id }) });
+    assert.equal(response.status, 200, JSON.stringify(await response.json()));
+    assert.equal((await db.item.findUniqueOrThrow({ where: { id: item.id } })).deploymentFactory, factory);
+  } finally {
+    protocol.factory = currentFactory;
+    Object.assign(settings.get(factory.toLowerCase())!, { supportsCollectionCreationFee: true, collectionCreationFee: creationFee });
+  }
 });
 
 test("email sessions cannot attach another wallet's receipt without verified wallet ownership", async () => {

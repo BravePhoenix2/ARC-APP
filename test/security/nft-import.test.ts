@@ -87,13 +87,15 @@ test("legacy pending imports cannot publish through reviewer approval and remain
   assert.equal((await db.submission.findUniqueOrThrow({ where: { id: pending.id } })).status, "REJECTED");
 });
 
-test("normal reviewed NFTs publish without a contract and require the verified deployment flow", async () => {
+test("normal NFTs publish without review and still require the verified deployment flow", async () => {
   const created = await submissions.POST(request("/api/submissions", "POST", application));
   assert.equal(created.status, 201);
   const submission = (await created.json()).submission;
+  assert.equal(submission.status, "APPROVED");
+  assert.ok(submission.itemId);
   const approved = await review.PATCH(request(`/api/admin/submissions/${submission.id}`, "PATCH", { decision: "APPROVED" }, true), { params: Promise.resolve({ id: submission.id }) });
-  assert.equal(approved.status, 200);
-  const item = await db.item.findUniqueOrThrow({ where: { id: (await approved.json()).submission.itemId } });
+  assert.equal(approved.status, 409, "reviewing an already published NFT cannot create a duplicate");
+  const item = await db.item.findUniqueOrThrow({ where: { id: submission.itemId } });
   assert.equal(item.creatorId, creatorId);
   assert.equal(item.contractAddress, null);
   assert.equal(item.deploymentFactory, null);

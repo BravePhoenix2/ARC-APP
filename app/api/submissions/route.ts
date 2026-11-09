@@ -9,6 +9,7 @@ import { savedImageScreening } from "@/lib/imageScreening";
 import { loadUploadBytes } from "@/lib/uploadStorage";
 import type { Prisma } from "@/lib/generated/prisma/client";
 import { limitedJson } from "@/lib/requestBody";
+import { publishSubmission } from "@/lib/publishSubmission";
 
 export const dynamic = "force-dynamic";
 const privateHeaders = { "Cache-Control": "private, no-store" };
@@ -37,10 +38,12 @@ async function handlePOST(request: NextRequest) {
       const owned = await prisma.uploadedImage.count({ where: { id: { in: images.map((image) => image.imageUrl.split("/").pop()!) }, OR: [{ ownerUserId: session.userId }, ...(session.walletAddress ? [{ ownerWallet: session.walletAddress }] : [])] } });
       if (owned !== images.length) return NextResponse.json({ error: "Every series image must be uploaded by your account." }, { status: 400 });
     }
-    // Check the queue before spending an optional detector operation. The
-    // transaction repeats this check to handle concurrent submissions.
-    const pending = await prisma.submission.count({ where: { creatorId: session.userId, status: "PENDING" } });
-    if (pending >= 20) return NextResponse.json({ error: "You already have 20 applications awaiting review." }, { status: 429 });
+    // Only original art waits for human review. NFT setup is published directly
+    // and its on-chain collection is created by the separate paid deployment.
+    if (input.itemType === "WEB2_ART") {
+      const pending = await prisma.submission.count({ where: { creatorId: session.userId, itemType: "WEB2_ART", status: "PENDING" } });
+      if (pending >= 20) return NextResponse.json({ error: "You already have 20 applications awaiting review." }, { status: 429 });
+    }
     let screening: Prisma.InputJsonValue | undefined;
     if (input.imageUrl.startsWith("/api/uploads/")) {
       const image = await prisma.uploadedImage.findFirst({ where: { id: input.imageUrl.split("/").pop(), OR: [{ ownerUserId: session.userId }, ...(session.walletAddress ? [{ ownerWallet: session.walletAddress }] : [])] } });
@@ -52,11 +55,17 @@ async function handlePOST(request: NextRequest) {
         await prisma.uploadedImage.update({ where: { id: image.id }, data: { screening } });
       } else if (image.screening) screening = image.screening;
     }
-    // Bound the review queue without rate-limiting unrelated public browsing.
     const submission = await prisma.$transaction(async (tx) => {
-      const pending = await tx.submission.count({ where: { creatorId: session.userId, status: "PENDING" } });
-      if (pending >= 20) throw new Error("PENDING_LIMIT");
-      return tx.submission.create({ data: { ...details, imageCount: images.length || 1, ...(images.length ? { collectionImages: { create: images.map((image, index) => ({ ...image, position: index + 1 })) } } : {}), ...(screening ? { screening } : {}), creatorId: session.userId } });
+      if (input.itemType === "WEB2_ART") {
+        const pending = await tx.submission.count({ where: { creatorId: session.userId, itemType: "WEB2_ART", status: "PENDING" } });
+        if (pending >= 20) throw new Error("PENDING_LIMIT");
+      }
+      const application = await tx.submission.create({
+        data: { ...details, imageCount: images.length || 1, ...(images.length ? { collectionImages: { create: images.map((image, index) => ({ ...image, position: index + 1 })) } } : {}), ...(screening ? { screening } : {}), creatorId: session.userId, status: input.itemType === "NFT" ? "APPROVED" : "PENDING" },
+        include: { collectionImages: { orderBy: { position: "asc" } } },
+      });
+      if (input.itemType === "NFT") await publishSubmission(tx, application);
+      return tx.submission.findUniqueOrThrow({ where: { id: application.id } });
     });
     return NextResponse.json({ submission }, { status: 201, headers: privateHeaders });
   } catch (error) {

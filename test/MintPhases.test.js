@@ -4,6 +4,7 @@ import hre from "hardhat";
 const { ethers, networkHelpers } = await hre.network.create();
 const { time } = networkHelpers;
 const { artifacts } = hre;
+const CREATION_FEE = ethers.parseUnits("5", 18);
 const leaf = (key, wallet, tier) => ethers.keccak256(ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(["bytes32", "address", "uint8"], [key, wallet, tier])));
 const pair = (a, b) => ethers.keccak256(ethers.concat([a, b].sort()));
 describe("Phased mint access", function () {
@@ -14,7 +15,7 @@ describe("Phased mint access", function () {
     const key = ethers.id("collection-one"); const a = leaf(key, ultimate.address, 1); const b = leaf(key, fcfs.address, 2);
     const config = { root: pair(a, b), collectionKey: key, ultimateStart: start, fcfsStart: start + 100, publicStart: start + 200, ultimateLimit: 1, fcfsLimit: 1, publicLimit: 2, ultimatePrice: 1, fcfsPrice: 2 };
     const args = ["Phases", "PH", "ipfs://metadata", 3, start, 10, 3, 500];
-    const transaction = edition ? await factory.createEditionWithPhases(...args, config) : await factory.create721WithPhases(...args, false, config);
+    const transaction = edition ? await factory.createEditionWithPhases(...args, config, { value: CREATION_FEE }) : await factory.create721WithPhases(...args, false, config, { value: CREATION_FEE });
     const receipt = await transaction.wait();
     const address = receipt.logs.map(l => { try { return factory.interface.parseLog(l); } catch { return null; } }).find(l => l?.name === "CollectionCreated").args.collection;
     const nft = await ethers.getContractAt(edition ? "ArticEdition" : "ArticStudioCollection", address);
@@ -57,7 +58,7 @@ describe("Guaranteed Ultimate allocations", function () {
     const start = await time.latest() + 100; const key = ethers.id("guaranteed");
     const a = leaf(key, first.address, 1); const b = leaf(key, second.address, 1);
     const config = { root: pair(a, b), collectionKey: key, ultimateStart: start, fcfsStart: start + 100, publicStart: start + 200, ultimateLimit: 2, fcfsLimit: 1, publicLimit: 1, ultimatePrice: 0, fcfsPrice: 1 };
-    const receipt = await (await factory.create721WithPhases("Guaranteed", "GTD", "ipfs://gtd", 2, start, 4, 2, 0, false, config)).wait();
+    const receipt = await (await factory.create721WithPhases("Guaranteed", "GTD", "ipfs://gtd", 2, start, 4, 2, 0, false, config, { value: CREATION_FEE })).wait();
     const address = receipt.logs.map(l => { try { return factory.interface.parseLog(l); } catch { return null; } }).find(l => l?.name === "CollectionCreated").args.collection;
     const nft = await ethers.getContractAt("ArticStudioCollection", address);
     await time.increaseTo(start);

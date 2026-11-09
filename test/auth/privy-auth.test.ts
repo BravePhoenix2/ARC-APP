@@ -748,7 +748,11 @@ test("protects private uploads and applications with the stable account ID and r
   assert.equal((await submissions.POST(request("/api/submissions", "POST", application, other))).status, 400);
   const created = await submissions.POST(request("/api/submissions", "POST", application, owner));
   assert.equal(created.status, 201);
-  assert.equal((await created.json()).submission.creatorId, owner.user.id);
+  const saved = (await created.json()).submission;
+  assert.equal(saved.creatorId, owner.user.id);
+  assert.equal(saved.status, "APPROVED");
+  assert.ok(saved.itemId);
+  assert.equal((await db.item.findUniqueOrThrow({ where: { id: saved.itemId } })).contractAddress, null, "publishing setup does not bypass paid on-chain creation");
   assert.equal((await (await submissions.GET(request("/api/submissions", "GET", undefined, other))).json()).submissions.length, 0);
   assert.equal((await (await submissions.GET(request("/api/submissions", "GET", undefined, owner))).json()).submissions.length, 1);
 });

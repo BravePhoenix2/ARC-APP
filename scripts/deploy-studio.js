@@ -20,6 +20,18 @@ async function main() {
   const marketplaceFeeBps = feeBps("MARKETPLACE_FEE_BPS", "250");
   const factory = await (await ethers.getContractFactory("ArticStudioFactory")).deploy(feeRecipient, mintFeeBps, mintSurchargeBps);
   await factory.waitForDeployment();
+  let creationFeeSupported, creationFee;
+  try {
+    [creationFeeSupported, creationFee] = await Promise.all([
+      factory.supportsCollectionCreationFee(), factory.collectionCreationFee(),
+    ]);
+  } catch {
+    throw new Error("The studio factory creation fee could not be verified. Stop and verify the deployed factory before continuing.");
+  }
+  if (!creationFeeSupported || creationFee !== ethers.parseUnits("5", 18)) {
+    throw new Error("The deployed studio factory must support the fixed 5 native test-USDC collection creation fee.");
+  }
+  console.log("Verified collection creation fee: 5 native test USDC per collection. Creator network gas is separate.");
   const art = await (await ethers.getContractFactory("ArticArtMarket")).deploy(feeRecipient, marketplaceFeeBps);
   await art.waitForDeployment();
   const auctions = await (await ethers.getContractFactory("ArticAuctionHouse")).deploy(await factory.getAddress(), await art.getAddress(), feeRecipient, marketplaceFeeBps);

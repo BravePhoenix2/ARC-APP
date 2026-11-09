@@ -67,7 +67,7 @@ before(async () => {
 });
 after(async () => { await db?.$disconnect(); rmSync(directory, { recursive: true, force: true }); });
 
-test("a folder series stays private until review and publishes distinct ordered token images", async () => {
+test("a folder series stays private until creation and publishes distinct ordered token images without review", async () => {
   const images = [];
   const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWOwr9jyHwAE0AJrq3udBQAAAABJRU5ErkJggg==", "base64");
   for (let index = 1; index <= 3; index++) {
@@ -77,17 +77,20 @@ test("a folder series stays private until review and publishes distinct ordered 
     images.push({ imageUrl: (await uploaded.json()).url as string, filename: `${index}.png` });
   }
   const body = { ...application, maxSupply: 3, images, imageUrl: images[0].imageUrl };
+  const finalImageId = images[2].imageUrl.split("/").pop()!;
+  assert.equal((await imageRoute.GET(request(images[2].imageUrl), { params: Promise.resolve({ id: finalImageId }) })).status, 404);
   assert.equal((await submissions.POST(request("/api/submissions", "POST", body, otherCookie))).status, 400);
   const created = await submissions.POST(request("/api/submissions", "POST", body, ownerCookie));
   assert.equal(created.status, 201); const { submission } = await created.json();
   assert.equal(submission.imageCount, 3);
-  const finalImageId = images[2].imageUrl.split("/").pop()!;
-  assert.equal((await imageRoute.GET(request(images[2].imageUrl), { params: Promise.resolve({ id: finalImageId }) })).status, 404);
+  assert.equal(submission.status, "APPROVED");
+  const itemId = submission.itemId;
+  assert.ok(itemId);
   const queue = await adminQueue.GET(request("/api/admin/submissions", "GET", undefined, reviewerCookie));
   const queued = (await queue.json()).submissions.find((entry: { id: string }) => entry.id === submission.id);
-  assert.deepEqual(queued.collectionImages.map((image: { filename: string }) => image.filename), ["1.png", "2.png", "3.png"]);
-  const result = await review.PATCH(request("/api/admin/submissions/review", "PATCH", { decision: "APPROVED" }, reviewerCookie), { params: Promise.resolve({ id: submission.id }) });
-  assert.equal(result.status, 200); const itemId = (await result.json()).submission.itemId;
+  assert.equal(queued, undefined, "new NFT collections never enter the pending review queue");
+  const publishedImages = await db.collectionImage.findMany({ where: { itemId }, orderBy: { position: "asc" } });
+  assert.deepEqual(publishedImages.map((image) => image.filename), ["1.png", "2.png", "3.png"]);
   const published = await imageRoute.GET(request(images[2].imageUrl), { params: Promise.resolve({ id: finalImageId }) });
   assert.equal(published.status, 200); assert.match(published.headers.get("cache-control")!, /public/);
   const { itemMetadataUri } = await import("../../lib/itemMetadata");
@@ -148,14 +151,17 @@ test("submission authentication, AI policy, privacy, approval, rejection, and im
   assert.equal((await submissions.POST(changedWallet)).status, 401, "cross-tab session changes cannot misattribute applications");
   assert.equal((await submissions.POST(request("/api/submissions", "POST", { ...application, priceUsdc: "-2" }, ownerCookie))).status, 400);
   assert.equal((await submissions.POST(request("/api/submissions", "POST", { ...application, imageUrl: "javascript:alert(1)" }, ownerCookie))).status, 400);
-  assert.equal((await catalog.POST(request("/api/items", "POST"))).status, 405, "legacy creation cannot bypass review");
+  assert.equal((await catalog.POST(request("/api/items", "POST"))).status, 405, "legacy creation cannot bypass submission validation");
 
-  const created = await submissions.POST(request("/api/submissions", "POST", { ...application, creatorWalletAddress: other }, ownerCookie));
+  const created = await submissions.POST(request("/api/submissions", "POST", { ...application, creatorWalletAddress: other, status: "REJECTED", reviewedBy: `user:${reviewerId}`, reviewedAt: new Date().toISOString(), itemId: "attacker-item" }, ownerCookie));
   assert.equal(created.status, 201);
   const { submission } = await created.json();
-  assert.equal(submission.status, "PENDING");
+  assert.equal(submission.status, "APPROVED");
+  assert.equal(submission.reviewedBy, null, "automatic NFT publication does not impersonate a reviewer");
+  assert.equal(submission.reviewedAt, null);
+  assert.notEqual(submission.itemId, "attacker-item");
   assert.equal(submission.creationMethod, "AI_GENERATED", "AI-generated NFTs are accepted");
-  assert.equal(await db.item.count(), 0, "pending applications are not public listings");
+  assert.equal(await db.item.count(), 1, "NFT setup publishes without a reviewer approval");
   const ownerRecord = await db.user.findUniqueOrThrow({ where: { id: submission.creatorId } });
   assert.equal(ownerRecord.walletAddress, owner, "a spoofed creator address is ignored");
   const privateList = await submissions.GET(request("/api/submissions", "GET", undefined, otherCookie));
@@ -163,18 +169,13 @@ test("submission authentication, AI policy, privacy, approval, rejection, and im
   assert.equal((await adminQueue.GET(request("/api/admin/submissions", "GET", undefined, ownerCookie))).status, 403);
   assert.equal((await review.PATCH(request("/api/admin/submissions/x", "PATCH", { decision: "APPROVED" }, ownerCookie), { params: Promise.resolve({ id: submission.id }) })).status, 403);
 
-  const approved = await review.PATCH(request("/api/admin/submissions/x", "PATCH", { decision: "APPROVED" }, reviewerCookie), { params: Promise.resolve({ id: submission.id }) });
-  assert.equal(approved.status, 200);
-  const approvedSubmission = (await approved.json()).submission;
-  assert.equal(approvedSubmission.status, "APPROVED");
-  assert.equal((await db.submission.findUniqueOrThrow({ where: { id: submission.id } })).reviewedBy, `user:${reviewerId}`);
-  assert.ok(approvedSubmission.itemId);
+  assert.ok(submission.itemId);
   const publicCatalog = await catalog.GET(request("/api/items?itemType=NFT"));
   const items = (await publicCatalog.json()).items;
   assert.equal(items.length, 1);
   assert.equal(items[0].title, application.title);
   assert.equal(items[0].creationMethod, "AI_GENERATED", "NFT publication preserves the declared creation method");
-  assert.equal(items[0].status, "UPCOMING", "approval does not claim an NFT is minting");
+  assert.equal(items[0].status, "UPCOMING", "catalog setup does not claim an undeployed NFT is minting");
   assert.equal(items[0].contactEmail, undefined, "private contact information is not published");
   assert.equal((await review.PATCH(request("/api/admin/submissions/x", "PATCH", { decision: "APPROVED" }, reviewerCookie), { params: Promise.resolve({ id: submission.id }) })).status, 409);
   assert.equal(await db.item.count(), 1, "repeat approvals cannot create duplicate items");
@@ -282,7 +283,7 @@ test("submission authentication, AI policy, privacy, approval, rejection, and im
   assert.equal(await db.item.count(), 2, "repeat Art approvals cannot duplicate publication");
 });
 
-test("NFT types survive private review, filter publicly, and block soulbound resale", async () => {
+test("NFT types publish directly, filter publicly, and block soulbound resale", async () => {
   const published = new Map<string, string>();
   for (const nftKind of ["COLLECTIBLE", "EDITION", "SOULBOUND", "MEMBERSHIP"] as const) {
     const settings = {
@@ -294,11 +295,10 @@ test("NFT types survive private review, filter publicly, and block soulbound res
     assert.equal(created.status, 201);
     const { submission } = await created.json();
     assert.equal(submission.nftKind, nftKind);
-    const beforeApproval = await catalog.GET(request(`/api/items?itemType=NFT&nftKind=${nftKind}`));
-    assert.ok(!(await beforeApproval.json()).items.some((item: { title: string }) => item.title === settings.title));
-    const approved = await review.PATCH(request("/api/admin/submissions/x", "PATCH", { decision: "APPROVED" }, reviewerCookie), { params: Promise.resolve({ id: submission.id }) });
-    assert.equal(approved.status, 200);
-    const itemId = (await approved.json()).submission.itemId;
+    const immediateCatalog = await catalog.GET(request(`/api/items?itemType=NFT&nftKind=${nftKind}`));
+    assert.ok((await immediateCatalog.json()).items.some((item: { title: string }) => item.title === settings.title));
+    assert.equal(submission.status, "APPROVED");
+    const itemId = submission.itemId;
     published.set(nftKind, itemId);
     const response = await catalog.GET(request(`/api/items?itemType=NFT&nftKind=${nftKind}`));
     assert.equal(response.status, 200);
@@ -306,7 +306,7 @@ test("NFT types survive private review, filter publicly, and block soulbound res
     assert.ok(publicItem);
     for (const key of ["nftKind", "symbol", "maxPerWallet", "royaltyBps", "metadataUri", "attributes"] as const) assert.deepEqual(publicItem[key], settings[key]);
     assert.equal(publicItem.mintPriceUsdc, 0);
-    assert.equal(publicItem.status, "UPCOMING", "review approval does not simulate contract deployment");
+    assert.equal(publicItem.status, "UPCOMING", "direct publication does not simulate paid contract deployment");
   }
   assert.equal((await catalog.GET(request("/api/items?nftKind=UNKNOWN"))).status, 400);
   assert.equal((await catalog.GET(request("/api/items?itemType=WEB2_ART&nftKind=SOULBOUND"))).status, 400);
@@ -374,5 +374,50 @@ test("landing trending drops select four published NFTs and advance at the next 
     Date.now = originalNow;
     await db.item.deleteMany({ where: { creatorId: creator.id } });
     await db.user.delete({ where: { id: creator.id } });
+  }
+});
+
+test("a full art review queue does not block direct NFT setup or alter older pending NFTs", async () => {
+  const creator = await db.user.findUniqueOrThrow({ where: { walletAddress: owner } });
+  const pendingArtBefore = await db.submission.count({ where: { creatorId: creator.id, itemType: "WEB2_ART", status: "PENDING" } });
+  await db.submission.createMany({ data: Array.from({ length: 20 - pendingArtBefore }, (_, index) => ({
+    creatorId: creator.id, creatorName: "Artist", itemType: "WEB2_ART" as const,
+    title: `Queued art ${index}`, description: "Artwork awaiting its human review.", imageUrl: application.imageUrl, priceUsdc: 5,
+  })) });
+  const legacy = await db.submission.create({ data: {
+    creatorId: creator.id, creatorName: "Artist", itemType: "NFT", title: "Older pending NFT",
+    description: "An application saved before direct NFT publication.", imageUrl: application.imageUrl, priceUsdc: 1, maxSupply: 5,
+  } });
+  const created = await submissions.POST(request("/api/submissions", "POST", { ...application, title: "Direct NFT despite art queue" }, ownerCookie));
+  assert.equal(created.status, 201);
+  const saved = (await created.json()).submission;
+  assert.equal(saved.status, "APPROVED");
+  assert.ok(saved.itemId);
+  const unchanged = await db.submission.findUniqueOrThrow({ where: { id: legacy.id } });
+  assert.equal(unchanged.status, "PENDING", "existing applications are never bulk-published by a new NFT creation");
+  assert.equal(unchanged.itemId, null);
+  const art = await submissions.POST(request("/api/submissions", "POST", {
+    ...application, itemType: "WEB2_ART", creationMethod: "HUMAN", humanMadeDeclaration: true,
+    creationProcess: "Hand-painted from my own sketches with acrylic paint on a stretched cotton canvas.",
+    category: "PAINTING", imageUrl: "/api/uploads/abcdefghijklmnopqrstuvwx",
+  }, ownerCookie));
+  assert.equal(art.status, 429, "the original art review queue cap is still enforced");
+});
+
+test("failed NFT publication rolls back its accepted submission and creator changes together", async () => {
+  const creator = await db.user.findUniqueOrThrow({ where: { walletAddress: other } });
+  const before = { submissions: await db.submission.count(), items: await db.item.count() };
+  await db.$executeRawUnsafe(`CREATE TRIGGER test_reject_nft_publication BEFORE INSERT ON Item
+    WHEN NEW.title = 'Atomic failure NFT' BEGIN SELECT RAISE(ABORT, 'publication fixture failure'); END`);
+  try {
+    const result = await submissions.POST(request("/api/submissions", "POST", { ...application, title: "Atomic failure NFT" }, otherCookie));
+    assert.equal(result.status, 500);
+    assert.equal(await db.submission.count(), before.submissions, "an accepted submission cannot remain without its item");
+    assert.equal(await db.item.count(), before.items);
+    const unchanged = await db.user.findUniqueOrThrow({ where: { id: creator.id } });
+    assert.equal(unchanged.isCreator, creator.isCreator);
+    assert.equal(unchanged.username, creator.username);
+  } finally {
+    await db.$executeRawUnsafe("DROP TRIGGER test_reject_nft_publication");
   }
 });

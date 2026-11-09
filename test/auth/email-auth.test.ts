@@ -331,11 +331,12 @@ test("email creators own private uploads and applications without acquiring revi
   assert.equal(created.status, 201);
   const { submission } = await created.json();
   assert.equal(submission.creatorId, owner.user.id);
-  assert.equal(submission.status, "PENDING");
+  assert.equal(submission.status, "APPROVED");
+  assert.ok(submission.itemId);
   assert.equal(submission.creationMethod, "AI_GENERATED");
   assert.equal((await db.user.findUniqueOrThrow({ where: { id: owner.user.id } })).walletAddress, null);
   assert.equal((await db.user.findUniqueOrThrow({ where: { id: walletUser.id } })).email, walletUser.email, "contact details cannot merge accounts");
-  assert.equal(await db.item.count(), 0, "email submissions remain private pending review");
+  assert.equal(await db.item.count(), 1, "email creators can publish NFT setup without review or wallet privileges");
   assert.deepEqual((await (await submissions.GET(request("/api/submissions", "GET", undefined, other))).json()).submissions, []);
   assert.equal((await (await submissions.GET(request("/api/submissions", "GET", undefined, owner))).json()).submissions[0].id, submission.id);
   const impersonation = request("/api/admin/submissions", "GET", undefined, owner);
@@ -354,15 +355,15 @@ test("email creators own private uploads and applications without acquiring revi
   assert.equal((await reviewRoute.PATCH(walletReviewer, { params: Promise.resolve({ id: submission.id }) })).status, 403, "the old wallet allowlist no longer grants reviewer access");
   const reviewer = await login(reviewerEmail);
   assert.equal((await adminQueue.GET(request("/api/admin/submissions", "GET", undefined, reviewer))).status, 200);
-  assert.equal((await reviewRoute.PATCH(request("/api/admin/submissions/x", "PATCH", { decision: "APPROVED", reviewedBy: reviewerWallet }, reviewer), { params: Promise.resolve({ id: submission.id }) })).status, 200);
-  assert.equal((await db.submission.findUniqueOrThrow({ where: { id: submission.id } })).reviewedBy, `user:${reviewer.user.id}`, "review history stores the authenticated account, ignoring the request body");
+  assert.equal((await reviewRoute.PATCH(request("/api/admin/submissions/x", "PATCH", { decision: "APPROVED", reviewedBy: reviewerWallet }, reviewer), { params: Promise.resolve({ id: submission.id }) })).status, 409);
+  assert.equal((await db.submission.findUniqueOrThrow({ where: { id: submission.id } })).reviewedBy, null, "automatic NFT publication cannot fabricate a reviewer record");
   const publicItems = (await (await catalog.GET(request("/api/items?itemType=NFT"))).json()).items;
   assert.equal(publicItems.length, 1);
   assert.equal(publicItems[0].creatorId, owner.user.id);
   assert.equal(publicItems[0].creator.walletAddress, null);
   assert.equal(publicItems[0].creator.email, undefined, "verified creator email is never published");
   assert.equal(publicItems[0].contactEmail, undefined);
-  assert.equal((await imageRoute.GET(request(imageUrl), { params: Promise.resolve({ id }) })).status, 200, "approved artwork images become public");
+  assert.equal((await imageRoute.GET(request(imageUrl), { params: Promise.resolve({ id }) })).status, 200, "directly published NFT images become public");
 });
 
 test("legacy verified email reviewer access requires a bound account and is revoked by allowlist changes", async () => {

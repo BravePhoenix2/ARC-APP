@@ -46,7 +46,7 @@ const HOW_IT_WORKS = [
   {
     step: "02",
     title: "Browse or mint",
-    description: "Explore reviewed Testnet drops, or submit your own collection for approval.",
+    description: "Explore Testnet drops or create your collection without reviewer approval for 5 test USDC plus gas.",
   },
   {
     step: "03",
