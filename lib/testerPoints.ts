@@ -1,9 +1,9 @@
 // Shared display rules. Awarding points is always performed by the server.
 export const TESTER_POINT_RULES = [
   { kind: "SIGN_IN", label: "Join the testnet", points: 10, description: "Verify an email address or sign in with your wallet." },
-  { kind: "APPROVED_CREATOR", label: "Become an approved creator", points: 25, description: "Have your first art or NFT application reviewed and approved." },
+  { kind: "APPROVED_CREATOR", label: "Publish as a creator", points: 25, description: "Publish your first NFT collection setup or have an original art application approved." },
   { kind: "DEPLOY_COLLECTION", label: "Deploy a collection", points: 20, description: "Create your first collection through the Artiq factory on Arc Testnet." },
-  { kind: "MINT_NFT", label: "Mint an NFT", points: 30, description: "Complete your first mint from an approved Artiq collection." },
+  { kind: "MINT_NFT", label: "Mint an NFT", points: 30, description: "Complete your first mint from an Artiq collection." },
   { kind: "BUY_ART", label: "Buy from ART BAZZAR", points: 40, description: "Complete your first purchase through Artiq Art checkout." },
   { kind: "PLACE_BID", label: "Place an auction bid", points: 15, description: "Place your first confirmed bid in an Artiq auction." },
   { kind: "JOIN_REWARD", label: "Join a reward round", points: 10, description: "Join your first eligible Artiq reward round." },

@@ -91,7 +91,7 @@ export function parseSubmission(body: unknown): SubmissionInput {
     category = b.category as typeof categories[number];
   } else {
     if (b.contractAddress != null && b.contractAddress !== "") {
-      throw new SubmissionValidationError("Submit this collection without an existing contract address. Deploy it from the approved collection page so its ownership and settings can be verified.");
+      throw new SubmissionValidationError("Save this collection without an existing contract address. Create it from the collection page so its ownership, settings, and creation fee can be verified.");
     }
     if (b.nftKind != null && !isNftKind(b.nftKind)) throw new SubmissionValidationError("Choose a valid NFT type.");
     nftKind = isNftKind(b.nftKind) ? b.nftKind : "COLLECTIBLE";

@@ -8,7 +8,7 @@ export function validateMintConfig(value: unknown, cap: number, publicPrice: num
   const times = [c.ultimateStart, c.fcfsStart, c.publicStart].map((v) => typeof v === "string" ? Date.parse(v) : NaN);
   if (times.some((v) => !Number.isFinite(v)) || times[0] <= Date.now() || times[0] >= times[1] || times[1] >= times[2]) throw new Error("Choose future dates in order: Ultimate, FCFS, then public.");
   for (const limit of [c.ultimateLimit, c.fcfsLimit, c.publicLimit]) if (!Number.isInteger(limit) || limit < 1 || limit > cap) throw new Error(`Each phase limit must be between 1 and the collection wallet cap (${cap}).`);
-  for (const price of [c.ultimatePrice, c.fcfsPrice]) if (typeof price !== "string" || usdcAmount(price, true) > usdcAmount(String(publicPrice), true)) throw new Error("Allowlist prices cannot exceed the approved public price.");
+  for (const price of [c.ultimatePrice, c.fcfsPrice]) if (typeof price !== "string" || usdcAmount(price, true) > usdcAmount(String(publicPrice), true)) throw new Error("Allowlist prices cannot exceed the collection's public price.");
   return { ultimateStart: new Date(times[0]).toISOString(), fcfsStart: new Date(times[1]).toISOString(), publicStart: new Date(times[2]).toISOString(), ultimateLimit: c.ultimateLimit, fcfsLimit: c.fcfsLimit, publicLimit: c.publicLimit, ultimatePrice: c.ultimatePrice, fcfsPrice: c.fcfsPrice };
 }
 export const collectionKey = (id: string) => keccak256(toHex(id));

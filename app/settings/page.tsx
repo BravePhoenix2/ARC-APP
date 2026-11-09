@@ -71,7 +71,7 @@ export default function SettingsPage() {
           </section>
           <section className={panel} aria-labelledby="creator-heading">
             <h2 id="creator-heading" className="text-lg">Creator studio</h2>
-            <p className="mt-2 text-sm text-[var(--muted-text)]">Apply to publish your NFT collection or original artwork. Applications are reviewed before appearing in the marketplace.</p>
+            <p className="mt-2 text-sm text-[var(--muted-text)]">Publish NFT collection setups without approval, then create each collection for 5 test USDC plus gas. Original artwork applications are reviewed before appearing in ART BAZZAR.</p>
             <div className="mt-5 flex flex-wrap gap-3">
               <Link href="/apply" className={secondaryButton}>My applications</Link>
               <Link href="/nfts/create" className={secondaryButton}>Create an NFT</Link>

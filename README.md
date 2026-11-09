@@ -4,6 +4,13 @@ Next.js marketplace with Prisma/SQLite and Solidity contracts.
 
 ## Marketplace revenue
 
+NFT collection setup publishes immediately without reviewer approval. Creators
+pay a one-time **5 test USDC** fee when their wallet creates the on-chain
+collection, plus network gas. Saving setup and configuring an allowlist do not
+charge this fee. The factory requires exactly 5 native USDC (18 decimals) for
+every collection type, including collections with free mints. Failed creations
+revert the fee; recovering a confirmed transaction never charges it again.
+
 New studio deployments collect a commission from paid NFT mints, original-art
 purchases, and settled asset and NFT auctions. Paid NFT mints have two platform
 charges: a fee deducted from creator proceeds and a separate surcharge added to
@@ -35,8 +42,8 @@ marketplace deduction, before payment. Verified older contracts retain their
 original fee rules.
 If fee terms cannot be verified, checkout waits for a successful retry.
 
-Platform fees accrue in separate pull-payment balances. Mint fees accumulate at
-the studio factory, art fees at the art market, and auction fees at the auction
+Platform fees accrue in separate pull-payment balances. Collection creation and
+mint fees accumulate at the studio factory, art fees at the art market, and auction fees at the auction
 house. In `/settings/protocol`, **Platform revenue** shows each configured
 contract's cumulative fees and current withdrawable balance. Connect the fee
 recipient wallet to withdraw. Creator/seller withdrawals cannot consume platform
@@ -168,8 +175,8 @@ tester counter. Counts represent verified accounts, not distinct people. Seeded
 marketplace users are excluded. Privy-linked identities share one Artiq account;
 previous separate accounts are never merged automatically.
 
-Each account earns each milestone once: verified sign-in (10), first approved
-creator application (25), collection deployment (20), NFT mint (30), art purchase
+Each account earns each milestone once: verified sign-in (10), first published
+NFT setup or approved art application (25), collection deployment (20), NFT mint (30), art purchase
 (40), auction bid (15), joining a reward round (10), and claiming a reward (15).
 The maximum is 165 points. Ties use join time, then the public profile ID.
 Pending and rejected applications stay private and earn no creator milestone.
@@ -199,28 +206,31 @@ completed files survive a failure, and selecting the folder again skips complete
 filenames. Filenames must be unique across subfolders. ZIP archives are excluded.
 The account upload budget is 200 NFT images and 200 MB per hour.
 
-Reviewers inspect the entire series before approval. Approved collections show
-the gallery and expose numbered token metadata. Pending uploads remain private.
+Saving an NFT setup immediately publishes the gallery and numbered token metadata
+without reviewer approval. Uploads stay private until their collection setup is published.
 Image series use generated metadata and require a new collection deployed through
 the updated studio factory; existing deployed contracts cannot be upgraded in
 place. ERC-1155 editions continue to share a single image. Back up the local
 database, then run `npm run db:generate` and `npm run db:push` after this update.
 
-`/nfts` lists reviewed collections with search, format filters, and price sorting.
+`/nfts` lists published collections with search, format filters, and price sorting.
 `/nfts/create` supports ERC-721 collectibles, ERC-1155 editions (one token ID with
 multiple copies), locked ERC-5192 soulbound NFTs, and transferable ERC-721
 membership passes. Membership benefits are described by the creator; expiry,
 subscriptions, and access enforcement are not automatic. ART BAZZAR still
 requires human authorship review. AI-generated and assisted NFTs remain allowed.
 
-Applications retain the review step. After approval, the creator can deploy from
-the collection detail page and collectors can mint there. Privy email sign-in can
+NFTs skip the review queue: saving the creator form opens the collection detail
+page, where the creator can configure mint access before paying 5 test USDC to
+create the collection. ART BAZZAR retains human review. Collectors can mint after
+the on-chain collection exists and its scheduled window opens. Privy email sign-in can
 create an embedded wallet. A selected wallet must sign deployments,
-mints, payments, and claims. A successful receipt is verified against the approved
-settings before the app attaches a collection or art checkout listing.
+mints, payments, and claims. A successful receipt is verified against the saved
+settings and the same-transaction creation fee proof before the app attaches a
+new collection. Original-art checkout listings still require approved artwork.
 
 Creators can configure **Ultimate → FCFS → Public** access in **Mint access** on
-an approved, undeployed collection. Set ordered opening dates, tier prices, and
+a saved, undeployed collection. Set ordered opening dates, tier prices, and
 phase wallet limits. The main **Public mint price** from the creator form is used
 for Public minting. Ultimate and FCFS have separate prices: after setting up the
 phases, use **Edit price** on either tier to save its price independently without
@@ -237,7 +247,7 @@ FCFS wallets cannot mint during this window, so those allocations remain availab
 Unclaimed Ultimate tokens are released when FCFS opens. Both Ultimate and FCFS
 wallets can then mint subject to remaining supply; everyone can mint during public
 access. Phase limits and the original collection wallet cap both apply, including
-across windows. Allowlist prices cannot exceed the approved
+across windows. Allowlist prices cannot exceed the collection's
 public price. Each collection supports up to 2,000 registered/imported wallets.
 
 Before deployment, review the roster and click **Lock allowlist for deployment**.
@@ -251,13 +261,19 @@ The previously deployed factory cannot support these new rules. Before replacing
 its configured address, run `npm run studio:pin-factories` with the original
 factory still in `.env.local`; this records the original factory on existing
 collection rows and original art-market addresses on existing checkout listings.
-In `/settings/protocol`, choose **Deploy contracts with asset auctions** to deploy
+Run `npm run studio:artifacts` to export the updated deployment bytecode.
+In `/settings/protocol`, choose **Deploy contracts with collection creation fees** to deploy
 a new factory, art market, and auction house from your wallet. Copy the complete configuration
 only after all three transactions confirm, then rebuild and restart. Pending transaction
 hashes and confirmed steps are saved in the browser so retries resume safely. Existing collections retain their original mint rules. Existing
 auctions/reward pools stay on the original house; the new house starts empty and
 checks mint eligibility through the new factory. Keep the old addresses for
 existing auctions and claims. No deployed collection or live auction is migrated.
+The setup verifies the fixed 5 test USDC fee before offering configuration to
+copy. Old factories cannot collect this fee in place. New creation stays disabled
+until a fee-capable factory is configured; existing collection mints retain their
+original contracts. Browser setup requires wallet signatures; no private key is
+needed in chat or in the app's public environment.
 
 The new contracts are restricted to **Arc Testnet** in the app. To activate them:
 
@@ -458,14 +474,15 @@ Use `npm start` after a successful build to serve the production build.
 ## Creator applications
 
 Visit `/apply` and use **Sign in** to continue with email or a wallet through
-Privy. A verified Artiq account can submit an NFT collection
-or ART BAZZAR for review. ART BAZZAR requires a
+Privy. A verified Artiq account can publish an NFT collection setup immediately,
+or submit ART BAZZAR for review. ART BAZZAR requires a
 PNG/JPEG/WebP upload (up to 5 MB), a declaration that no generative AI was used,
 and at least 30 characters explaining the creation process. NFTs may use uploaded
 images or HTTPS image URLs and may declare human-made, AI-assisted, or AI-generated
 work. Declared AI use is shown on marketplace NFT cards. Creators can track their
-application status. Uploaded images are stored in the database. Pending uploads
-can only be viewed by their owner and reviewers; approved listing images are public.
+collection or application status. Uploaded images are stored in the database.
+NFT setup images become public when saved; unpublished uploads and pending ART
+BAZZAR images remain private to their owner and reviewers. Approved art images are public.
 External image URLs retain the visibility of their original host.
 
 Set server-only `ARTIQ_ADMIN_EMAILS` in `.env.local` to a comma-separated list of
@@ -480,8 +497,10 @@ account as `user:<account-id>`; historical wallet audit records stay intact.
 Before hosting, set `NEXT_PUBLIC_APP_URL` to the public app origin. A reverse-proxy
 deployment can use the server-only `ARTIQ_APP_ORIGIN` override for wallet sign-in.
 Visit `/admin/submissions` and sign in with a listed email to approve or reject
-applications. Approval posts the listing; it does not deploy a contract or mint an
-NFT. Rejections include feedback visible to the creator.
+art applications. Approval posts the artwork listing; it does not send an on-chain
+transaction. New NFT setups do not enter this queue. Historical pending NFT
+applications remain unchanged and can be recreated through the current creator
+form. Rejections include feedback visible to the creator.
 
 ### Legacy email compatibility
 

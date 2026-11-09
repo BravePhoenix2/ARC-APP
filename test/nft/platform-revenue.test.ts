@@ -101,7 +101,7 @@ test("shows actual accrued and withdrawable fees without losing bigint precision
   assert.match(text, /Test USDC has no monetary value/);
   assert.match(text, /2\.5/);
   assert.match(text, /Collection creation fee/);
-  assert.match(text, /5 test USDC/);
+  assert.ok(renderer!.root.findAllByType("strong").some((node) => node.children.join("") === "5 test USDC"));
   assert.equal(withdrawalButtons().length, 3);
   assert.match(text, /Collector mint surcharge/);
   assert.match(text, /4\.5/);
