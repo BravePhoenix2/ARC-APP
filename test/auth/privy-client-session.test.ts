@@ -16,12 +16,14 @@ let sdk: { ready: boolean; authenticated: boolean; user: { id: string; email: { 
 let session: PrivySession;
 let renderer: ReactTestRenderer | undefined;
 let events: EventTarget;
-let responses: Array<Response | Error>;
+let responses: Array<Response | Error | Promise<Response>>;
 let timers: Array<{ callback: () => void; delay: number; active: boolean }>;
 let draftUnmounts: number;
 let accessToken: () => Promise<string | null>;
 let identityToken: () => Promise<string | null>;
+let observedIdentityToken: string | null;
 let postCount: number;
+let postedBodies: Array<{ accessToken: string; identityToken: string | null; forceProfileRefresh?: boolean }>;
 let sdkLogout: () => Promise<void>;
 const originalFetch = globalThis.fetch;
 const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
@@ -30,7 +32,7 @@ const dependencies: Record<string, unknown> = {
   "@privy-io/react-auth": {
     usePrivy: () => ({ ...sdk, getAccessToken: () => accessToken(), login() {}, logout: () => sdkLogout() }),
     useUser: () => ({ refreshUser: async () => {} }),
-    useIdentityToken: () => ({ identityToken: "signed-identity" }),
+    useIdentityToken: () => ({ identityToken: observedIdentityToken }),
     getIdentityToken: () => identityToken(),
     useLinkAccount: () => ({ linkWallet() {} }),
     useWallets: () => ({ wallets: [] }),
@@ -73,8 +75,10 @@ beforeEach(() => {
   events = new EventTarget(); responses = []; timers = []; draftUnmounts = 0;
   accessToken = async () => "signed-access";
   identityToken = async () => "signed-identity";
+  observedIdentityToken = "signed-identity";
   sdkLogout = async () => {};
   postCount = 0;
+  postedBodies = [];
   Object.defineProperty(globalThis, "window", { configurable: true, value: {
     addEventListener: events.addEventListener.bind(events), removeEventListener: events.removeEventListener.bind(events), dispatchEvent: events.dispatchEvent.bind(events),
     setInterval: () => 1, clearInterval() {},
@@ -84,6 +88,7 @@ beforeEach(() => {
   globalThis.fetch = async (_url, options) => {
     if (options?.method === "DELETE") return Response.json({ ok: true });
     postCount++;
+    postedBodies.push(JSON.parse(String(options?.body)));
     const response = responses.shift();
     assert.ok(response, "Unexpected session request");
     if (response instanceof Error) throw response;
@@ -113,12 +118,14 @@ test("provider/network refresh failures keep a valid reviewer session and mounte
 
 test("an embedded wallet appearing refreshes proofs without resetting the reviewer", async () => {
   responses.push(success()); await render();
+  assert.equal(postedBodies[0].forceProfileRefresh, undefined);
   responses.push(Response.json({ error: "Temporary outage" }, { status: 503 }));
   sdk = { ...sdk, user: { ...sdk.user, linkedAccounts: [...sdk.user.linkedAccounts, { type: "wallet", chainType: "ethereum", address: `0x${"1".repeat(40)}` }] } };
   await render();
   assert.equal(session.authenticated, true);
   assert.equal(draftUnmounts, 0);
   assert.equal(responses.length, 0);
+  assert.equal(postedBodies[1].forceProfileRefresh, true, "linked-account changes request a fresh ownership snapshot");
 });
 
 test("rejected credentials and switching Privy identities clear the previous reviewer", async () => {
@@ -193,6 +200,8 @@ test("concurrent refreshes share one verification request", async () => {
   responses.push(success());
   await act(async () => { token.resolve("fresh-token"); assert.deepEqual(await Promise.all([first, second]), [true, true]); });
   assert.equal(postCount, 2, "one bootstrap and one shared refresh");
+  assert.equal(postedBodies[0].forceProfileRefresh, undefined);
+  assert.equal(postedBodies[1].forceProfileRefresh, true, "an explicit refresh bypasses the brief server profile cache");
 });
 
 test("temporary login failures retry twice with backoff, then stop", async () => {
@@ -218,12 +227,29 @@ test("rejected credentials do not schedule automatic retries", async () => {
 
 test("a missing identity token uses the server fallback immediately", async () => {
   let reads = 0;
+  observedIdentityToken = null;
   identityToken = async () => { reads++; return null; };
   responses.push(success()); await render();
   assert.equal(reads, 1);
   assert.equal(postCount, 1);
   assert.equal(session.authenticated, true);
 });
+
+for (const getterFailure of ["missing", "error"] as const) {
+  test(`an initially observed identity proof is submitted when the identity getter returns ${getterFailure}`, async () => {
+    observedIdentityToken = "hook-signed-identity";
+    identityToken = async () => {
+      if (getterFailure === "error") throw new Error("Identity token storage is temporarily unavailable");
+      return null;
+    };
+    responses.push(success());
+    await render();
+    assert.equal(postCount, 1);
+    assert.equal(postedBodies[0].identityToken, "hook-signed-identity", "the server receives signed claims instead of needing a profile lookup");
+    assert.equal(session.authenticated, true);
+    assert.equal(session.error, null);
+  });
+}
 
 test("a stalled HTTP verification times out without discarding a valid session", async () => {
   responses.push(success()); await render();
@@ -301,4 +327,87 @@ test("provider throttling waits for Retry-After and repeated clicks cannot bypas
     assert.equal(postCount, requests + 1);
     assert.equal(session.error, null);
   } finally { Date.now = originalNow; }
+});
+
+test("a newly available identity proof recovers from profile throttling without waiting or repeating the profile lookup", async () => {
+  observedIdentityToken = null;
+  identityToken = async () => null;
+  responses.push(Response.json({ error: "Provider busy", code: "PRIVY_PROFILE_RATE_LIMITED" }, { status: 503, headers: { "Retry-After": "45" } }));
+  await render();
+  assert.equal(postCount, 1);
+  assert.equal(postedBodies[0].identityToken, null);
+  assert.equal(session.authenticated, false);
+
+  observedIdentityToken = "new-signed-identity";
+  responses.push(success());
+  await render();
+  assert.equal(postCount, 2);
+  assert.equal(postedBodies[1].identityToken, "new-signed-identity", "recovery submits the proof that avoids the throttled endpoint");
+  assert.equal(session.authenticated, true);
+  assert.equal(session.error, null);
+  assert.ok(!timers.some((timer) => timer.active && timer.delay === 45_000));
+});
+
+test("an identity proof arriving during a profile request is used after that request is throttled", async () => {
+  const profileResponse = deferred<Response>();
+  observedIdentityToken = null;
+  identityToken = async () => null;
+  responses.push(profileResponse.promise, success());
+  await render();
+  observedIdentityToken = "new-signed-identity";
+  await render();
+  assert.equal(postCount, 1, "the first request already used the profile fallback");
+  await act(async () => {
+    profileResponse.resolve(Response.json({ error: "Provider busy", code: "PRIVY_PROFILE_RATE_LIMITED" }, { status: 503, headers: { "Retry-After": "45" } }));
+  });
+  assert.equal(postCount, 2);
+  assert.deepEqual(postedBodies.map((body) => body.identityToken), [null, "new-signed-identity"]);
+  assert.equal(session.authenticated, true);
+});
+
+test("linked-account changes during verification request a fresh snapshot after it completes", async () => {
+  const access = deferred<string>();
+  accessToken = () => access.promise;
+  responses.push(success(), success());
+  await render();
+  sdk = { ...sdk, user: { ...sdk.user, linkedAccounts: [...sdk.user.linkedAccounts, { type: "wallet", chainType: "ethereum", address: `0x${"2".repeat(40)}` }] } };
+  await render();
+  assert.equal(postCount, 0);
+  await act(async () => { access.resolve("signed-access"); });
+  assert.equal(postCount, 2);
+  assert.deepEqual(postedBodies.map((body) => body.forceProfileRefresh), [undefined, true]);
+  assert.equal(session.authenticated, true);
+});
+
+for (const [status, code] of [[429, "LOGIN_RATE_LIMITED"], [503, "PRIVY_VERIFICATION_UNAVAILABLE"]] as const) {
+  test(`a newly available identity proof cannot bypass ${code} cooldowns`, async () => {
+    observedIdentityToken = null;
+    identityToken = async () => null;
+    responses.push(Response.json({ error: "Please wait", code }, { status, headers: { "Retry-After": "45" } }));
+    await render();
+    observedIdentityToken = "new-signed-identity";
+    await render();
+    await refresh();
+    assert.equal(postCount, 1);
+    assert.equal(session.authenticated, false);
+    assert.equal(session.isSyncing, false);
+    assert.ok(timers.some((timer) => timer.active && timer.delay === 45_000));
+  });
+}
+
+test("a rejected recovery proof stops without repeatedly bypassing the provider cooldown", async () => {
+  observedIdentityToken = null;
+  identityToken = async () => null;
+  responses.push(Response.json({ error: "Provider busy", code: "PRIVY_PROFILE_RATE_LIMITED" }, { status: 503, headers: { "Retry-After": "45" } }));
+  await render();
+  observedIdentityToken = "rejected-identity";
+  responses.push(Response.json({ error: "Invalid token" }, { status: 401 }));
+  await render();
+  await render();
+  await focus();
+  await refresh();
+  assert.equal(postCount, 2);
+  assert.equal(session.authenticated, false);
+  assert.equal(session.isSyncing, false);
+  assert.equal(session.error, "Invalid token");
 });

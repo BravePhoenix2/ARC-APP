@@ -25,6 +25,33 @@ export type PrivySession = {
 
 const verificationKeys = new Map<string, JWTVerifyGetKey>();
 const hashToken = (token: string) => createHash("sha256").update(token).digest("hex");
+type VerifiedAccounts = Pick<VerifiedPrivyIdentity, "email" | "verifiedEmails" | "walletAddresses">;
+type ProfileLookup = { promise: Promise<VerifiedAccounts>; cacheable: boolean };
+const profileCache = new Map<string, { accounts: VerifiedAccounts; expiresAt: number }>();
+const profileLookups = new Map<string, ProfileLookup>();
+const PROFILE_CACHE_MS = 30_000;
+const PROFILE_CACHE_LIMIT = 256;
+
+function privyClientId(): string | undefined {
+  const value = process.env.NEXT_PUBLIC_PRIVY_CLIENT_ID?.trim();
+  return value && /^[a-zA-Z0-9_-]{8,128}$/.test(value) ? value : undefined;
+}
+
+function copyVerifiedAccounts(accounts: VerifiedAccounts): VerifiedAccounts {
+  return { email: accounts.email, verifiedEmails: [...accounts.verifiedEmails], walletAddresses: [...accounts.walletAddresses] };
+}
+
+function profileKey(accessToken: string, appId: string, subject: string, clientId = privyClientId()): string {
+  return JSON.stringify([appId, clientId ?? "", subject, hashToken(accessToken)]);
+}
+
+function invalidateProfile(key: string): void {
+  profileCache.delete(key);
+  // A lookup started before a link/unlink must not repopulate a stale snapshot.
+  const previous = profileLookups.get(key);
+  if (previous) previous.cacheable = false;
+  profileLookups.delete(key);
+}
 
 type VerificationDiagnostic = {
   stage: "jwks" | "access-token" | "identity-token" | "current-user";
@@ -71,15 +98,14 @@ export function privyVerificationFailureCode(error: unknown): "PRIVY_NOT_CONFIGU
  * authenticates the user's access token, without an app secret or dashboard
  * identity-token flag. No client-supplied user object or URL is accepted.
  */
-async function currentPrivyAccounts(accessToken: string, appId: string, subject: string): Promise<unknown[]> {
-  const clientId = process.env.NEXT_PUBLIC_PRIVY_CLIENT_ID?.trim();
+async function currentPrivyAccounts(accessToken: string, appId: string, subject: string, clientId?: string): Promise<unknown[]> {
   let response: Response;
   try {
     response = await fetch("https://auth.privy.io/api/v1/users/me", {
       method: "GET", redirect: "error", cache: "no-store", signal: AbortSignal.timeout(8_000),
       headers: {
         Authorization: `Bearer ${accessToken}`, "privy-app-id": appId, Accept: "application/json",
-        ...(clientId && /^[a-zA-Z0-9_-]{8,128}$/.test(clientId) ? { "privy-client-id": clientId } : {}),
+        ...(clientId ? { "privy-client-id": clientId } : {}),
       },
     });
   } catch (error) {
@@ -157,6 +183,67 @@ function emailAddress(value: unknown): string | null {
   return labels.length >= 2 && labels.every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label)) ? email : null;
 }
 
+function verifiedAccounts(accounts: unknown): VerifiedAccounts {
+  if (!Array.isArray(accounts) || accounts.length > 100) throw new Error("INVALID_PRIVY_TOKEN");
+  const now = Math.floor(Date.now() / 1_000);
+  const emails: string[] = [];
+  const wallets: string[] = [];
+  for (const account of accounts) {
+    if (!account || typeof account !== "object" || Array.isArray(account)) continue;
+    const linked = account as Record<string, unknown>;
+    // Identity tokens use `lv`; the full linked-account representation uses `verified_at`.
+    const verifiedAt = linked.lv ?? linked.latest_verified_at ?? linked.verified_at;
+    if (typeof verifiedAt !== "number" || !Number.isSafeInteger(verifiedAt) || verifiedAt <= 0 || verifiedAt > now + 30) continue;
+    if (linked.type === "email") {
+      const email = emailAddress(linked.address);
+      if (email && !emails.includes(email)) emails.push(email);
+    }
+    if (linked.type === "wallet" && linked.chain_type === "ethereum" && linked.user_can_sign !== false) {
+      const wallet = walletAddress(linked.address);
+      if (wallet && !wallets.includes(wallet)) wallets.push(wallet);
+    }
+  }
+  if (!emails.length && !wallets.length) throw new Error("PRIVY_IDENTITY_REQUIRED");
+  return { email: emails[0] ?? null, verifiedEmails: emails, walletAddresses: wallets };
+}
+
+/** Called only after access-token verification; cached claims never authenticate a JWT. */
+async function currentPrivyIdentity(accessToken: string, appId: string, subject: string, tokenExpiresAt: number, forceRefresh: boolean): Promise<VerifiedAccounts> {
+  const clientId = privyClientId();
+  const key = profileKey(accessToken, appId, subject, clientId);
+  const now = Date.now();
+  for (const [cachedKey, entry] of profileCache) {
+    if (entry.expiresAt <= now) profileCache.delete(cachedKey);
+  }
+  if (forceRefresh) {
+    invalidateProfile(key);
+  } else {
+    const cached = profileCache.get(key);
+    if (cached) return copyVerifiedAccounts(cached.accounts);
+    const pending = profileLookups.get(key);
+    if (pending) return copyVerifiedAccounts(await pending.promise);
+  }
+  const load = async () => {
+    const accounts = verifiedAccounts(await currentPrivyAccounts(accessToken, appId, subject, clientId));
+    if (tokenExpiresAt <= Date.now()) throw new Error("INVALID_PRIVY_TOKEN");
+    return accounts;
+  };
+  // Keep retained memory bounded even under many distinct valid-token requests.
+  if (!profileLookups.has(key) && profileLookups.size >= PROFILE_CACHE_LIMIT) return load();
+  const lookup: ProfileLookup = { promise: Promise.resolve().then(load), cacheable: true };
+  profileLookups.set(key, lookup);
+  try {
+    const accounts = await lookup.promise;
+    if (lookup.cacheable && profileLookups.get(key) === lookup) {
+      while (profileCache.size >= PROFILE_CACHE_LIMIT) profileCache.delete(profileCache.keys().next().value!);
+      profileCache.set(key, { accounts: copyVerifiedAccounts(accounts), expiresAt: Math.min(Date.now() + PROFILE_CACHE_MS, tokenExpiresAt) });
+    }
+    return copyVerifiedAccounts(accounts);
+  } finally {
+    if (profileLookups.get(key) === lookup) profileLookups.delete(key);
+  }
+}
+
 /** Only Privy's fixed HTTPS JWKS origin can supply verification keys. No token-controlled URLs. */
 function privyKeys(appId: string): JWTVerifyGetKey {
   let keys = verificationKeys.get(appId);
@@ -173,7 +260,7 @@ function privyKeys(appId: string): JWTVerifyGetKey {
 
 /** A signed access token authenticates the DID; signed identity claims or Privy's authenticated API prove linked accounts. */
 export async function verifyPrivyTokens(
-  input: { accessToken: string; identityToken?: string | null },
+  input: { accessToken: string; identityToken?: string | null; forceProfileRefresh?: boolean },
   verificationKey?: JWTVerifyGetKey,
   onVerifiedSubject?: (privyDid: string) => Promise<void>,
 ): Promise<VerifiedPrivyIdentity> {
@@ -211,41 +298,23 @@ export async function verifyPrivyTokens(
   if (typeof access.payload.sid !== "string" || !access.payload.sid) throw new Error("INVALID_PRIVY_TOKEN");
   // A verified DID can acquire its abuse budget before any provider profile read.
   await onVerifiedSubject?.(access.payload.sub!);
-  let accounts: unknown;
+  let accounts: VerifiedAccounts;
   let identityExpiresAt = access.payload.exp!;
   if (input.identityToken) {
     // A supplied but invalid identity token cannot be hidden by an API fallback.
     const identity = await verifyToken(input.identityToken);
     validateClaims(identity);
     if (access.payload.sub !== identity.payload.sub || typeof identity.payload.linked_accounts !== "string") throw new Error("INVALID_PRIVY_TOKEN");
-    accounts = JSON.parse(identity.payload.linked_accounts);
+    accounts = verifiedAccounts(JSON.parse(identity.payload.linked_accounts));
     identityExpiresAt = identity.payload.exp!;
+    if (input.forceProfileRefresh === true) invalidateProfile(profileKey(input.accessToken, appId, access.payload.sub!));
   } else {
-    accounts = await currentPrivyAccounts(input.accessToken, appId, access.payload.sub!);
+    accounts = await currentPrivyIdentity(input.accessToken, appId, access.payload.sub!, access.payload.exp! * 1_000, input.forceProfileRefresh === true);
   }
-  if (!Array.isArray(accounts) || accounts.length > 100) throw new Error("INVALID_PRIVY_TOKEN");
-  const emails: string[] = [];
-  const wallets: string[] = [];
-  for (const account of accounts) {
-    if (!account || typeof account !== "object" || Array.isArray(account)) continue;
-    const linked = account as Record<string, unknown>;
-    // Identity tokens use `lv`; the full linked-account representation uses `verified_at`.
-    const verifiedAt = linked.lv ?? linked.latest_verified_at ?? linked.verified_at;
-    if (typeof verifiedAt !== "number" || !Number.isSafeInteger(verifiedAt) || verifiedAt <= 0 || verifiedAt > now + 30) continue;
-    if (linked.type === "email") {
-      const email = emailAddress(linked.address);
-      if (email && !emails.includes(email)) emails.push(email);
-    }
-    if (linked.type === "wallet" && linked.chain_type === "ethereum" && linked.user_can_sign !== false) {
-      const wallet = walletAddress(linked.address);
-      if (wallet && !wallets.includes(wallet)) wallets.push(wallet);
-    }
-  }
-  if (!emails.length && !wallets.length) throw new Error("PRIVY_IDENTITY_REQUIRED");
   const expiresAt = new Date(Math.min(access.payload.exp!, identityExpiresAt, now + PRIVY_SESSION_SECONDS) * 1_000);
   if (expiresAt.getTime() <= Date.now()) throw new Error("INVALID_PRIVY_TOKEN");
   return {
-    privyDid: access.payload.sub!, email: emails[0] ?? null, verifiedEmails: emails, walletAddresses: wallets,
+    privyDid: access.payload.sub!, ...accounts,
     expiresAt,
   };
 }

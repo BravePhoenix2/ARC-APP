@@ -385,9 +385,12 @@ configured, the landing page renders normally and app entry shows a setup notice
 
 1. Create an app named **Artiq Testnet** at [Privy Dashboard](https://dashboard.privy.io).
 2. Under **User management > Authentication**, enable **Email** and **Ethereum
-   wallet** login. Optionally enable **Advanced > Return user data in an identity
-   token**. Without that token, the server retrieves verified account links from
-   Privy's authenticated current-user API after verifying the access token.
+   wallet** login. Enable **Advanced > Return user data in an identity token**
+   so the server can verify linked accounts without a rate-limited profile request.
+   The app accepts the SDK's signed identity token from the request or its cookie,
+   including HttpOnly cookies. Without that token, the server falls back to Privy's
+   authenticated current-user API, briefly reuses verified profiles, and combines
+   concurrent lookups. This fallback still depends on the provider's availability.
 3. In app settings, allow `http://localhost:3000` and your current public HTTPS
    app origin. Temporary Cloudflare tunnel domains change; update the allowed
    origin and Artiq public URL whenever the tunnel changes. If app clients are

@@ -1,5 +1,6 @@
 import { protectAccount, withAbuseProtection } from "@/lib/abuseProtection";
 import { NextRequest, NextResponse } from "next/server";
+import { decodeJwt } from "jose";
 import { getAddress } from "viem";
 import { EMAIL_SESSION_COOKIE, clearEmailSessionCookie, getEmailSession } from "@/lib/emailAuth";
 import {
@@ -41,6 +42,22 @@ function sessionBody(request: NextRequest, session: PrivySession) {
     },
     expiresAt: session.expiresAt.toISOString(),
   };
+}
+
+function identityCookie(request: NextRequest, accessToken: string): string | undefined {
+  // The SDK scopes cookies to the active DID when multiple users are stored.
+  // Decoding only selects a cookie; verifyPrivyTokens must verify both JWTs
+  // and their matching subjects before any account data can be trusted.
+  if (accessToken.length <= 16_000) {
+    try {
+      const { sub } = decodeJwt(accessToken);
+      if (typeof sub === "string" && /^did:privy:[a-zA-Z0-9:_-]{1,160}$/.test(sub)) {
+        const token = request.cookies.get(`privy-${sub}-id-token`)?.value;
+        if (token) return token;
+      }
+    } catch { /* Malformed access tokens are rejected by the verifier below. */ }
+  }
+  return request.cookies.get("privy-id-token")?.value;
 }
 
 function label(account: Candidate): string {
@@ -151,16 +168,21 @@ async function handlePOST(request: NextRequest) {
     return NextResponse.json({ error: "Provide a valid sign-in request." }, { status: 400, headers });
   }
   if (!body || typeof body !== "object" || Array.isArray(body)) return NextResponse.json({ error: "Provide a valid sign-in request." }, { status: 400, headers });
-  const { accessToken, identityToken, preferredAccountId } = body as Record<string, unknown>;
+  const { accessToken, identityToken, preferredAccountId, forceProfileRefresh } = body as Record<string, unknown>;
   if (typeof accessToken !== "string" || !accessToken ||
       (preferredAccountId !== undefined && (typeof preferredAccountId !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(preferredAccountId)))) {
     return NextResponse.json({ error: "Provide your current Privy sign-in tokens." }, { status: 400, headers });
   }
   if (identityToken !== undefined && identityToken !== null && typeof identityToken !== "string") return NextResponse.json({ error: "Provide your current Privy sign-in tokens." }, { status: 400, headers });
+  if (forceProfileRefresh !== undefined && typeof forceProfileRefresh !== "boolean") return NextResponse.json({ error: "Provide a valid sign-in request." }, { status: 400, headers });
+  // HttpOnly identity cookies are unavailable to getIdentityToken() in the
+  // browser. Use the same signed proof without another provider profile read.
+  // An explicitly supplied proof always wins, including when it is invalid.
+  const identityProof = identityToken || request.headers.get("privy-id-token") || identityCookie(request, accessToken);
   let identity: VerifiedPrivyIdentity;
   const verificationStartedAt = Date.now();
   try {
-    identity = await verifyPrivyTokens({ accessToken, identityToken }, undefined, async (did) => {
+    identity = await verifyPrivyTokens({ accessToken, identityToken: identityProof, forceProfileRefresh: forceProfileRefresh === true }, undefined, async (did) => {
       const limited = await protectAccount("login", did, "auth/privy/session", request);
       if (limited) throw new LoginThrottled(limited);
     });
@@ -170,7 +192,8 @@ async function handlePOST(request: NextRequest) {
     const diagnostic = privyVerificationDiagnostic(cause);
     console.warn("[artiq-auth]", { event: "privy_session_verification_failed", code, ...diagnostic, elapsedMs: Date.now() - verificationStartedAt });
     if (code === "PRIVY_VERIFICATION_UNAVAILABLE") {
-      return NextResponse.json({ error: diagnostic.retryAfterSeconds ? "The sign-in provider is busy. Please wait a moment before trying again." : "Sign-in verification is temporarily unavailable. Please retry in a moment.", code }, {
+      const profileLimited = diagnostic.stage === "current-user" && diagnostic.upstreamStatus === 429;
+      return NextResponse.json({ error: "Sign-in verification is temporarily unavailable. Please retry in a moment.", code: profileLimited ? "PRIVY_PROFILE_RATE_LIMITED" : code }, {
         status: 503, headers: { ...headers, ...(diagnostic.retryAfterSeconds ? { "Retry-After": String(diagnostic.retryAfterSeconds) } : {}) },
       });
     }

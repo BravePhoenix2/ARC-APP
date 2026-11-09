@@ -25,6 +25,7 @@ const dependencies: Record<string, unknown> = {
   "@/components/Atmosphere": empty,
   "@/components/DailyMuse": empty,
   "@/components/TrendingDrops": empty,
+  "@/components/TestnetNotice": empty,
   "@/components/Eyebrow": empty,
   "@/components/orbit-shapes": { OrbitCircle: () => null, OrbitOval: () => null, OrbitSquare: () => null, OrbitTriangle: () => null },
   "@/lib/arcConfig": { arcChain: { name: "Arc Testnet" } },

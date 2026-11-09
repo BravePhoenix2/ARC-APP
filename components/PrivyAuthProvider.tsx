@@ -44,7 +44,8 @@ function abortable<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
 }
 
 type VerifiedSession = { binding: string; user: PrivyAccount; expiresAt: number };
-type PendingSync = { binding: string; accountId?: string; controller: AbortController; promise: Promise<boolean> };
+type PendingSync = { binding: string; accountId?: string; forceProfileRefresh: boolean; controller: AbortController; promise: Promise<boolean> };
+type SyncOptions = { identityProof?: string; forceProfileRefresh?: boolean };
 
 /** Does not mount the SDK or make authentication requests without an app ID. */
 export function UnconfiguredPrivyAuthProvider({ children }: { children: ReactNode }) {
@@ -89,6 +90,12 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
   const [retryDelay, setRetryDelay] = useState<number | null>(null);
   const retryCount = useRef(0);
   const retryAfterUntil = useRef(0);
+  const profileCooldown = useRef(false);
+  const lastSubmittedIdentityToken = useRef<string | null>(null);
+  const lastObservedIdentityToken = useRef(observedIdentityToken);
+  const observedIdentityTokenRef = useRef(observedIdentityToken);
+  observedIdentityTokenRef.current = observedIdentityToken;
+  const profileRecoveryToken = useRef<string | null>(null);
   const renewalAttemptedFor = useRef<number | null>(null);
   const lastFocusSync = useRef(0);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
@@ -122,6 +129,7 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
     accounts: Array.from(new Set(linkedAccounts)),
   }) : "";
   const binding = ready && sdkAuthenticated && sdkUser ? sdkUser.id : "";
+  const lastLinkedIdentity = useRef({ binding, identity });
   const selectedWallet = address && linkedAccounts.includes(`wallet:${address.toLowerCase()}`) ? address : undefined;
   const current = useRef({ binding, ready, sdkAuthenticated, hasVerified: Boolean(verified), hasPendingChoice: pendingAccounts.length > 0 });
   current.current = { binding, ready, sdkAuthenticated, hasVerified: Boolean(verified), hasPendingChoice: pendingAccounts.length > 0 };
@@ -157,11 +165,19 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
     finally { if (pendingRevocation.current === request) pendingRevocation.current = null; }
   }, []);
 
-  const sync = useCallback(async (preferredAccountId?: string): Promise<boolean> => {
+  const sync = useCallback(async (preferredAccountId?: string, options?: SyncOptions): Promise<boolean> => {
     const requestedBinding = current.current.binding;
-    if (Date.now() < retryAfterUntil.current) return false;
+    const identityProof = options?.identityProof;
+    const forceProfileRefresh = options?.forceProfileRefresh === true;
+    // A newly issued identity proof avoids the throttled profile endpoint.
+    // Account/application rate limits still apply, and an unchanged proof
+    // cannot repeatedly bypass a provider cooldown.
+    const recoveringProfile = Boolean(identityProof && profileCooldown.current && profileRecoveryToken.current !== identityProof);
+    if (Date.now() < retryAfterUntil.current && !recoveringProfile) return false;
     if (!requestedBinding || !current.current.ready || !current.current.sdkAuthenticated || loggingOut.current || suspended.current) return false;
-    if (pending.current?.binding === requestedBinding && pending.current.accountId === preferredAccountId) return pending.current.promise;
+    if (pending.current?.binding === requestedBinding && pending.current.accountId === preferredAccountId &&
+        pending.current.forceProfileRefresh === forceProfileRefresh) return pending.current.promise;
+    if (recoveringProfile) profileRecoveryToken.current = identityProof!;
     pending.current?.controller.abort();
     const controller = new AbortController();
     const version = ++generation.current;
@@ -186,8 +202,10 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
           invalidSession = true;
           throw new Error("Your sign-in has expired. Sign out and sign in again.");
         }
-        const identityToken = await abortable(getIdentityToken().catch(() => null), controller.signal);
+        const identityToken = identityProof ??
+          (await abortable(getIdentityToken().catch(() => null), controller.signal) ?? observedIdentityTokenRef.current);
         if (!isCurrent()) return false;
+        lastSubmittedIdentityToken.current = identityToken;
         // A missing identity token is supported by the server's authenticated
         // Privy profile lookup. Only Privy can attest email/wallet ownership;
         // the unsigned SDK user is never sent as an authentication substitute.
@@ -198,7 +216,7 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
           // Wallet selection is separate from account authentication. Private
           // transaction requests bind the selected, server-verified wallet.
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ accessToken, identityToken, ...(preferredAccountId ? { preferredAccountId } : {}) }),
+          body: JSON.stringify({ accessToken, identityToken, ...(preferredAccountId ? { preferredAccountId } : {}), ...(forceProfileRefresh ? { forceProfileRefresh: true } : {}) }),
           signal: controller.signal,
         }), controller.signal);
         const body = await abortable(response.json().catch(() => null), controller.signal);
@@ -215,6 +233,7 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
             if (Number.isFinite(seconds) && seconds > 0) {
               retryAfterMs = Math.min(300_000, seconds * 1000);
               retryAfterUntil.current = Date.now() + retryAfterMs;
+              profileCooldown.current = response.status === 503 && body?.code === "PRIVY_PROFILE_RATE_LIMITED";
             }
           }
           invalidSession = response.status < 500 && response.status !== 429;
@@ -230,6 +249,9 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
         const changed = lastAccount.current !== accountId;
         lastAccount.current = accountId;
         retryCount.current = 0;
+        retryAfterUntil.current = 0;
+        profileCooldown.current = false;
+        profileRecoveryToken.current = null;
         setVerified({ binding: requestedBinding, user: body.user, expiresAt });
         setPendingAccounts([]);
         setError(null);
@@ -256,14 +278,14 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
         }
       }
     })();
-    pending.current = { binding: requestedBinding, accountId: preferredAccountId, controller, promise: request };
+    pending.current = { binding: requestedBinding, accountId: preferredAccountId, forceProfileRefresh, controller, promise: request };
     return request;
   }, [clearSession, queryClient]);
 
   const refresh = useCallback(() => {
     if (Date.now() < retryAfterUntil.current) return Promise.resolve(false);
     retryCount.current = 0;
-    return sync();
+    return sync(undefined, { forceProfileRefresh: true });
   }, [sync]);
   const selectAccount = useCallback((accountId: string) => {
     if (!pendingAccounts.some((account) => account.id === accountId)) return Promise.resolve(false);
@@ -286,6 +308,9 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
     setRetryDelay(null);
     retryCount.current = 0;
     retryAfterUntil.current = 0;
+    profileCooldown.current = false;
+    lastSubmittedIdentityToken.current = null;
+    profileRecoveryToken.current = null;
     renewalAttemptedFor.current = null;
     lastFocusSync.current = 0;
     clearSession();
@@ -301,8 +326,14 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
   }, [binding, clearSession, ready, revokeServerSession, sync]);
 
   useEffect(() => {
-    if (binding && !pending.current && !current.current.hasPendingChoice) void sync();
-  }, [binding, identity, sync]);
+    if (lastLinkedIdentity.current.binding !== binding) {
+      lastLinkedIdentity.current = { binding, identity };
+      return;
+    }
+    if (!binding || lastLinkedIdentity.current.identity === identity || pending.current || current.current.hasPendingChoice) return;
+    lastLinkedIdentity.current = { binding, identity };
+    void sync(undefined, { forceProfileRefresh: true });
+  }, [binding, identity, isSyncing, sync]);
 
   useEffect(() => {
     if (!binding || retryDelay === null || pendingAccounts.length || isLoggingOut) return;
@@ -312,10 +343,13 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
 
   // A token can arrive after the login callback. Resume verification rather
   // than leaving a successfully signed-in user at a second Sign in button.
-  const hasIdentityToken = Boolean(observedIdentityToken);
   useEffect(() => {
-    if (binding && hasIdentityToken && !pending.current && !current.current.hasVerified && !current.current.hasPendingChoice) void sync();
-  }, [binding, hasIdentityToken, sync]);
+    if (!observedIdentityToken) { lastObservedIdentityToken.current = null; return; }
+    if (!binding || observedIdentityToken === lastObservedIdentityToken.current || pending.current) return;
+    lastObservedIdentityToken.current = observedIdentityToken;
+    if (observedIdentityToken === lastSubmittedIdentityToken.current || current.current.hasVerified || current.current.hasPendingChoice) return;
+    void sync(undefined, { identityProof: observedIdentityToken });
+  }, [binding, isSyncing, observedIdentityToken, sync]);
 
   useEffect(() => {
     if (!binding) return;

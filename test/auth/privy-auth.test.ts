@@ -256,7 +256,7 @@ test("rejects unconfigured, foreign, malformed and oversized sign-ins before cre
   const missing = request("/api/auth/privy/session", "POST", tokens);
   missing.headers.delete("origin");
   assert.equal((await route.POST(missing)).status, 403);
-  for (const body of [null, [], {}, { ...tokens, identityToken: {} }, { ...tokens, preferredAccountId: { id: "spoofed" } }, { ...tokens, extra: "x".repeat(100_000) }]) {
+  for (const body of [null, [], {}, { ...tokens, identityToken: {} }, { ...tokens, forceProfileRefresh: "true" }, { ...tokens, preferredAccountId: { id: "spoofed" } }, { ...tokens, extra: "x".repeat(100_000) }]) {
     assert.equal((await route.POST(request("/api/auth/privy/session", "POST", body))).status, 400);
   }
   const malformed = new NextRequest(`${origin}/api/auth/privy/session`, { method: "POST", headers: { Origin: origin, "Content-Type": "application/json" }, body: "{" });
@@ -298,8 +298,8 @@ test("an access-token-only login reads Privy's verified current user and restore
   const privyDid = did();
   const tokens = await tokenPair({ privyDid });
   let currentCookie = previous.cookie;
+  currentUserPlans.push({ body: currentUserBody(privyDid, [fullEmailAccount(reviewerEmail)]) });
   for (const identityToken of [undefined, null, ""]) {
-    currentUserPlans.push({ body: currentUserBody(privyDid, [fullEmailAccount(reviewerEmail)]) });
     const incoming = request("/api/auth/privy/session", "POST", {
       accessToken: tokens.accessToken, identityToken,
       // The user can choose neither the upstream identity nor its privileges.
@@ -321,13 +321,59 @@ test("an access-token-only login reads Privy's verified current user and restore
     assert.equal((await adminQueue.GET(request("/api/admin/submissions", "GET", undefined, reviewer))).status, 200);
     assert.ok(Date.parse(body.expiresAt) <= (nowSeconds() + 3600) * 1000, "the fallback session cannot outlive its verified access token");
   }
-  assert.equal(currentUserRequests.length, 3);
+  assert.equal(currentUserRequests.length, 1, "reloads with the same verified token reuse the short-lived profile snapshot");
   assert.ok(currentUserRequests.every((call) => call.headers.get("authorization") === `Bearer ${tokens.accessToken}`));
   assert.equal(await db.user.count(), 1);
   assert.equal(await db.privySession.count(), 1);
   assert.equal(await db.emailSession.count(), 0);
   assert.equal(await db.testerProfile.count(), 1);
   assert.equal(await db.testerMilestone.count({ where: { kind: "SIGN_IN" } }), 1);
+});
+
+test("signed identity headers and SDK cookies verify sign-in without a provider profile request", async () => {
+  const tokens = await tokenPair({ accounts: [emailAccount(reviewerEmail), walletAccount(ownerWallet)] });
+  const { sub } = JSON.parse(Buffer.from(tokens.accessToken.split(".")[1], "base64url").toString());
+  for (const source of ["cookie", "scoped-cookie", "header"] as const) {
+    const incoming = request("/api/auth/privy/session", "POST", { accessToken: tokens.accessToken, identityToken: null });
+    if (source === "header") incoming.headers.set("privy-id-token", tokens.identityToken);
+    else incoming.cookies.set(source === "cookie" ? "privy-id-token" : `privy-${sub}-id-token`, tokens.identityToken);
+    const response = await route.POST(incoming);
+    assert.equal(response.status, 200, source);
+    const body = await response.json();
+    assert.equal(body.user.email, reviewerEmail);
+    assert.equal(body.user.isAdmin, true);
+    assert.deepEqual(body.user.walletAddresses, [ownerWallet]);
+  }
+  assert.equal(currentUserRequests.length, 0, "a signed identity proof bypasses the rate-limited profile endpoint");
+  assert.equal(await db.user.count(), 1);
+});
+
+test("identity cookies cannot authenticate forged, expired, foreign-app or mismatched proofs", async () => {
+  const tokens = await tokenPair();
+  const invalidProofs = [
+    "forged-identity-token",
+    (await tokenPair({ identityClaims: { aud: "foreign-app" } })).identityToken,
+    (await tokenPair({ identityClaims: { exp: nowSeconds() - 60 } })).identityToken,
+    (await tokenPair()).identityToken,
+  ];
+  for (const proof of invalidProofs) {
+    const incoming = request("/api/auth/privy/session", "POST", { accessToken: tokens.accessToken });
+    incoming.cookies.set("privy-id-token", proof);
+    const response = await route.POST(incoming);
+    assert.equal(response.status, 401);
+    assert.equal((await response.json()).code, "INVALID_PRIVY_TOKEN");
+  }
+  for (const source of ["body", "header"] as const) {
+    const incoming = request("/api/auth/privy/session", "POST", {
+      accessToken: tokens.accessToken, ...(source === "body" ? { identityToken: "invalid-explicit-token" } : {}),
+    });
+    incoming.cookies.set("privy-id-token", tokens.identityToken);
+    if (source === "header") incoming.headers.set("privy-id-token", "invalid-explicit-token");
+    assert.equal((await route.POST(incoming)).status, 401, "an invalid explicit proof cannot fall back to a valid cookie");
+  }
+  assert.equal(currentUserRequests.length, 0);
+  assert.equal(await db.user.count(), 0);
+  assert.equal(await db.privySession.count(), 0);
 });
 
 test("a supplied invalid identity token cannot be replaced with a more permissive profile lookup", async () => {
@@ -427,7 +473,7 @@ test("provider throttling forwards a bounded retry delay and preserves verified 
     const response = await route.POST(request("/api/auth/privy/session", "POST", { accessToken: tokens.accessToken, identityToken: null }, signed));
     assert.equal(response.status, 503);
     assert.equal(response.headers.get("retry-after"), expected);
-    assert.equal((await response.json()).code, "PRIVY_VERIFICATION_UNAVAILABLE");
+    assert.equal((await response.json()).code, "PRIVY_PROFILE_RATE_LIMITED");
     assert.equal(await db.privySession.count(), 1, "throttling cannot issue or revoke a session");
   }
 });
