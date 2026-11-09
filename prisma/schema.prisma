@@ -169,6 +169,7 @@ model Item {
   collectionImages CollectionImage[]
   contractAddress String?
   deploymentFactory String?
+  creationPayment CollectionCreationPayment?
   mintAccessPlan MintAccessPlan?
   mintPriceUsdc   Float?
   mintStartTime   DateTime?
@@ -199,6 +200,20 @@ model Item {
   @@index([itemType])
   @@index([nftKind])
   @@index([status])
+}
+
+// A confirmed direct treasury payment belongs to one collection forever.
+// Restrict deletion so a retained payment cannot silently be reused.
+model CollectionCreationPayment {
+  itemId          String   @id
+  item            Item     @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  ownerUserId     String
+  txHash          String   @unique
+  payerWallet     String
+  recipientWallet String
+  chainId         Int
+  amount          String
+  paidAt          DateTime @default(now())
 }
 
 model WatchlistEntry {

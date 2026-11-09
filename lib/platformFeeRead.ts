@@ -1,8 +1,23 @@
 import { toFunctionSelector, zeroAddress, type Address, type Hex, type PublicClient } from "viem";
-import { platformFeeAbi } from "@/lib/protocol";
+import { factoryAbi, platformFeeAbi } from "@/lib/protocol";
 
 export type PlatformFeeTerms = { legacy: boolean; bps: bigint; recipient: Address | null };
 export type PlatformFeeClient = Pick<PublicClient, "readContract" | "getCode">;
+
+/** Older studio factories create collections without a buyer mint surcharge. */
+export async function readMintSurchargeBps(client: Pick<PublicClient, "readContract">, address: Address): Promise<bigint> {
+  let supported: boolean;
+  try { supported = await client.readContract({ address, abi: factoryAbi, functionName: "supportsMintSurcharge" }); }
+  catch (error) {
+    if (isMissingPlatformFeeInterface(error)) return BigInt(0);
+    throw error;
+  }
+  if (!supported) return BigInt(0);
+  // Once the capability is present, an unavailable rate is not a legacy term.
+  const rate = await client.readContract({ address, abi: factoryAbi, functionName: "mintSurchargeBps" });
+  if (rate < BigInt(0) || rate > BigInt(1000)) throw new Error("The deployed mint surcharge is invalid.");
+  return rate;
+}
 
 /** A missing getter is different from an unavailable RPC or an application revert. */
 export function isMissingPlatformFeeInterface(error: unknown): boolean {

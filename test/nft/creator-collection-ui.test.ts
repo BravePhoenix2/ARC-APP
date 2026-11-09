@@ -84,7 +84,7 @@ async function submit() {
 test("NFT details go straight to collection setup and disclose the later 5 test USDC wallet fee", async () => {
   await render();
   assert.match(visibleText(), /without reviewer approval/);
-  assert.match(visibleText(), /one-time 5 test USDC creation fee plus network gas/);
+  assert.match(visibleText(), /one-time 5 test USDC creation fee directly to the platform wallet/);
   assert.match(visibleText(), /Continue to collection setup/);
   assert.doesNotMatch(visibleText(), /Submit for review/);
   await fillDetails(); await nftImage(); await submit();

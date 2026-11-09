@@ -1,6 +1,6 @@
 import { isAddress, type Address, type Hash, type PublicClient } from "viem";
 
-export type RegistrationOperation = "collection-deployment" | "art-listing";
+export type RegistrationOperation = "collection-deployment" | "collection-creation-fee" | "art-listing";
 export type TransactionRecoveryScope = {
   accountId: string;
   walletAddress: string;

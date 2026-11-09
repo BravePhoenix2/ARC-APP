@@ -9,9 +9,9 @@ import { factoryAbi, platformFeeAbi, protocol } from "@/lib/protocol";
 import { readPlatformFeeTerms } from "@/lib/platformFeeRead";
 
 type Transaction = ReturnType<typeof useProtocolTransaction>;
-type Revenue = { legacy: true } | { legacy: false; recipient: Address; bps: bigint; mintSurchargeBps?: bigint; collectionCreationFee?: bigint; pending: bigint; total: bigint };
+type Revenue = { legacy: true } | { legacy: false; recipient: Address; bps: bigint; mintSurchargeBps?: bigint; pending: bigint; total: bigint };
 const sources = [
-  { key: "factory", label: "NFT collection and mint fees", mintFees: true },
+  { key: "factory", label: "NFT mint fees", mintFees: true },
   { key: "artMarket", label: "Art sale fees" },
   { key: "auctions", label: "Auction sale fees" },
 ] as const;
@@ -30,10 +30,7 @@ function RevenueSource({ label, address, tx, mintFees = false }: { label: string
       if (!terms.recipient) throw new Error("The contract did not return a fee recipient.");
       const blockNumber = await client.getBlockNumber();
       let mintSurchargeBps: bigint | undefined;
-      let collectionCreationFee: bigint | undefined;
       if (mintFees) {
-        const supportsCreationFee = await client.readContract({ address: address!, abi: factoryAbi, functionName: "supportsCollectionCreationFee", blockNumber }).catch(() => false);
-        if (supportsCreationFee) collectionCreationFee = await client.readContract({ address: address!, abi: factoryAbi, functionName: "collectionCreationFee", blockNumber });
         const supported = await client.readContract({ address: address!, abi: factoryAbi, functionName: "supportsMintSurcharge", blockNumber }).catch(() => false);
         if (supported) mintSurchargeBps = await client.readContract({ address: address!, abi: factoryAbi, functionName: "mintSurchargeBps", blockNumber });
       }
@@ -41,7 +38,7 @@ function RevenueSource({ label, address, tx, mintFees = false }: { label: string
         client.readContract({ address: address!, abi: platformFeeAbi, functionName: "pendingPlatformFees", blockNumber }),
         client.readContract({ address: address!, abi: platformFeeAbi, functionName: "totalPlatformFees", blockNumber }),
       ]);
-      return { legacy: false, recipient: terms.recipient, bps: terms.bps, mintSurchargeBps, collectionCreationFee, pending, total };
+      return { legacy: false, recipient: terms.recipient, bps: terms.bps, mintSurchargeBps, pending, total };
     },
   });
   const revenue = query.data && !query.data.legacy ? query.data : null;
@@ -71,10 +68,9 @@ function RevenueSource({ label, address, tx, mintFees = false }: { label: string
       : !tx.client ? <p role="status" className="mt-3 text-xs text-[var(--muted-text)]">Connecting to Arc to read fee accounting…</p>
       : query.isError ? <div className="mt-3 space-y-2"><p role="alert" className="text-xs leading-6 text-rose-600 dark:text-rose-300">Fee accounting could not be read from Arc. Retry to check this contract.</p><button type="button" className="text-xs font-semibold text-[#b55fbe] underline" disabled={query.isFetching} onClick={() => void query.refetch()}>{query.isFetching ? "Retrying…" : "Retry fee accounting"}</button></div>
       : query.isPending ? <p role="status" className="mt-3 text-xs text-[var(--muted-text)]">Loading on-chain fee accounting…</p>
-      : query.data?.legacy ? <p className="mt-3 text-xs leading-6 text-[var(--muted-text)]">This legacy deployment does not collect platform fees. Deploy and configure a fee-enabled contract to activate monetization here.</p>
+      : query.data?.legacy ? <p className="mt-3 text-xs leading-6 text-[var(--muted-text)]">This legacy deployment has no on-chain commission ledger. Collection creation fees are separate and are paid directly to the platform wallet.</p>
       : revenue && <>
         {mintFees ? <div className="mt-4 space-y-1 text-xs text-[var(--muted-text)]">
-          {revenue.collectionCreationFee !== undefined ? <p>Collection creation fee <strong className="text-[var(--text)]">{formatUnits(revenue.collectionCreationFee, 18)} test USDC</strong> per collection</p> : <p>This deployment does not collect collection creation fees.</p>}
           <p>Creator mint fee <strong className="text-[var(--text)]">{formatUnits(revenue.bps, 2)}%</strong></p>
           {revenue.mintSurchargeBps !== undefined ? <><p>Collector mint surcharge <strong className="text-[var(--text)]">{formatUnits(revenue.mintSurchargeBps, 2)}%</strong></p><p>Combined mint platform rate <strong className="text-[var(--text)]">{formatUnits(revenue.bps + revenue.mintSurchargeBps, 2)}%</strong></p></> : <p>This deployment does not add a collector mint surcharge.</p>}
         </div> : <p className="mt-4 text-xs text-[var(--muted-text)]">Platform rate <strong className="text-[var(--text)]">{formatUnits(revenue.bps, 2)}%</strong></p>}
@@ -96,6 +92,7 @@ export default function PlatformRevenue() {
     <p className="text-[10px] font-semibold uppercase tracking-[.18em] text-[#b55fbe]">Arc Testnet</p>
     <h2 id="platform-revenue-title" className="mt-2 text-xl">Platform revenue</h2>
     <p className="mt-3 text-xs leading-6 text-[var(--muted-text)]">Fees recorded by the configured contracts appear below. Test USDC has no monetary value. Withdrawals go to the connected fee recipient wallet.</p>
+    <p className="mt-3 text-xs leading-6 text-[var(--muted-text)]">Each creator pays the 5 test USDC collection creation fee directly to the platform wallet. These payments are already in that wallet and are separate from the contract balances below.</p>
     <div className="mt-5 space-y-4">{sources.map((source) => <RevenueSource key={source.key} label={source.label} address={protocol[source.key]} tx={tx} mintFees={"mintFees" in source && source.mintFees} />)}</div>
     {previousHouses.length > 0 && <div className="mt-5 space-y-4">{previousHouses.map((address) => <RevenueSource key={address} label="Previous auction house fees" address={address} tx={tx} />)}</div>}
     {tx.isWrongNetwork && <button type="button" className={`${button} mt-5`} disabled={tx.pending} onClick={() => void tx.switchToArc()}>Switch to Arc Testnet</button>}

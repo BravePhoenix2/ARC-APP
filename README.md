@@ -5,11 +5,15 @@ Next.js marketplace with Prisma/SQLite and Solidity contracts.
 ## Marketplace revenue
 
 NFT collection setup publishes immediately without reviewer approval. Creators
-pay a one-time **5 test USDC** fee when their wallet creates the on-chain
-collection, plus network gas. Saving setup and configuring an allowlist do not
-charge this fee. The factory requires exactly 5 native USDC (18 decimals) for
-every collection type, including collections with free mints. Failed creations
-revert the fee; recovering a confirmed transaction never charges it again.
+pay a one-time **5 test USDC** fee directly to the existing platform wallet
+before creating the on-chain collection, plus network gas. Saving setup and
+configuring an allowlist do not charge this fee. Every collection type requires
+this payment, including collections with free mints. The server verifies the
+confirmed payment and binds it to that creator's collection; one transaction
+cannot pay for multiple collections. A confirmed fee remains credited if
+collection deployment fails, so retrying never charges it again. Failed payment
+transactions do not count as paid. This uses the existing wallet and factory;
+no new contract deployment or protocol-address replacement is required.
 
 New studio deployments collect a commission from paid NFT mints, original-art
 purchases, and settled asset and NFT auctions. Paid NFT mints have two platform
@@ -42,8 +46,12 @@ marketplace deduction, before payment. Verified older contracts retain their
 original fee rules.
 If fee terms cannot be verified, checkout waits for a successful retry.
 
-Platform fees accrue in separate pull-payment balances. Collection creation and
-mint fees accumulate at the studio factory, art fees at the art market, and auction fees at the auction
+Collection creation fees are platform revenue sent straight to the configured
+platform wallet. The server uses `FEE_RECIPIENT_ADDRESS`, with
+`NEXT_PUBLIC_PLATFORM_FEE_RECIPIENT` as its fallback. These direct payments are
+already in that wallet and do not require a contract fee withdrawal.
+
+Mint fees accumulate at the studio factory, art fees at the art market, and auction fees at the auction
 house. In `/settings/protocol`, **Platform revenue** shows each configured
 contract's cumulative fees and current withdrawable balance. Connect the fee
 recipient wallet to withdraw. Creator/seller withdrawals cannot consume platform
@@ -225,9 +233,11 @@ page, where the creator can configure mint access before paying 5 test USDC to
 create the collection. ART BAZZAR retains human review. Collectors can mint after
 the on-chain collection exists and its scheduled window opens. Privy email sign-in can
 create an embedded wallet. A selected wallet must sign deployments,
-mints, payments, and claims. A successful receipt is verified against the saved
-settings and the same-transaction creation fee proof before the app attaches a
-new collection. Original-art checkout listings still require approved artwork.
+mints, payments, and claims. The app first verifies the direct creation-fee
+payment, then verifies the collection deployment receipt against the saved
+settings before attaching the new collection. Fee and deployment confirmations
+can be recovered independently without making a second fee payment.
+Original-art checkout listings still require approved artwork.
 
 Creators can configure **Ultimate → FCFS → Public** access in **Mint access** on
 a saved, undeployed collection. Set ordered opening dates, tier prices, and
@@ -257,25 +267,24 @@ creating the collection. Contracts verify wallet/tier proofs and reject public
 mint calls during allowlist windows. ERC-721, soulbound, membership, and ERC-1155
 collections use the same rules. Public-only collections keep the existing flow.
 
-The previously deployed factory cannot support these new rules. Before replacing
-its configured address, run `npm run studio:pin-factories` with the original
-factory still in `.env.local`; this records the original factory on existing
-collection rows and original art-market addresses on existing checkout listings.
-Run `npm run studio:artifacts` to export the updated deployment bytecode.
-In `/settings/protocol`, choose **Deploy contracts with collection creation fees** to deploy
-a new factory, art market, and auction house from your wallet. Copy the complete configuration
-only after all three transactions confirm, then rebuild and restart. Pending transaction
-hashes and confirmed steps are saved in the browser so retries resume safely. Existing collections retain their original mint rules. Existing
-auctions/reward pools stay on the original house; the new house starts empty and
-checks mint eligibility through the new factory. Keep the old addresses for
-existing auctions and claims. No deployed collection or live auction is migrated.
-The setup verifies the fixed 5 test USDC fee before offering configuration to
-copy. Old factories cannot collect this fee in place. New creation stays disabled
-until a fee-capable factory is configured; existing collection mints retain their
-original contracts. Browser setup requires wallet signatures; no private key is
-needed in chat or in the app's public environment.
+The 5 test USDC direct creation payment works with the currently configured
+studio factory. Keep the existing protocol addresses when enabling this fee.
 
-The new contracts are restricted to **Arc Testnet** in the app. To activate them:
+Older installations adding mint-phase support for the first time need a
+factory that supports those phases. That upgrade is independent of the direct
+creation fee. Before replacing original addresses, run
+`npm run studio:pin-factories` with the original factory still in `.env.local`;
+this records the original factory on existing collection rows and original
+art-market addresses on existing checkout listings. Export browser deployment
+bytecode with `npm run studio:artifacts`. In `/settings/protocol`, choose
+**Deploy contracts with asset auctions** and copy the complete configuration
+only after all three transactions confirm, then rebuild and restart. Pending
+hashes and confirmed steps are saved in the browser so retries resume safely.
+Existing collections retain their original mint rules. Existing auctions and
+reward pools stay on the original house; retain its address for existing claims.
+No deployed collection or live auction is migrated.
+
+Contract setup is restricted to **Arc Testnet** in the app. For a new installation:
 
 1. Open `/settings/protocol` and connect a wallet funded with test USDC.
 2. Confirm the three contract deployments. Completed steps are saved locally.

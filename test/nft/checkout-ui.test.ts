@@ -38,8 +38,14 @@ let feeError = false;
 let feeContract: string | null = null;
 let isOwner = false;
 let factoryMintSurcharge: bigint | null | undefined = BigInt(200);
-let factoryCreationFee: bigint | null | undefined = COLLECTION_CREATION_FEE;
-let factoryCreationFeeError = false;
+let factoryMintSurchargeError = false;
+let creationFeeRequests = 0;
+const creationPayment = { paid: true, isError: false, isLoading: false, busy: false, error: "", failureReason: null,
+  data: { recipient: market, amount: COLLECTION_CREATION_FEE.toString() },
+  recovery: { key: "creation-payment", ready: true, record: null, storageUnavailable: false },
+  requestPending: false, requestStorageUnavailable: false,
+  pay: async () => { creationFeeRequests++; }, recover: async () => {}, refetch: async () => {}, hash: null,
+};
 const queryFunctions = new Map<string, () => Promise<unknown>>();
 const noop = () => null;
 const deps: Record<string, unknown> = {
@@ -51,6 +57,7 @@ const deps: Record<string, unknown> = {
   "@/components/TransactionStatus": { default: noop, __esModule: true },
   "@/components/RegistrationRecovery": require("../../components/RegistrationRecovery"),
   "@/hooks/useTransactionRecovery": require("../../hooks/useTransactionRecovery"),
+  "@/hooks/useCollectionCreationPayment": { useCollectionCreationPayment: () => creationPayment },
   "@/lib/transactionRecovery": require("../../lib/transactionRecovery"),
   "@/components/PlatformFeeBreakdown": require("../../components/PlatformFeeBreakdown"),
   "@/hooks/usePlatformFees": { usePlatformFees: (_client: unknown, address: string | null) => { feeContract = address; return { data: feeTerms, isError: feeError, refetch: async () => {} }; } },
@@ -67,7 +74,7 @@ const deps: Record<string, unknown> = {
   "@/lib/protocol": { ...require("../../lib/protocol"), protocol: { ...protocol, factory: market, artMarket: market, isTestnet: true }, artMarketForItem: (item: { artMarketAddress?: string | null }) => item.artMarketAddress ? require("../../lib/protocol").artMarketForItem(item) : market, artMarketAbi },
   "@/lib/nftTypes": require("../../lib/nftTypes"),
   "@/lib/artDelivery": require("../../lib/artDelivery"),
-  "@tanstack/react-query": { useQuery: ({ queryKey, queryFn }: { queryKey: string[]; queryFn: () => Promise<unknown> }) => { queryFunctions.set(queryKey[0], queryFn); return { isLoading: false, isError: queryKey[0] === "factory-creation-fee" ? factoryCreationFeeError : false, refetch: async () => {}, data: queryKey[0] === "item-detail" ? { item, isOwner, metadataUrl: "https://articmarket.xyz/api/items/approved/metadata" } : queryKey[0] === "collection-state" ? state : queryKey[0] === "factory-mint-surcharge" ? factoryMintSurcharge : queryKey[0] === "factory-creation-fee" ? factoryCreationFee : queryKey[0] === "art-order" ? { order: null } : { listing: [market, "art-hash", BigInt(25), `0x${"0".repeat(40)}`, false], proceeds: BigInt(0) } }; } },
+  "@tanstack/react-query": { useQuery: ({ queryKey, queryFn }: { queryKey: string[]; queryFn: () => Promise<unknown> }) => { queryFunctions.set(queryKey[0], queryFn); return { isLoading: false, isError: queryKey[0] === "factory-mint-surcharge" && factoryMintSurchargeError, refetch: async () => {}, data: queryKey[0] === "item-detail" ? { item, isOwner, metadataUrl: "https://articmarket.xyz/api/items/approved/metadata" } : queryKey[0] === "collection-state" ? state : queryKey[0] === "factory-mint-surcharge" ? factoryMintSurcharge : queryKey[0] === "art-order" ? { order: null } : { listing: [market, "art-hash", BigInt(25), `0x${"0".repeat(40)}`, false], proceeds: BigInt(0) } }; } },
 };
 function load(file: string): React.ComponentType<{ id: string }> {
   const source = readFileSync(new URL(`../../components/${file}.tsx`, import.meta.url), "utf8");
@@ -76,12 +83,14 @@ function load(file: string): React.ComponentType<{ id: string }> {
   new Function("require", "module", "exports", code)((name: string) => deps[name] ?? require(name), output, output.exports);
   return output.exports.default;
 }
+deps["@/components/CollectionCreationPayment"] = { default: load("CollectionCreationPayment"), __esModule: true };
 const CollectionDetail = load("CollectionDetail");
 const ArtCheckout = load("ArtCheckout");
 beforeEach(() => {
   storage.clear();
   queryFunctions.clear();
-  factoryCreationFee = COLLECTION_CREATION_FEE; factoryCreationFeeError = false;
+  creationPayment.paid = true; creationPayment.isError = false;
+  factoryMintSurchargeError = false; creationFeeRequests = 0;
   Object.defineProperty(globalThis, "localStorage", { configurable: true, value: { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => storage.set(key, value), removeItem: (key: string) => storage.delete(key) } });
   logins = connections = payments = 0; saved = undefined; lastWrite = undefined; saveFailure = false;
   Object.assign(account, { authenticated: false, identity: "guest", walletAddress: undefined });
@@ -217,16 +226,41 @@ test("collection creators review the factory mint fee before deployment", async 
   for (const text of ["Public mint price per token", "25 USDC", "Collector platform fee (2%)", "0.5 USDC", "Collector pays per token", "25.5 USDC", "Creator platform fee (2.5%)", "0.625 USDC", "Creator receives per token", "24.375 USDC", "Total platform fees", "1.125 USDC"]) assert.ok(spans.includes(text), text);
 });
 
-test("an older factory cannot deploy collections without buyer-paid mint fees", async () => {
-  item.contractAddress = null; isOwner = true; factoryMintSurcharge = null;
+test("a verified legacy factory accepts direct payment credit and creates without a buyer surcharge or upgrade", async () => {
+  item.contractAddress = null; isOwner = true; factoryMintSurcharge = BigInt(0);
+  feeTerms = { legacy: true, bps: BigInt(0), recipient: null };
+  creationPayment.paid = false;
+  Object.assign(account, { authenticated: true, identity: "creator", walletAddress: wallet }); tx.isConnected = true;
   await act(async () => { renderer = create(React.createElement(CollectionDetail, { id: item.id })); });
-  const deploy = renderer!.root.findAllByType("button").find((node) => node.props.children === "Create collection · 5 USDC")!;
+  const pay = renderer!.root.findAllByType("button").find((node) => node.props.children === "Pay 5 test USDC creation fee")!;
+  assert.equal(pay.props.disabled, false);
+  await act(async () => pay.props.onClick()); assert.equal(creationFeeRequests, 1);
+  creationPayment.paid = true;
+  await act(async () => renderer!.update(React.createElement(CollectionDetail, { id: item.id })));
+  const deploy = renderer!.root.findAllByType("button").find((node) => node.props.children === "Create collection")!;
+  assert.equal(deploy.props.disabled, false);
+  await act(async () => { deploy.props.onClick(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  assert.equal(lastWrite?.functionName, "create721"); assert.equal(lastWrite?.value, undefined);
+});
+
+test("an RPC failure blocks payment and creation even when a prior surcharge result was zero", async () => {
+  item.contractAddress = null; isOwner = true; factoryMintSurcharge = BigInt(0); factoryMintSurchargeError = true;
+  feeTerms = { legacy: true, bps: BigInt(0), recipient: null }; creationPayment.paid = false;
+  Object.assign(account, { authenticated: true, identity: "creator", walletAddress: wallet }); tx.isConnected = true;
+  tx.client = { readContract: async () => { throw new Error("Arc RPC unavailable"); }, getTransactionReceipt: async () => ({ from: wallet, to: market, status: "success" }) };
+  await act(async () => { renderer = create(React.createElement(CollectionDetail, { id: item.id })); });
+  assert.equal(renderer!.root.findAllByType("button").find((node) => node.props.children === "Pay 5 test USDC creation fee")!.props.disabled, true);
+  await assert.rejects(queryFunctions.get("factory-mint-surcharge")!(), /Arc RPC unavailable/);
+  creationPayment.paid = true;
+  await act(async () => renderer!.update(React.createElement(CollectionDetail, { id: item.id })));
+  const deploy = renderer!.root.findAllByType("button").find((node) => node.props.children === "Create collection")!;
   assert.equal(deploy.props.disabled, true);
-  assert.match(JSON.stringify(renderer!.toJSON()), /Collection creation is temporarily unavailable/);
+  await act(async () => { deploy.props.onClick(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  assert.equal(lastWrite, undefined); assert.match(tx.error, /mint payment check/);
 });
 
 for (const kind of ["COLLECTIBLE", "EDITION", "SOULBOUND", "MEMBERSHIP"]) {
-  for (const phased of [false, true]) test(`${kind} creation ${phased ? "with whitelist phases" : "with public minting"} pays exactly 5 USDC once`, async () => {
+  for (const phased of [false, true]) test(`${kind} creation ${phased ? "with whitelist phases" : "with public minting"} uses verified direct-payment credit and sends no additional fee`, async () => {
     item.contractAddress = null; item.nftKind = kind; isOwner = true;
     Object.assign(account, { authenticated: true, identity: "creator", walletAddress: wallet }); tx.isConnected = true;
     tx.client = { readContract: async () => true, getTransactionReceipt: async () => ({ from: wallet, to: market, status: "success" }) };
@@ -239,49 +273,30 @@ for (const kind of ["COLLECTIBLE", "EDITION", "SOULBOUND", "MEMBERSHIP"]) {
     assert.ok(disclosure.findAllByType("span").some((node) => node.children.includes("5 test USDC")));
     assert.match(JSON.stringify(renderer!.toJSON()), /Network gas is separate/);
     assert.doesNotMatch(JSON.stringify(renderer!.toJSON()), /Approved · awaiting/);
-    const deploy = renderer!.root.findAllByType("button").find((node) => node.props.children === "Create collection · 5 USDC")!;
+    const deploy = renderer!.root.findAllByType("button").find((node) => node.props.children === "Create collection")!;
     assert.equal(deploy.props.disabled, false);
     await act(async () => { deploy.props.onClick(); await new Promise((resolve) => setTimeout(resolve, 0)); });
     assert.equal(payments, 1);
     assert.equal(lastWrite?.functionName, `${kind === "EDITION" ? "createEdition" : "create721"}${phased ? "WithPhases" : ""}`);
-    assert.equal(lastWrite?.value, COLLECTION_CREATION_FEE);
+    assert.equal(lastWrite?.value, undefined);
     assert.equal((lastWrite?.args as unknown[])[3], usdcAmount("25"), "the collection fee is separate from the collector's mint price");
     if (kind !== "EDITION") assert.equal((lastWrite?.args as unknown[])[8], kind === "SOULBOUND");
   });
 }
 
-for (const [label, fee, failed] of [
-  ["still loading", undefined, false], ["unsupported", null, false],
-  ["wrong amount", usdcAmount("6"), false], ["unavailable", COLLECTION_CREATION_FEE, true],
-] as const) test(`collection creation cannot request payment when its fee is ${label}`, async () => {
-  item.contractAddress = null; isOwner = true; factoryCreationFee = fee; factoryCreationFeeError = failed;
+for (const failed of [false, true]) test(`collection creation is blocked without confirmed fee credit (API failure: ${failed})`, async () => {
+  item.contractAddress = null; isOwner = true; creationPayment.paid = false; creationPayment.isError = failed;
   Object.assign(account, { authenticated: true, identity: "creator", walletAddress: wallet }); tx.isConnected = true;
   await act(async () => { renderer = create(React.createElement(CollectionDetail, { id: item.id })); });
-  const deploy = renderer!.root.findAllByType("button").find((node) => node.props.children === "Create collection · 5 USDC")!;
+  const deploy = renderer!.root.findAllByType("button").find((node) => node.props.children === "Create collection")!;
   assert.equal(deploy.props.disabled, true);
   await act(async () => { deploy.props.onClick(); await new Promise((resolve) => setTimeout(resolve, 0)); });
   assert.equal(lastWrite, undefined);
-  assert.match(tx.error, /creation fee to be verified/);
-});
-
-test("collection creation fee query checks both capability and the exact deployed amount", async () => {
-  item.contractAddress = null; isOwner = true;
-  let supported = true;
-  let fee = COLLECTION_CREATION_FEE;
-  const calls: string[] = [];
-  tx.client = { readContract: async ({ functionName }) => { calls.push(functionName); return functionName === "supportsCollectionCreationFee" ? supported : fee; }, getTransactionReceipt: async () => ({ from: wallet, to: market, status: "success" }) };
-  await act(async () => { renderer = create(React.createElement(CollectionDetail, { id: item.id })); });
-  const query = queryFunctions.get("factory-creation-fee")!;
-  assert.equal(await query(), COLLECTION_CREATION_FEE);
-  assert.deepEqual(calls, ["supportsCollectionCreationFee", "collectionCreationFee"]);
-  fee = usdcAmount("6");
-  await assert.rejects(query(), /creation fee could not be verified/);
-  supported = false;
-  assert.equal(await query(), null);
+  assert.match(tx.error, /Pay and verify the 5 test USDC creation fee/);
 });
 
 test("an unavailable creation fee does not block minting an already deployed collection", async () => {
-  factoryCreationFee = null; factoryCreationFeeError = true;
+  creationPayment.paid = false; creationPayment.isError = true;
   Object.assign(account, { authenticated: true, identity: "collector", walletAddress: wallet }); tx.isConnected = true;
   await act(async () => { renderer = create(React.createElement(CollectionDetail, { id: item.id })); });
   assert.equal(renderer!.root.findAllByProps({ "aria-label": "Collection creation fee" }).length, 0);
@@ -296,10 +311,10 @@ test("a confirmed collection deployment survives reload and retries registration
   tx.client = { getTransactionReceipt: async () => ({ from: wallet, to: market, status: "success" }) };
   saveFailure = true;
   await act(async () => { renderer = create(React.createElement(CollectionDetail, { id: item.id })); });
-  const deploymentButton = () => renderer!.root.findAllByType("button").find((node) => node.props.children === "Create collection · 5 USDC")!;
+  const deploymentButton = () => renderer!.root.findAllByType("button").find((node) => node.props.children === "Create collection")!;
   assert.equal(deploymentButton().props.disabled, false);
   await act(async () => { deploymentButton().props.onClick(); await new Promise((resolve) => setTimeout(resolve, 0)); });
-  assert.equal(payments, 1); assert.equal(lastWrite?.functionName, "create721"); assert.equal(lastWrite?.value, COLLECTION_CREATION_FEE);
+  assert.equal(payments, 1); assert.equal(lastWrite?.functionName, "create721"); assert.equal(lastWrite?.value, undefined);
   assert.equal(storage.size, 1); assert.match([...storage.values()][0], new RegExp(hash));
   await act(async () => { renderer!.unmount(); renderer = create(React.createElement(CollectionDetail, { id: item.id })); });
   assert.equal(deploymentButton().props.disabled, true, "reload must not offer a second deployment while registration is unresolved");
@@ -337,7 +352,7 @@ test("another account or wallet cannot see a saved deployment recovery record", 
   Object.assign(account, { authenticated: true, identity: "creator", walletAddress: wallet }); tx.isConnected = true;
   saveFailure = true;
   await act(async () => { renderer = create(React.createElement(CollectionDetail, { id: item.id })); });
-  await act(async () => { renderer!.root.findAllByType("button").find((node) => node.props.children === "Create collection · 5 USDC")!.props.onClick(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  await act(async () => { renderer!.root.findAllByType("button").find((node) => node.props.children === "Create collection")!.props.onClick(); await new Promise((resolve) => setTimeout(resolve, 0)); });
   Object.assign(account, { identity: "other-account" });
   await act(async () => renderer!.update(React.createElement(CollectionDetail, { id: item.id })));
   assert.equal(renderer!.root.findByProps({ "aria-label": "Collection deployment transaction hash" }).props.value, "");
@@ -354,7 +369,7 @@ test("a verified reverted deployment can be cleared; a different wallet receipt 
   Object.assign(account, { authenticated: true, identity: "creator", walletAddress: wallet }); tx.isConnected = true;
   saveFailure = true;
   await act(async () => { renderer = create(React.createElement(CollectionDetail, { id: item.id })); });
-  const deploy = () => renderer!.root.findAllByType("button").find((node) => node.props.children === "Create collection · 5 USDC")!;
+  const deploy = () => renderer!.root.findAllByType("button").find((node) => node.props.children === "Create collection")!;
   await act(async () => { deploy().props.onClick(); await new Promise((resolve) => setTimeout(resolve, 0)); });
   tx.client = { getTransactionReceipt: async () => ({ from: market, to: market, status: "success" }) };
   await act(async () => renderer!.update(React.createElement(CollectionDetail, { id: item.id })));
@@ -372,7 +387,7 @@ test("an unavailable receipt keeps its saved recovery record and cannot trigger 
   Object.assign(account, { authenticated: true, identity: "creator", walletAddress: wallet }); tx.isConnected = true;
   saveFailure = true;
   await act(async () => { renderer = create(React.createElement(CollectionDetail, { id: item.id })); });
-  const deploy = () => renderer!.root.findAllByType("button").find((node) => node.props.children === "Create collection · 5 USDC")!;
+  const deploy = () => renderer!.root.findAllByType("button").find((node) => node.props.children === "Create collection")!;
   await act(async () => { deploy().props.onClick(); await new Promise((resolve) => setTimeout(resolve, 0)); });
   tx.client = { getTransactionReceipt: async () => { throw new Error("Transaction receipt is not available yet"); } };
   await act(async () => renderer!.update(React.createElement(CollectionDetail, { id: item.id })));
@@ -390,5 +405,5 @@ test("a manually entered receipt rejected by server verification does not block 
   await act(async () => renderer!.root.findByProps({ "aria-label": "Collection deployment transaction hash" }).props.onChange({ target: { value: hash } }));
   await act(async () => { await renderer!.root.findAllByType("button").find((node) => node.props.children === "Verify and save deployment")!.props.onClick(); });
   assert.match(tx.error, /does not match/); assert.equal(storage.size, 0); assert.equal(payments, 0);
-  assert.equal(renderer!.root.findAllByType("button").find((node) => node.props.children === "Create collection · 5 USDC")!.props.disabled, false);
+  assert.equal(renderer!.root.findAllByType("button").find((node) => node.props.children === "Create collection")!.props.disabled, false);
 });

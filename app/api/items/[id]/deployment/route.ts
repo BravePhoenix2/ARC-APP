@@ -5,8 +5,10 @@ import { prisma } from "@/lib/prisma";
 import { sameOrigin } from "@/lib/walletAuth";
 import { getCreatorSession } from "@/lib/creatorSession";
 import { limitedJson } from "@/lib/requestBody";
-import { protocol } from "@/lib/protocol";
+import { COLLECTION_CREATION_FEE, protocol } from "@/lib/protocol";
 import { DeploymentVerificationError, verifiedCollection } from "@/lib/deploymentVerification";
+import { getCollectionCreationPayment } from "@/lib/collectionCreationPayment";
+import { arcChain } from "@/lib/arcConfig";
 
 export const dynamic = "force-dynamic";
 const headers = { "Cache-Control": "private, no-store" };
@@ -29,6 +31,12 @@ async function handlePOST(request: NextRequest, context: { params: Promise<{ id:
   if (!body || typeof body !== "object" || !("txHash" in body) || typeof body.txHash !== "string" || !/^0x[a-fA-F0-9]{64}$/.test(body.txHash)) return NextResponse.json({ error: "Provide a valid deployment transaction hash." }, { status: 400, headers });
   const factory = item.contractAddress && item.deploymentFactory ? item.deploymentFactory as Address : protocol.factory;
   try {
+    if (!item.contractAddress) {
+      const payment = await getCollectionCreationPayment(item.id);
+      if (!payment || payment.ownerUserId !== session.userId || payment.chainId !== arcChain.id || payment.amount !== COLLECTION_CREATION_FEE.toString()) {
+        return NextResponse.json({ error: "Pay the 5 test USDC creation fee to the platform wallet before creating this collection.", code: "COLLECTION_CREATION_FEE_REQUIRED" }, { status: 402, headers });
+      }
+    }
     const deployed = await verifiedCollection(item, body.txHash as Hash, factory);
     if (session.walletAddress.toLowerCase() !== deployed.creator.toLowerCase()) return NextResponse.json({ error: "The deployment wallet must match your signed-in wallet." }, { status: 403, headers });
     if (item.contractAddress && item.contractAddress.toLowerCase() !== deployed.address.toLowerCase()) return NextResponse.json({ error: "This collection already has a different contract. Its address cannot be replaced." }, { status: 409, headers });

@@ -12,12 +12,12 @@ import PlatformRevenue from "@/components/PlatformRevenue";
 import { useProtocolTransaction } from "@/hooks/useProtocolTransaction";
 import { useArtiqAccount } from "@/hooks/useArtiqAccount";
 import { arcChain } from "@/lib/arcConfig";
-import { COLLECTION_CREATION_FEE, auctionAbi, factoryAbi, platformFeeAbi, protocol, transactionError } from "@/lib/protocol";
+import { auctionAbi, factoryAbi, platformFeeAbi, protocol, transactionError } from "@/lib/protocol";
 import { feePresets, percentToBps, readFeeTerms } from "@/lib/monetization";
 import { deploymentConfiguration, deploymentKeys, readDeploymentDraft, type StudioDeployment } from "@/lib/studioDeployment";
 
 const button = "gallery-button inline-flex items-center justify-center gap-2 px-5 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40";
-const storageKey = "artiq:studio-testnet-deployment:collection-creation-fee-v3";
+const storageKey = "artiq:studio-testnet-deployment:mint-surcharge-v2";
 const labels = { factory: "NFT studio factory", artMarket: "Art checkout", auctions: "Auction and rewards house" };
 const initialDraft = (): StudioDeployment => ({});
 
@@ -89,9 +89,6 @@ export default function ProtocolSetupPage() {
           ]);
           if (recipient.toLowerCase() !== fees.feeRecipient.toLowerCase() || Number(bps) !== (key === "factory" ? fees.mintFeeBps : fees.marketplaceFeeBps)) throw new Error(`The ${labels[key]} fee terms do not match this deployment. Check the saved draft.`);
           if (key === "factory") {
-            const supportsCreationFee = await tx.client!.readContract({ address, abi: factoryAbi, functionName: "supportsCollectionCreationFee" }).catch(() => false);
-            const creationFee = supportsCreationFee ? await tx.client!.readContract({ address, abi: factoryAbi, functionName: "collectionCreationFee" }) : null;
-            if (creationFee !== COLLECTION_CREATION_FEE) throw new Error("This NFT studio factory does not collect the required 5 test USDC collection creation fee. Deploy the updated factory.");
             const supportsSurcharge = await tx.client!.readContract({ address, abi: factoryAbi, functionName: "supportsMintSurcharge" }).catch(() => false);
             if (supportsSurcharge !== true) throw new Error("This NFT studio factory does not support buyer-paid mint surcharges. Deploy the updated factory and preserve the old address for its existing collections.");
             const surchargeBps = await tx.client!.readContract({ address, abi: factoryAbi, functionName: "mintSurchargeBps" });
@@ -132,13 +129,14 @@ export default function ProtocolSetupPage() {
     } catch (cause) { setError(transactionError(cause)); }
     finally { setPending(false); guard.current = false; }
   }
-  const actionLabel = !tx.isConnected ? account.authenticated ? "Connect wallet to deploy" : "Sign in to deploy" : tx.isWrongNetwork ? "Switch to Arc Testnet" : deployed.pending ? "Resume pending deployment" : started ? "Continue deployment" : "Deploy contracts with collection creation fees";
+  const actionLabel = !tx.isConnected ? account.authenticated ? "Connect wallet to deploy" : "Sign in to deploy" : tx.isWrongNetwork ? "Switch to Arc Testnet" : deployed.pending ? "Resume pending deployment" : started ? "Continue deployment" : "Deploy contracts with asset auctions";
   return <main className="gallery-page min-h-screen"><Atmosphere /><MarketNav />
     <div className="relative mx-auto max-w-4xl px-4 py-12 sm:px-8">
       <Link href="/settings" className="text-xs font-semibold text-[var(--muted-text)]">← Settings</Link>
       <p className="mt-8 text-[10px] font-semibold uppercase tracking-[.18em] text-[#b55fbe]">Project owner · Arc Testnet</p>
       <h1 className="mt-4 text-4xl">Set up marketplace revenue.</h1>
-      <p className="mt-5 max-w-2xl text-sm leading-7 text-[var(--muted-text)]">Choose your commission and fee wallet, then deploy the studio, art checkout, and auction contracts. Each NFT collection costs its creator 5 test USDC to create, plus gas. NFT creators publish without reviewer approval and can set up allowlists before paying to create their collection. Paid mints have a creator proceeds fee and a separate surcharge paid by the minter. Art and auction fees are deducted from seller proceeds.</p>
+      <p className="mt-5 max-w-2xl text-sm leading-7 text-[var(--muted-text)]">Choose your commission and fee wallet, then deploy the studio, art checkout, and auction contracts. The updated auction house supports timed digital and physical asset listings as well as NFTs. Paid mints have a creator proceeds fee and a separate surcharge paid by the minter. Art and auction fees are deducted from seller proceeds.</p>
+      <p className="mt-3 max-w-2xl text-sm leading-7 text-[var(--muted-text)]">The 5 test USDC collection creation fee goes directly to your existing platform wallet. It does not require a new contract deployment here.</p>
       <section className="gallery-card mt-8 p-6 sm:p-8">
         <div className="flex items-center gap-3"><ShieldCheck size={23} className="text-[#b55fbe]" /><h2 className="text-xl">{configured ? "Current project addresses" : "Testnet setup required"}</h2></div>
         <div className="mt-6 space-y-4">{deploymentKeys.map((key) => <div key={key} className="rounded-xl border border-[var(--border-soft)] p-4"><p className="text-xs font-semibold">{labels[key]}</p>{protocol[key] ? <a href={`${arcChain.blockExplorers?.default.url}/address/${protocol[key]}`} target="_blank" rel="noreferrer" className="mt-2 flex items-center gap-2 break-all font-mono text-[11px] text-[#b55fbe]">{protocol[key]}<ExternalLink size={12} className="shrink-0" /></a> : <p className="mt-2 text-xs text-[var(--muted-text)]">Not configured</p>}</div>)}</div>
@@ -150,7 +148,7 @@ export default function ProtocolSetupPage() {
             <div className="grid gap-4 sm:grid-cols-3"><label className="block text-xs font-semibold">Creator mint proceeds fee (%)<input aria-label="Creator mint proceeds fee (%)" type="number" min="0" max="10" step="0.01" value={mintPercent} onChange={(event) => setMintPercent(event.target.value)} className="mt-2 block w-full rounded-xl border border-[var(--border-soft)] bg-[var(--chip-bg)] px-4 py-3 text-sm" /></label><label className="block text-xs font-semibold">Buyer mint surcharge (%)<input aria-label="Buyer mint surcharge (%)" type="number" min="0" max="10" step="0.01" value={mintSurchargePercent} onChange={(event) => setMintSurchargePercent(event.target.value)} className="mt-2 block w-full rounded-xl border border-[var(--border-soft)] bg-[var(--chip-bg)] px-4 py-3 text-sm" /></label><label className="block text-xs font-semibold">Art and auction proceeds fee (%)<input aria-label="Art and auction proceeds fee (%)" type="number" min="0" max="10" step="0.01" value={salePercent} onChange={(event) => setSalePercent(event.target.value)} className="mt-2 block w-full rounded-xl border border-[var(--border-soft)] bg-[var(--chip-bg)] px-4 py-3 text-sm" /></label></div>
           </fieldset>
           <p className="text-xs leading-6 text-[var(--muted-text)]">Choose one preset or set custom rates up to 10%. Terms are fixed in these contracts after deployment. Under the standard terms, a 5 USDC NFT costs the minter 5.10 USDC: the 2.5% proceeds fee leaves 4.875 USDC for the creator, while the platform receives that 0.125 USDC fee plus the 0.10 USDC buyer surcharge, totaling 0.225 USDC. Art and auction fees remain part of the displayed price and are deducted from seller proceeds; a 100 USDC sale at 2.5% credits 2.50 USDC to the platform and 97.50 USDC to the seller before any creator royalty. Gas is paid separately. Free mints, refunds, and reward pools have no platform fee. <a className="underline" href="https://support.opensea.io/en/articles/8867091-what-fees-do-i-pay-on-opensea" target="_blank" rel="noreferrer">OpenSea fee reference</a>.</p>
-          <p className="text-xs leading-6 text-[var(--muted-text)]">Confirm three new contract deployments using test USDC for gas. The fixed 5 test USDC fee applies when a creator makes an NFT collection; it is separate from these contract setup transactions and the mint percentage rates. Confirmed steps and fee terms are saved so you can resume. Test USDC has no monetary value.</p>
+          <p className="text-xs leading-6 text-[var(--muted-text)]">Confirm three new contract deployments using test USDC for gas. Confirmed steps and fee terms are saved so you can resume. Test USDC has no monetary value.</p>
           {configured && <p className="text-xs leading-6 text-[var(--muted-text)]">Before replacing the configured addresses, back up the database, apply the additive schema update, and run npm run studio:pin-factories with the original addresses. Only collections deployed through the updated factory use the buyer-paid mint surcharge. Existing collections and art listings retain their original contracts and fee terms. Keep the original auction-house address for existing auctions, refunds, and reward claims.</p>}
           <button className={button} disabled={pending || !ready || !protocol.isTestnet} onClick={() => void deploy()}><Rocket size={16} />{pending ? "Deploying…" : actionLabel}</button>
         </div>}

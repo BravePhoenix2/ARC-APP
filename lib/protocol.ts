@@ -49,20 +49,17 @@ export function formatFeePercent(bps: bigint | number): string {
 }
 
 export const factoryAbi = parseAbi([
-  "function supportsCollectionCreationFee() pure returns (bool)",
-  "function collectionCreationFee() view returns (uint256)",
   "function supportsMintPhases() pure returns (bool)",
   "function supportsImageSeries() pure returns (bool)",
   "function supportsMintSurcharge() pure returns (bool)",
   "function mintSurchargeBps() view returns (uint256)",
-  "function create721(string name_,string symbol_,string metadataURI_,uint256 mintPrice_,uint256 mintStartTime_,uint256 maxSupply_,uint256 maxPerWallet_,uint96 royaltyBps_,bool soulbound_) payable returns (address)",
-  "function create721WithPhases(string name_,string symbol_,string metadataURI_,uint256 mintPrice_,uint256 mintStartTime_,uint256 maxSupply_,uint256 maxPerWallet_,uint96 royaltyBps_,bool soulbound_,(bytes32 root,bytes32 collectionKey,uint64 ultimateStart,uint64 fcfsStart,uint64 publicStart,uint32 ultimateLimit,uint32 fcfsLimit,uint32 publicLimit,uint256 ultimatePrice,uint256 fcfsPrice) config) payable returns (address)",
-  "function createEdition(string name_,string symbol_,string metadataURI_,uint256 mintPrice_,uint256 mintStartTime_,uint256 maxSupply_,uint256 maxPerWallet_,uint96 royaltyBps_) payable returns (address)",
-  "function createEditionWithPhases(string name_,string symbol_,string metadataURI_,uint256 mintPrice_,uint256 mintStartTime_,uint256 maxSupply_,uint256 maxPerWallet_,uint96 royaltyBps_,(bytes32 root,bytes32 collectionKey,uint64 ultimateStart,uint64 fcfsStart,uint64 publicStart,uint32 ultimateLimit,uint32 fcfsLimit,uint32 publicLimit,uint256 ultimatePrice,uint256 fcfsPrice) config) payable returns (address)",
+  "function create721(string name_,string symbol_,string metadataURI_,uint256 mintPrice_,uint256 mintStartTime_,uint256 maxSupply_,uint256 maxPerWallet_,uint96 royaltyBps_,bool soulbound_) returns (address)",
+  "function create721WithPhases(string name_,string symbol_,string metadataURI_,uint256 mintPrice_,uint256 mintStartTime_,uint256 maxSupply_,uint256 maxPerWallet_,uint96 royaltyBps_,bool soulbound_,(bytes32 root,bytes32 collectionKey,uint64 ultimateStart,uint64 fcfsStart,uint64 publicStart,uint32 ultimateLimit,uint32 fcfsLimit,uint32 publicLimit,uint256 ultimatePrice,uint256 fcfsPrice) config) returns (address)",
+  "function createEdition(string name_,string symbol_,string metadataURI_,uint256 mintPrice_,uint256 mintStartTime_,uint256 maxSupply_,uint256 maxPerWallet_,uint96 royaltyBps_) returns (address)",
+  "function createEditionWithPhases(string name_,string symbol_,string metadataURI_,uint256 mintPrice_,uint256 mintStartTime_,uint256 maxSupply_,uint256 maxPerWallet_,uint96 royaltyBps_,(bytes32 root,bytes32 collectionKey,uint64 ultimateStart,uint64 fcfsStart,uint64 publicStart,uint32 ultimateLimit,uint32 fcfsLimit,uint32 publicLimit,uint256 ultimatePrice,uint256 fcfsPrice) config) returns (address)",
   "function hasMinted(address) view returns (bool)",
   "function collectionCreator(address) view returns (address)",
   "event CollectionCreated(address indexed creator,address indexed collection,uint8 standard,bool soulbound,string name,string symbol)",
-  "event CollectionCreationFeePaid(address indexed creator,address indexed collection,uint256 amount)",
 ]);
 
 export const collectionAbi = parseAbi([

@@ -12,7 +12,7 @@ const factory = `0x${"2".repeat(40)}` as const;
 const auction = `0x${"3".repeat(40)}` as const;
 const factoryHash = `0x${"a".repeat(64)}` as const;
 const auctionHash = `0x${"b".repeat(64)}` as const;
-const storageKey = "artiq:studio-testnet-deployment:collection-creation-fee-v3";
+const storageKey = "artiq:studio-testnet-deployment:mint-surcharge-v2";
 const artHash = `0x${"c".repeat(64)}` as const;
 const fees = { feeRecipient: market, mintFeeBps: 250, mintSurchargeBps: 200, marketplaceFeeBps: 250 };
 const originalRecipient = process.env.NEXT_PUBLIC_PLATFORM_FEE_RECIPIENT;
@@ -28,15 +28,11 @@ let supportsMintSurcharge: boolean;
 let supportReadFailure: boolean;
 let supportsAssets: boolean;
 let surchargeOverride: bigint | undefined;
-let supportsCreationFee: boolean;
-let creationFeeOverride: bigint | undefined;
 const storageDescriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
 const account = { authenticated: true, login: () => { connects++; }, connectWallet: () => { connects++; } };
 const tx = { address: market, isConnected: true, isWrongNetwork: false, chainId: 5042002, switchToArc: async () => {}, refetchBalance: async () => {}, client: {
   getCode: async () => "0x6000",
   readContract: async ({ address, functionName }: { address: string; functionName: string }) => {
-    if (functionName === "supportsCollectionCreationFee") return supportsCreationFee;
-    if (functionName === "collectionCreationFee") return creationFeeOverride ?? BigInt("5000000000000000000");
     if (functionName === "supportsMintSurcharge") { if (supportReadFailure) throw new Error("function unavailable"); return supportsMintSurcharge; }
     if (functionName === "supportsAssetAuctions") return supportsAssets;
     const bytecode = address === factory ? "0x01" : address === market ? "0x02" : "0x03";
@@ -79,8 +75,6 @@ beforeEach(() => {
   supportsMintSurcharge = supportsAssets = true;
   supportReadFailure = false;
   surchargeOverride = undefined;
-  supportsCreationFee = true;
-  creationFeeOverride = undefined;
   account.authenticated = true; tx.isConnected = true;
   Object.defineProperty(globalThis, "localStorage", { configurable: true, value: { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => stored.set(key, value), removeItem: (key: string) => stored.delete(key) } });
 });
@@ -169,7 +163,6 @@ test("invalid fee wallet or excessive rate prevents all deployment transactions"
 });
 
 test("resumed deployment retains frozen fee terms and ignores drafts from older factory generations", async () => {
-  stored.set("artiq:studio-testnet-deployment:mint-surcharge-v2", JSON.stringify({ factory, artMarket: market, auctions: auction, fees }));
   stored.set("artiq:studio-testnet-deployment:phases-v1", JSON.stringify({ factory, artMarket: market, auctions: auction }));
   stored.set("artiq:studio-testnet-deployment:asset-auctions-v1", JSON.stringify({ factory, artMarket: market, auctions: auction, fees: { feeRecipient: market, mintFeeBps: 250, marketplaceFeeBps: 250 } }));
   await mount();
@@ -199,20 +192,6 @@ test("a factory without buyer-paid mint surcharge support cannot become current 
   assert.equal(writes.length, 1);
   await deploy();
   assert.equal(writes.length, 1, "retry verifies the submitted factory instead of deploying a duplicate");
-});
-
-test("a factory without the exact collection creation fee cannot become current configuration", async () => {
-  supportsCreationFee = false;
-  await mount(); await deploy();
-  assert.equal(exportBlocks().length, 0);
-  assert.match(text(), /required 5 test USDC collection creation fee/);
-  assert.equal(writes.length, 1);
-  supportsCreationFee = true;
-  creationFeeOverride = BigInt("4000000000000000000");
-  await deploy();
-  assert.equal(writes.length, 1, "the submitted factory is checked again without a duplicate deployment");
-  assert.equal(exportBlocks().length, 0);
-  assert.match(text(), /required 5 test USDC collection creation fee/);
 });
 
 test("a saved legacy factory is rejected before any later contract is deployed", async () => {

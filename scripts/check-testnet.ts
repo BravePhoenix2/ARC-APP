@@ -6,14 +6,14 @@ async function main() {
   const issues = testnetConfigurationIssues();
   const { createPublicClient, http, parseAbi } = await import("viem");
   const { arcChain } = await import("../lib/arcConfig");
-  const { protocol, COLLECTION_CREATION_FEE } = await import("../lib/protocol");
+  const { protocol } = await import("../lib/protocol");
   const { prisma } = await import("../lib/prisma");
   const client = createPublicClient({ chain: arcChain, transport: http(undefined, { timeout: 10_000, retryCount: 0 }) });
-  const abi = parseAbi(["function supportsMintSurcharge() pure returns (bool)", "function supportsImageSeries() pure returns (bool)", "function supportsMintPhases() pure returns (bool)", "function supportsCollectionCreationFee() pure returns (bool)", "function collectionCreationFee() view returns (uint256)", "function supportsAssetAuctions() pure returns (bool)", "function platformFeeBps() view returns (uint256)", "function mintSurchargeBps() view returns (uint256)", "function feeRecipient() view returns (address)", "function studioFactory() view returns (address)", "function artMarket() view returns (address)", "function metadataURI() view returns (string)"]);
+  const abi = parseAbi(["function supportsMintSurcharge() pure returns (bool)", "function supportsImageSeries() pure returns (bool)", "function supportsMintPhases() pure returns (bool)", "function supportsAssetAuctions() pure returns (bool)", "function platformFeeBps() view returns (uint256)", "function mintSurchargeBps() view returns (uint256)", "function feeRecipient() view returns (address)", "function studioFactory() view returns (address)", "function artMarket() view returns (address)", "function metadataURI() view returns (string)"]);
   try {
     try { if (await client.getChainId() !== 5042002) issues.push("The configured RPC is not Arc Testnet."); }
     catch { issues.push("Arc Testnet RPC is unavailable."); }
-    const checks = [["studio factory", protocol.factory, ["supportsMintSurcharge", "supportsImageSeries", "supportsMintPhases", "supportsCollectionCreationFee"]], ["art market", protocol.artMarket, []], ["auction house", protocol.auctions, ["supportsAssetAuctions"]]] as const;
+    const checks = [["studio factory", protocol.factory, ["supportsMintSurcharge", "supportsImageSeries", "supportsMintPhases"]], ["art market", protocol.artMarket, []], ["auction house", protocol.auctions, ["supportsAssetAuctions"]]] as const;
     for (const [name, address, capabilities] of checks) {
       if (!address) { issues.push(`Configure the ${name} address.`); continue; }
       try {
@@ -23,14 +23,7 @@ async function main() {
         const [fee, recipient] = await Promise.all([client.readContract({ address, abi, functionName: "platformFeeBps" }), client.readContract({ address, abi, functionName: "feeRecipient" })]);
         const expectedFee = BigInt(name === "studio factory" ? process.env.MINT_FEE_BPS || "250" : process.env.MARKETPLACE_FEE_BPS || "250");
         if (fee !== expectedFee || recipient.toLowerCase() !== process.env.NEXT_PUBLIC_PLATFORM_FEE_RECIPIENT?.toLowerCase()) throw new Error("Wrong fee terms");
-        if (name === "studio factory") {
-          const [surcharge, creationFee] = await Promise.all([
-            client.readContract({ address, abi, functionName: "mintSurchargeBps" }),
-            client.readContract({ address, abi, functionName: "collectionCreationFee" }),
-          ]);
-          if (surcharge !== BigInt(process.env.MINT_SURCHARGE_BPS || "200")) throw new Error("Wrong surcharge");
-          if (creationFee !== COLLECTION_CREATION_FEE) throw new Error("Wrong collection creation fee");
-        }
+        if (name === "studio factory" && await client.readContract({ address, abi, functionName: "mintSurchargeBps" }) !== BigInt(process.env.MINT_SURCHARGE_BPS || "200")) throw new Error("Wrong surcharge");
         if (name === "auction house") {
           const [factory, market] = await Promise.all([client.readContract({ address, abi, functionName: "studioFactory" }), client.readContract({ address, abi, functionName: "artMarket" })]);
           if (factory.toLowerCase() !== protocol.factory?.toLowerCase() || market.toLowerCase() !== protocol.artMarket?.toLowerCase()) throw new Error("Mismatched dependencies");
@@ -53,6 +46,6 @@ async function main() {
   } finally { await prisma.$disconnect(); }
   for (const issue of Array.from(new Set(issues))) console.error(`- ${issue}`);
   if (issues.length) { console.error("Public Testnet configuration is not ready. No transactions or data changes were performed."); process.exitCode = 1; }
-  else console.log("Configuration and read-only contract checks passed, including the fixed 5 native test-USDC collection creation fee. Hosted login, wallet transactions, restore testing, monitoring and scheduled jobs still require release evidence.");
+  else console.log("Configuration and read-only contract checks passed. Hosted login, wallet transactions, restore testing, monitoring and scheduled jobs still require release evidence.");
 }
 main().catch(() => { console.error("Testnet checks could not complete. Review the private environment/provider configuration."); process.exitCode = 1; });

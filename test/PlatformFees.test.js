@@ -5,7 +5,6 @@ const { ethers, networkHelpers } = await hre.network.create();
 const { time, loadFixture } = networkHelpers;
 
 const USDC = value => ethers.parseUnits(String(value), 18);
-const CREATION_FEE = USDC(5);
 const creatorFee = (base, bps = 250n) => base * bps / 10_000n;
 const mintSurcharge = (base, bps = 200n) => base * bps / 10_000n;
 const mintPayment = (base, surchargeBps = 200n) => base + mintSurcharge(base, surchargeBps);
@@ -22,8 +21,8 @@ async function deployMonetizedPlatform() {
 
 async function collectionFor(factory, creator, edition = false, price = USDC(2)) {
   const args = ["Revenue collection", "REV", "ipfs://revenue", price, 0, 100, 20, 500];
-  if (edition) await factory.connect(creator).createEdition(...args, { value: CREATION_FEE });
-  else await factory.connect(creator).create721(...args, false, { value: CREATION_FEE });
+  if (edition) await factory.connect(creator).createEdition(...args);
+  else await factory.connect(creator).create721(...args, false);
   const addresses = await factory.getCollectionsByCreator(creator.address);
   return ethers.getContractAt(edition ? "ArticEdition" : "ArticStudioCollection", addresses[addresses.length - 1]);
 }
@@ -57,17 +56,16 @@ describe("Platform revenue", function () {
     expect(await collection.mintSurchargeBps()).to.equal(200);
     await expect(collection.connect(buyer).mint(3, { value: base })).to.be.revertedWithCustomError(collection, "IncorrectPayment");
     await expect(collection.connect(buyer).mint(3, { value: total })).to.emit(factory, "PlatformFeeAccrued").withArgs(await collection.getAddress(), platformRevenue);
-    expect(await factory.pendingPlatformFees()).to.equal(CREATION_FEE + platformRevenue);
-    expect(await factory.totalPlatformFees()).to.equal(CREATION_FEE + platformRevenue);
-    expect(await ethers.provider.getBalance(await factory.getAddress())).to.equal(CREATION_FEE + platformRevenue);
+    expect(await factory.pendingPlatformFees()).to.equal(platformRevenue);
+    expect(await factory.totalPlatformFees()).to.equal(platformRevenue);
+    expect(await ethers.provider.getBalance(await factory.getAddress())).to.equal(platformRevenue);
     expect(await ethers.provider.getBalance(await collection.getAddress())).to.equal(creatorProceeds);
     await expect(collection.connect(creator).withdraw(creator.address)).to.changeEtherBalances(ethers, [collection, creator], [-creatorProceeds, creatorProceeds]);
-    expect(await ethers.provider.getBalance(await factory.getAddress())).to.equal(CREATION_FEE + platformRevenue);
+    expect(await ethers.provider.getBalance(await factory.getAddress())).to.equal(platformRevenue);
     await expect(factory.connect(creator).withdrawPlatformFees(creator.address)).to.be.revertedWithCustomError(factory, "NotFeeRecipient");
-    const treasuryBalance = CREATION_FEE + platformRevenue;
-    await expect(factory.connect(treasury).withdrawPlatformFees(other.address)).to.changeEtherBalances(ethers, [factory, other], [-treasuryBalance, treasuryBalance]);
+    await expect(factory.connect(treasury).withdrawPlatformFees(other.address)).to.changeEtherBalances(ethers, [factory, other], [-platformRevenue, platformRevenue]);
     expect(await factory.pendingPlatformFees()).to.equal(0);
-    expect(await factory.totalPlatformFees()).to.equal(CREATION_FEE + platformRevenue);
+    expect(await factory.totalPlatformFees()).to.equal(platformRevenue);
     await expect(factory.connect(treasury).withdrawPlatformFees(other.address)).to.be.revertedWithCustomError(factory, "NoPlatformFees");
     await expect(factory.connect(creator).notifyMint(buyer.address, { value: 1 })).to.be.revertedWithCustomError(factory, "NotRegisteredCollection");
   });
@@ -76,7 +74,7 @@ describe("Platform revenue", function () {
     const { factory, creator, buyer } = await loadFixture(deployMonetizedPlatform);
     const collection = await collectionFor(factory, creator, false, USDC(5));
     await collection.connect(buyer).mint(1, { value: USDC("5.10") });
-    expect(await factory.pendingPlatformFees()).to.equal(CREATION_FEE + USDC("0.225"));
+    expect(await factory.pendingPlatformFees()).to.equal(USDC("0.225"));
     expect(await ethers.provider.getBalance(await collection.getAddress())).to.equal(USDC("4.875"));
   });
 
@@ -85,13 +83,13 @@ describe("Platform revenue", function () {
     const surchargeOnlyFactory = await ethers.deployContract("ArticStudioFactory", [treasury.address, 0, 200]);
     const surchargeOnly = await collectionFor(surchargeOnlyFactory, creator, false, USDC(5));
     await surchargeOnly.connect(buyer).mint(1, { value: USDC("5.10") });
-    expect(await surchargeOnlyFactory.pendingPlatformFees()).to.equal(CREATION_FEE + USDC("0.10"));
+    expect(await surchargeOnlyFactory.pendingPlatformFees()).to.equal(USDC("0.10"));
     expect(await ethers.provider.getBalance(await surchargeOnly.getAddress())).to.equal(USDC(5));
 
     const deductionOnlyFactory = await ethers.deployContract("ArticStudioFactory", [treasury.address, 250, 0]);
     const deductionOnly = await collectionFor(deductionOnlyFactory, creator, true, USDC(5));
     await deductionOnly.connect(buyer).mint(1, { value: USDC(5) });
-    expect(await deductionOnlyFactory.pendingPlatformFees()).to.equal(CREATION_FEE + USDC("0.125"));
+    expect(await deductionOnlyFactory.pendingPlatformFees()).to.equal(USDC("0.125"));
     expect(await ethers.provider.getBalance(await deductionOnly.getAddress())).to.equal(USDC("4.875"));
   });
 
@@ -108,7 +106,7 @@ describe("Platform revenue", function () {
     await expect(collection.connect(buyer).mint(3, { value: total - 1n })).to.be.revertedWithCustomError(collection, "IncorrectPayment");
     await expect(collection.connect(buyer).mint(3, { value: total + 1n })).to.be.revertedWithCustomError(collection, "IncorrectPayment");
     await collection.connect(buyer).mint(3, { value: total });
-    expect(await factory.pendingPlatformFees()).to.equal(CREATION_FEE + platformRevenue);
+    expect(await factory.pendingPlatformFees()).to.equal(platformRevenue);
     expect(await ethers.provider.getBalance(await collection.getAddress())).to.equal(base - deduction);
   });
 
@@ -118,20 +116,20 @@ describe("Platform revenue", function () {
     const key = ethers.id(`revenue-phases-${edition}`);
     const config = { root: leaf(key, buyer.address, 1), collectionKey: key, ultimateStart: start, fcfsStart: start + 100, publicStart: start + 200, ultimateLimit: 2, fcfsLimit: 2, publicLimit: 2, ultimatePrice: USDC(1), fcfsPrice: USDC(2) };
     const args = ["Phased revenue", "PHREV", "ipfs://phased", USDC(3), start, 20, 6, 500];
-    if (edition) await factory.connect(creator).createEditionWithPhases(...args, config, { value: CREATION_FEE });
-    else await factory.connect(creator).create721WithPhases(...args, false, config, { value: CREATION_FEE });
+    if (edition) await factory.connect(creator).createEditionWithPhases(...args, config);
+    else await factory.connect(creator).create721WithPhases(...args, false, config);
     const [address] = await factory.getCollectionsByCreator(creator.address);
     const collection = await ethers.getContractAt(edition ? "ArticEdition" : "ArticStudioCollection", address);
     await time.increaseTo(start);
     await expect(collection.connect(buyer).mintAllowlisted(1, 1, [], { value: USDC(1) })).to.be.revertedWithCustomError(collection, "IncorrectPayment");
     await collection.connect(buyer).mintAllowlisted(1, 1, [], { value: mintPayment(USDC(1)) });
-    expect(await factory.pendingPlatformFees()).to.equal(CREATION_FEE + mintRevenue(USDC(1)));
+    expect(await factory.pendingPlatformFees()).to.equal(mintRevenue(USDC(1)));
     await time.increaseTo(start + 100);
     await collection.connect(buyer).mintAllowlisted(1, 1, [], { value: mintPayment(USDC(2)) });
     await time.increaseTo(start + 200);
     await collection.connect(buyer).mint(2, { value: mintPayment(USDC(6)) });
     const total = USDC(9);
-    expect(await factory.pendingPlatformFees()).to.equal(CREATION_FEE + mintRevenue(total));
+    expect(await factory.pendingPlatformFees()).to.equal(mintRevenue(total));
     expect(await ethers.provider.getBalance(address)).to.equal(total - creatorFee(total));
   });
 
@@ -140,11 +138,11 @@ describe("Platform revenue", function () {
     const free = await collectionFor(factory, creator, false, 0);
     await free.connect(buyer).mint(1);
     expect(await factory.hasMinted(buyer.address)).to.equal(true);
-    expect(await factory.pendingPlatformFees()).to.equal(CREATION_FEE);
+    expect(await factory.pendingPlatformFees()).to.equal(0);
     const zero = await ethers.deployContract("ArticStudioFactory", [treasury.address, 0, 0]);
     const paid = await collectionFor(zero, creator);
     await paid.connect(buyer).mint(1, { value: USDC(2) });
-    expect(await zero.pendingPlatformFees()).to.equal(CREATION_FEE);
+    expect(await zero.pendingPlatformFees()).to.equal(0);
     expect(await ethers.provider.getBalance(await paid.getAddress())).to.equal(USDC(2));
     const art = await ethers.deployContract("ArticArtMarket", [treasury.address, 0]);
     await art.connect(creator).createListing(ethers.id("zero-rate"), USDC(2));
@@ -160,7 +158,7 @@ describe("Platform revenue", function () {
     const auction = await ethers.deployContract("ArticAuctionHouse", [await factory.getAddress(), await art.getAddress(), treasury.address, 100]);
     const collection = await collectionFor(factory, creator, false, USDC(100));
     await collection.connect(seller).mint(1, { value: mintPayment(USDC(100)) });
-    expect(await factory.pendingPlatformFees()).to.equal(CREATION_FEE + USDC(12));
+    expect(await factory.pendingPlatformFees()).to.equal(USDC(12));
     expect(await ethers.provider.getBalance(await collection.getAddress())).to.equal(USDC(90));
     await art.connect(seller).createListing(ethers.id("one-percent"), USDC(100));
     await art.connect(buyer).buyListing(1, { value: USDC(100) });
@@ -247,7 +245,7 @@ describe("Platform revenue", function () {
     await auction.connect(buyer).bid(1, { value: USDC(2) });
     await time.increaseTo(ends);
     await auction.settle(1);
-    for (const [contract, expectedFee] of [[factory, CREATION_FEE + USDC("0.09")], [art, USDC("0.05")], [auction, USDC("0.05")]]) {
+    for (const [contract, expectedFee] of [[factory, USDC("0.09")], [art, USDC("0.05")], [auction, USDC("0.05")]]) {
       expect(await contract.pendingPlatformFees()).to.equal(expectedFee);
       await expect(treasury.withdrawFees(await contract.getAddress(), recipient)).to.be.revertedWithCustomError(contract, "PlatformFeePayoutFailed");
       expect(await contract.pendingPlatformFees()).to.equal(expectedFee);

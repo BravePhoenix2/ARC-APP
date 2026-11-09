@@ -11,7 +11,7 @@ async function deployPlatform() {
   const factory = await ethers.deployContract("ArticStudioFactory", [treasury.address, 250, 200]);
   const art = await ethers.deployContract("ArticArtMarket", [treasury.address, 250]);
   const auction = await ethers.deployContract("ArticAuctionHouse", [await factory.getAddress(), await art.getAddress(), treasury.address, 250]);
-  await factory.connect(creator).create721("Auction collection", "AUCT", "ipfs://token.json", 0, 0, 100, 10, 500, false, { value: USDC(5) });
+  await factory.connect(creator).create721("Auction collection", "AUCT", "ipfs://token.json", 0, 0, 100, 10, 500, false);
   const [collectionAddress] = await factory.getCollectionsByCreator(creator.address);
   const nft = await ethers.getContractAt("ArticStudioCollection", collectionAddress);
   await nft.connect(seller).mint(2);
@@ -80,7 +80,7 @@ describe("ArticAuctionHouse auctions", function () {
   it("rejects soulbound tokens, unsupported assets and accidental safe transfers", async function () {
     const ctx = await loadFixture(deployPlatform);
     const { factory, creator, seller, auction, nft, art } = ctx;
-    await factory.connect(creator).create721("Soul", "SOUL", "ipfs://soul", 0, 0, 5, 1, 0, true, { value: USDC(5) });
+    await factory.connect(creator).create721("Soul", "SOUL", "ipfs://soul", 0, 0, 5, 1, 0, true);
     const addresses = await factory.getCollectionsByCreator(creator.address);
     const soul = await ethers.getContractAt("ArticStudioCollection", addresses[1]);
     await soul.connect(seller).mint(1);

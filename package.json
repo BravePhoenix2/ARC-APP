@@ -17,7 +17,7 @@
     "studio:artifacts": "hardhat compile && node scripts/export-studio-artifacts.cjs",
     "studio:pin-factories": "node --import tsx scripts/pin-collection-factories.ts",
     "studio:deploy:testnet": "hardhat run scripts/deploy-studio.js --network arcTestnet",
-    "test:app": "node --import tsx --import ./test/setup.mjs --test test/auth/*.test.ts test/wallet/*.test.ts test/screening/*.test.ts test/preview/*.test.ts test/submissions/*.test.ts test/nft/*.test.ts test/leaderboard/*.test.ts test/security/*.test.ts test/database/config.test.ts",
+    "test:app": "node --import tsx --import ./test/setup.mjs --test test/auth/*.test.ts test/wallet/*.test.ts test/screening/*.test.ts test/preview/*.test.ts test/submissions/*.test.ts test/nft/*.test.ts test/leaderboard/*.test.ts test/security/*.test.ts test/database/*.test.ts",
     "tester:backfill": "node --import tsx scripts/backfill-testers.ts",
     "test": "hardhat test mocha test/*.js",
     "db:generate": "node scripts/sync-database-schemas.mjs && prisma generate",
