@@ -356,6 +356,21 @@ for that local run, including Safari. Normal `npm start` keeps production HTTPS
 cookies. Use `npm run dev` when editing and hot reload is needed; stop the other
 server before switching modes.
 
+To test sign-in from another PC, forward an HTTPS tunnel to
+`http://127.0.0.1:3000`, stop the existing app server, and run:
+
+```sh
+npm run preview:share -- https://your-current-tunnel.trycloudflare.com
+```
+
+Add that exact origin to Privy's allowed origins. This command sets
+`ARTIQ_APP_ORIGIN` and `NEXT_PUBLIC_APP_URL` for the build and server and keeps
+HTTPS session cookies enabled. Keep both the app and tunnel running. When a
+Cloudflare quick tunnel gets a new hostname, restart this command with the new
+origin and update Privy's allowlist. A stale configured origin causes
+`POST /api/auth/privy/session` to return 403 and shows **Retry verification**
+after Privy login.
+
 The landing page renders before the wallet SDK downloads and initializes.
 Authenticated watchlist controls load separately, so public discovery does not
 pull wallet and private-account code into its initial JavaScript.
