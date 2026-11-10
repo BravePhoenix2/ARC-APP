@@ -226,7 +226,8 @@ test("changing wallet during the prompt preserves the original recovery scope an
   account = { ...account, walletAddress: otherWallet, headers: { ...account.headers, "X-Wallet-Address": otherWallet } };
   await render();
   await act(async () => { finish(hash); await work; }); await settle();
-  assert.equal(posted.length, 0); assert.equal(payment.recovery.record, null);
+  const otherWalletRecord = payment.recovery.record;
+  assert.equal(posted.length, 0); assert.equal(otherWalletRecord, null);
   account = { ...account, walletAddress: wallet, headers: { ...account.headers, "X-Wallet-Address": wallet } };
   await render(); assert.equal(payment.recovery.record?.hash, hash); assert.equal(sent.length, 1);
 });

@@ -3,6 +3,7 @@
 import Image from "next/image";
 import { useEffect, useRef, useState, type InputHTMLAttributes } from "react";
 import { MAX_COLLECTION_IMAGES, type CollectionImageInput } from "@/lib/collectionImages";
+import { maxImageBytes } from "@/lib/imageLimits";
 
 type Props = { images: CollectionImageInput[]; onChange: (images: CollectionImageInput[]) => void; headers: Record<string, string>; busy: boolean; onBusy: (busy: boolean) => void; preview?: boolean };
 const action = "rounded-full border border-[var(--border-soft)] px-4 py-2 text-xs font-semibold disabled:opacity-40";
@@ -27,7 +28,7 @@ export default function CollectionFolderUpload({ images, onChange, headers, busy
     const supported = candidates.filter((file) => !uploadedNames.has(file.name));
     if (!supported.length) { setProgress("All selected images are already uploaded. Remove an image first to replace it."); return; }
     if (images.length + supported.length > MAX_COLLECTION_IMAGES) { setError(`A collection can contain up to ${MAX_COLLECTION_IMAGES} images. Remove images or choose a smaller folder.`); return; }
-    if (supported.some((file) => !file.size || file.size > 5 * 1024 * 1024) || supported.reduce((sum, file) => sum + file.size, 0) > 100 * 1024 * 1024) { setError("Use images up to 5 MB each and up to 100 MB per selection."); return; }
+    if (supported.some((file) => !file.size || file.size > maxImageBytes) || supported.reduce((sum, file) => sum + file.size, 0) > 100 * 1024 * 1024) { setError("Use images up to 4 MB each and up to 100 MB per selection."); return; }
     const abort = new AbortController(); controller.current = abort; onBusy(true);
     const completed = [...images];
     try {
@@ -53,7 +54,7 @@ export default function CollectionFolderUpload({ images, onChange, headers, busy
   }
   function move(index: number, offset: number) { const next = [...images]; [next[index], next[index + offset]] = [next[index + offset], next[index]]; onChange(next); }
   return <div className="space-y-4 rounded-xl border border-[var(--border-soft)] p-4">
-    <p className="text-xs leading-6 text-[var(--muted-text)]">Select a folder or multiple images. Up to 100 images, 5 MB each, 100 MB per selection. Non-image files are skipped. Each image becomes one NFT; the first is your collection cover. Upload order starts by filename, including subfolders.</p>
+    <p className="text-xs leading-6 text-[var(--muted-text)]">Select a folder or multiple images. Up to 100 images, 4 MB each, 100 MB per selection. Non-image files are skipped. Each image becomes one NFT; the first is your collection cover. Upload order starts by filename, including subfolders.</p>
     <input ref={files} type="file" multiple accept="image/png,image/jpeg,image/webp" aria-label="Choose collection images" className="sr-only" disabled={busy} onChange={(event) => void upload(event.target.files)} />
     <input ref={folder} type="file" multiple {...({ webkitdirectory: "", directory: "" } as InputHTMLAttributes<HTMLInputElement>)} aria-label="Choose collection folder" className="sr-only" disabled={busy} onChange={(event) => void upload(event.target.files)} />
     <div className="flex flex-wrap gap-3"><button type="button" className={action} disabled={busy} onClick={() => folder.current?.click()}>Choose folder</button><button type="button" className={action} disabled={busy} onClick={() => files.current?.click()}>Choose multiple images</button>{busy && <button type="button" className={action} onClick={() => controller.current?.abort()}>Stop upload</button>}</div>

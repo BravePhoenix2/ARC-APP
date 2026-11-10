@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { NextRequest } from "next/server";
 import sharp from "sharp";
 import { maxAccountImageBytes } from "../../lib/imageUpload";
+import { maxImageBytes } from "../../lib/imageLimits";
 
 const directory = mkdtempSync(join(tmpdir(), "artiq-upload-limits-"));
 process.env.DATABASE_URL = `file:${join(directory, "test.db")}`;
@@ -37,6 +38,17 @@ before(async () => {
 });
 afterEach(async () => { await db.submission.deleteMany(); await db.uploadedImage.deleteMany(); });
 after(async () => { await db?.$disconnect(); rmSync(directory, { recursive: true, force: true }); });
+
+test("the upload route accepts 4 MiB with multipart headers and rejects one extra byte without saving it", async () => {
+  const boundary = Buffer.alloc(maxImageBytes); png.copy(boundary);
+  const accepted = await upload(boundary);
+  assert.equal(accepted.status, 201);
+  const saved = await db.uploadedImage.findMany();
+  assert.equal(saved.length, 1); assert.ok(saved[0].byteSize <= maxImageBytes);
+  const rejected = await upload(Buffer.concat([boundary, Buffer.from([0])]));
+  assert.equal(rejected.status, 400); assert.match((await rejected.json()).error, /4 MB/);
+  assert.equal(await db.uploadedImage.count(), 1, "oversized uploads never create a storage record");
+});
 
 test("old retained images count toward the total account budget independently of hourly quotas", async () => {
   await db.uploadedImage.create({ data: { ownerUserId: userId, ownerWallet, mimeType: "image/png", data: new Uint8Array(png), byteSize: maxAccountImageBytes, createdAt: new Date(Date.now() - 24 * 60 * 60_000) } });

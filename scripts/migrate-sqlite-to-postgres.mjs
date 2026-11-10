@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import Database from "better-sqlite3";
 import pg from "pg";
 import { config } from "dotenv";
+import { sqliteMigrationRows } from "./sqlite-migration-rows.mjs";
 
 config({ path: ".env.local", quiet: true });
 const apply = process.argv.includes("--apply");
@@ -72,7 +73,7 @@ try {
       const columns = model.fields.map((field) => quote(field.name)).join(", ");
       const parameters = model.fields.map((_, index) => `$${index + 1}`).join(", ");
       let copied = 0;
-      for (const row of source.prepare(`SELECT ${columns} FROM ${quote(model.name)} ORDER BY "id"`).iterate()) {
+      for (const row of sqliteMigrationRows(source, model.name, model.fields.map((field) => field.name))) {
         await target.query(`INSERT INTO ${quote(model.name)} (${columns}) VALUES (${parameters})`, model.fields.map((field) => convert(row[field.name], field.type)));
         copied++;
       }

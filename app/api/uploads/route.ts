@@ -32,7 +32,7 @@ async function handlePOST(request: NextRequest) {
     const bytes = await limitedBody(request, maxFileSize + 16_384);
     const form = await new Response(bytes as BodyInit, { headers: { "Content-Type": request.headers.get("content-type") ?? "" } }).formData();
     const file = form.get("file");
-    if (!(file instanceof File) || file.size === 0 || file.size > maxFileSize) return NextResponse.json({ error: "Upload an image up to 5 MB." }, { status: 400 });
+    if (!(file instanceof File) || file.size === 0 || file.size > maxFileSize) return NextResponse.json({ error: "Upload an image up to 4 MB." }, { status: 400 });
     const limit = form.get("itemType") === "NFT" ? 200 : 30;
     await checkUploadBudget(prisma, session.userId, session.walletAddress, file.size, limit);
     const { data, mimeType, screening } = await prepareUploadedImage(Buffer.from(await file.arrayBuffer()), file.type);
@@ -51,7 +51,7 @@ async function handlePOST(request: NextRequest) {
     if (error instanceof ImageValidationError) return NextResponse.json({ error: error.message }, { status: 400 });
     if (error instanceof UploadStorageError) return NextResponse.json({ error: error.message }, { status: 503 });
     if (error && typeof error === "object" && "code" in error && error.code === "P2034") return NextResponse.json({ error: "Another upload changed your storage budget. Keep completed uploads and retry this file." }, { status: 429 });
-    if (error instanceof Error && error.message === "BODY_TOO_LARGE") return NextResponse.json({ error: "Image must be under 5 MB." }, { status: 413 });
+    if (error instanceof Error && error.message === "BODY_TOO_LARGE") return NextResponse.json({ error: "Image must be 4 MB or smaller." }, { status: 413 });
     return NextResponse.json({ error: "Couldn't upload this file. Please choose a valid image and try again." }, { status: 400 });
   }
 }

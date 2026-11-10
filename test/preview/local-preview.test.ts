@@ -3,6 +3,7 @@ import { afterEach, beforeEach, test } from "node:test";
 import { NextRequest } from "next/server";
 import { POST } from "../../app/api/preview/screen/route";
 import { localPreviewEnabled, localPreviewRequestAllowed } from "../../lib/localPreview";
+import { maxImageBytes } from "../../lib/imageLimits";
 
 const names = ["NODE_ENV", "ARTIQ_LOCAL_PREVIEW", "ARTIQ_PREVIEW_ORIGIN", "ARTIQ_AI_PIXEL_SCREENING", "SIGHTENGINE_API_USER", "SIGHTENGINE_API_SECRET"];
 let previous: Record<string, string | undefined>;
@@ -141,4 +142,11 @@ test("preview enforces file signatures, image size, and supported types", async 
   assert.equal((await POST(request({ bytes: Buffer.from("<svg></svg>") }))).status, 400);
   const oversized = request(); oversized.headers.set("content-length", String(6 * 1024 * 1024));
   assert.equal((await POST(oversized)).status, 413);
+});
+
+test("preview accepts the shared 4 MiB boundary and rejects a larger file", async () => {
+  const boundary = Buffer.alloc(maxImageBytes); png.copy(boundary);
+  assert.equal((await POST(request({ bytes: boundary }))).status, 200);
+  const rejected = await POST(request({ bytes: Buffer.concat([boundary, Buffer.from([0])]) }));
+  assert.equal(rejected.status, 400); assert.match((await rejected.json()).error, /4 MB/);
 });

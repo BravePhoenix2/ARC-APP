@@ -5,6 +5,7 @@ import { afterEach, beforeEach, test } from "node:test";
 import React from "react";
 import { act, create, type ReactTestRenderer, type ReactTestRendererJSON } from "react-test-renderer";
 import ts from "typescript";
+import { maxImageBytes } from "../../lib/imageLimits";
 
 // Render the real form with deterministic account, router, and HTTP boundaries.
 // No wallet payment, provider login, detector request, or real upload is made.
@@ -18,6 +19,7 @@ let responseStatus: "APPROVED" | "PENDING";
 let includeItemId: boolean;
 let walletRequests: number;
 let history: Array<Record<string, unknown>>;
+let uploads: number;
 const noop = () => null;
 const dependencies: Record<string, unknown> = {
   "next/navigation": { useRouter: () => ({ push: (destination: string) => destinations.push(destination) }) },
@@ -32,6 +34,7 @@ const dependencies: Record<string, unknown> = {
     refresh: async () => true, logout: async () => true, connectWallet: () => { walletRequests++; },
   }) },
   "@/lib/nftTypes": require("../../lib/nftTypes"),
+  "@/lib/imageLimits": require("../../lib/imageLimits"),
   "@tanstack/react-query": {
     useQueryClient: () => ({ invalidateQueries: async () => {} }),
     useQuery: () => ({ data: history, isLoading: false, isError: false, isFetching: false, refetch: async () => {} }),
@@ -44,10 +47,10 @@ new Function("require", "module", "exports", code)((name: string) => dependencie
 const CreatorApplication = output.exports.default;
 
 beforeEach(() => {
-  destinations = []; submitted = []; history = []; walletRequests = 0;
+  destinations = []; submitted = []; history = []; walletRequests = 0; uploads = 0;
   responseStatus = "APPROVED"; includeItemId = true;
   globalThis.fetch = async (url, options) => {
-    if (String(url) === "/api/uploads") return Response.json({ url: "/api/uploads/owned-image", screening: { status: "REVIEW_REQUIRED", summary: "The reviewer will inspect your creation details.", signals: [] } });
+    if (String(url) === "/api/uploads") { uploads++; return Response.json({ url: "/api/uploads/owned-image", screening: { status: "REVIEW_REQUIRED", summary: "The reviewer will inspect your creation details.", signals: [] } }); }
     assert.equal(String(url), "/api/submissions");
     assert.equal(options?.method, "POST");
     const body = JSON.parse(String(options?.body));
@@ -80,6 +83,15 @@ async function nftImage() {
 async function submit() {
   await act(async () => { await renderer!.root.findByType("form").props.onSubmit({ preventDefault() {} }); });
 }
+
+test("creator images reject more than 4 MiB before upload and accept the boundary", async () => {
+  await render("WEB2_ART");
+  const choose = async (size: number) => act(async () => { await renderer!.root.findByProps({ id: "art-image" }).props.onChange({ target: { files: [new File([new Uint8Array(size)], "painting.png", { type: "image/png" })] } }); });
+  await choose(maxImageBytes + 1);
+  assert.equal(uploads, 0); assert.match(visibleText(), /4 MB or smaller/);
+  await choose(maxImageBytes);
+  assert.equal(uploads, 1); assert.doesNotMatch(visibleText(), /4 MB or smaller/);
+});
 
 test("NFT details go straight to collection setup and disclose the later 5 test USDC wallet fee", async () => {
   await render();

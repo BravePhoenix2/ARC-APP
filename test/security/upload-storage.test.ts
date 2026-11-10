@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import { loadUploadBytes, saveUploadBytes, removeUploadObject, UploadStorageError } from "../../lib/uploadStorage";
-import { maxImageBytes } from "../../lib/imageUpload";
+import { maxImageBytes, maxStoredImageBytes } from "../../lib/imageLimits";
 
 const keys = ["ARTIQ_UPLOAD_STORAGE", "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "ARTIQ_SUPABASE_STORAGE_BUCKET"] as const;
 const original = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
@@ -53,9 +53,12 @@ test("private object reads use authenticated storage and enforce the byte limit 
   assert.deepEqual(await loadUploadBytes({ data: new Uint8Array(), storageKey }), new Uint8Array([7, 8, 9]));
   await assert.rejects(loadUploadBytes({ data: new Uint8Array(), storageKey: "uploads/../../private" }), UploadStorageError);
   assert.equal(calls, 1, "invalid keys never reach a provider");
-  globalThis.fetch = async () => new Response("too big", { headers: { "content-length": String(maxImageBytes + 1) } });
+  const legacy = new Uint8Array(maxImageBytes + 1);
+  globalThis.fetch = async () => new Response(legacy);
+  assert.deepEqual(await loadUploadBytes({ data: new Uint8Array(), storageKey }), legacy, "retained legacy images still fit the original read budget");
+  globalThis.fetch = async () => new Response("too big", { headers: { "content-length": String(maxStoredImageBytes + 1) } });
   await assert.rejects(loadUploadBytes({ data: new Uint8Array(), storageKey }), UploadStorageError);
-  globalThis.fetch = async () => new Response(new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array(maxImageBytes)); controller.enqueue(new Uint8Array([1])); controller.close(); } }));
+  globalThis.fetch = async () => new Response(new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array(maxStoredImageBytes)); controller.enqueue(new Uint8Array([1])); controller.close(); } }));
   await assert.rejects(loadUploadBytes({ data: new Uint8Array(), storageKey }), /oversized/);
 });
 

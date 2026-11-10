@@ -1,4 +1,5 @@
 import { inflateSync } from "node:zlib";
+import { maxImageBytes } from "./imageLimits";
 
 export type ImageScreeningReport = {
   version: 1;
@@ -21,7 +22,6 @@ export function savedImageScreening(value: unknown): ImageScreeningReport | unde
   };
 }
 
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const MAX_METADATA_BYTES = 1024 * 1024;
 const MAX_FIELD_BYTES = 256 * 1024;
 const MAX_CHUNKS = 4096;
@@ -300,7 +300,7 @@ export function screenImage(data: Uint8Array, mimeType: string): ImageScreeningR
   };
 
   try {
-    if (data.byteLength > MAX_IMAGE_BYTES) notice("IMAGE_LIMIT", "Image exceeds the screening size limit; human review required");
+    if (data.byteLength > maxImageBytes) notice("IMAGE_LIMIT", "Image exceeds the screening size limit; human review required");
     else {
       const bytes = Buffer.from(data.buffer, data.byteOffset, data.byteLength);
       if (mimeType === "image/png") inspectPng(bytes);

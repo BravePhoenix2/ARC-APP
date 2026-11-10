@@ -89,6 +89,7 @@ before(async () => {
 });
 beforeEach(async (t) => {
   testTime += 60_000;
+  assert.ok("mock" in t, "This hook runs for individual tests.");
   t.mock.timers.enable({ apis: ["Date"], now: testTime });
   await db.collectionCreationPayment.deleteMany();
   await db.item.deleteMany();

@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
 import sharp from "sharp";
 import { screenImage, type ImageScreeningReport } from "./imageScreening";
+import { maxImageBytes, maxStoredImageBytes } from "./imageLimits";
 
-export const maxImageBytes = 5 * 1024 * 1024;
+export { maxImageBytes } from "./imageLimits";
 export const maxImageDimension = 8192;
 export const maxImagePixels = 40_000_000;
 export const maxAccountImageBytes = 500 * 1024 * 1024;
@@ -19,9 +20,14 @@ export class ImageValidationError extends Error {}
 
 /** Screen the original privately, then decode and strip all public metadata. */
 export async function prepareUploadedImage(data: Buffer, claimedMime: string) {
+  return prepareImage(data, claimedMime, maxImageBytes);
+}
+
+async function prepareImage(data: Buffer, claimedMime: string, byteLimit: number) {
   const mimeType = imageMime(data);
-  if (!mimeType || mimeType !== claimedMime || data.length === 0 || data.length > maxImageBytes) {
-    throw new ImageValidationError("Use a PNG, JPEG, or WebP image up to 5 MB.");
+  const sizeLabel = `${byteLimit / (1024 * 1024)} MB`;
+  if (!mimeType || mimeType !== claimedMime || data.length === 0 || data.length > byteLimit) {
+    throw new ImageValidationError(`Use a PNG, JPEG, or WebP image up to ${sizeLabel}.`);
   }
   const screening = screenImage(data, mimeType);
   try {
@@ -36,7 +42,7 @@ export async function prepareUploadedImage(data: Buffer, claimedMime: string) {
     if (mimeType === "image/jpeg") outputImage.jpeg({ quality: 100, chromaSubsampling: "4:4:4" });
     if (mimeType === "image/webp") outputImage.webp({ lossless: true });
     const { data: output, info } = await outputImage.toBuffer({ resolveWithObject: true });
-    if (output.length > maxImageBytes) throw new ImageValidationError("The processed image exceeds 5 MB. Reduce its dimensions and try again.");
+    if (output.length > byteLimit) throw new ImageValidationError(`The processed image exceeds ${sizeLabel}. Reduce its dimensions and try again.`);
     return {
       data: output, mimeType,
       screening: { ...screening, publicImage: { version: 1 as const, sha256: createHash("sha256").update(output).digest("hex"), width: info.width, height: info.height } },
@@ -51,6 +57,10 @@ export async function prepareUploadedImage(data: Buffer, claimedMime: string) {
 export async function publicImageBytes(data: Uint8Array, mimeType: string, screening: unknown) {
   const bytes = Buffer.from(data);
   const marker = (screening as ImageScreeningReport | null)?.publicImage;
-  if (marker?.version === 1 && marker.sha256 === createHash("sha256").update(bytes).digest("hex")) return bytes;
-  return (await prepareUploadedImage(bytes, mimeType)).data;
+  const output = marker?.version === 1 && marker.sha256 === createHash("sha256").update(bytes).digest("hex")
+    ? bytes : (await prepareImage(bytes, mimeType, maxStoredImageBytes)).data;
+  // Preserve legacy local reads and records. Vercel cannot serve oversized
+  // responses; an operator must prepare a smaller copy before moving that art.
+  if (process.env.VERCEL === "1" && output.length > 4_500_000) throw new ImageValidationError("This stored image exceeds the hosting response limit. Contact support to prepare a smaller copy.");
+  return output;
 }

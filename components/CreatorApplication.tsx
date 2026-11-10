@@ -13,6 +13,7 @@ import CollectionFolderUpload from "@/components/CollectionFolderUpload";
 import type { CollectionImageInput } from "@/lib/collectionImages";
 import { useArtiqAccount } from "@/hooks/useArtiqAccount";
 import { NFT_KINDS, NFT_KIND_INFO, type NftKind } from "@/lib/nftTypes";
+import { maxImageBytes } from "@/lib/imageLimits";
 
 type ItemType = "NFT" | "WEB2_ART";
 type CreationMethod = "HUMAN" | "AI_GENERATED" | "AI_ASSISTED";
@@ -192,8 +193,8 @@ function SubmissionForm({ walletAddress, accountId, initialItemType, initialNftK
       if (fileRef.current) fileRef.current.value = "";
       return;
     }
-    if (file.size > 5 * 1024 * 1024) {
-      setUploadError("Your image must be 5 MB or smaller.");
+    if (file.size > maxImageBytes) {
+      setUploadError("Your image must be 4 MB or smaller.");
       if (fileRef.current) fileRef.current.value = "";
       return;
     }
@@ -369,7 +370,7 @@ function SubmissionForm({ walletAddress, accountId, initialItemType, initialNftK
                   <input ref={fileRef} type="file" id="art-image" accept="image/png,image/jpeg,image/webp" className="sr-only" disabled={busy} onChange={(event) => void uploadImage(event.target.files?.[0])} />
                   <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--card-bg)] text-[#b55fbe]">{isUploading ? <LoaderCircle size={23} className="animate-spin" /> : uploadedUrl ? <CheckCircle2 size={23} /> : <Upload size={23} />}</div>
                   <p className="mt-3 break-words text-sm font-semibold">{isUploading ? "Uploading your image…" : uploadedName || "Give your work the spotlight"}</p>
-                  <p className="mt-2 text-xs text-[var(--muted-text)]">PNG, JPEG, or WebP · Up to 5 MB</p>
+                  <p className="mt-2 text-xs text-[var(--muted-text)]">PNG, JPEG, or WebP · Up to 4 MB</p>
                   <button type="button" disabled={busy} onClick={() => fileRef.current?.click()} className={`${smallButton} mt-4`}>{uploadedUrl ? "Replace image" : uploadError ? "Try another image" : "Choose image"}<ImagePlus size={14} aria-hidden="true" /></button>
                 </div>
               ) : (

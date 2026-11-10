@@ -1,15 +1,18 @@
 # Artwork storage and retention
 
 Uploads are decoded as still PNG, JPEG, or WebP images before storage. The input
-limit is 5 MB, 40 megapixels, and 8,192 pixels per side. Animation is rejected.
+limit is 4 MiB (4,194,304 bytes), 40 megapixels, and 8,192 pixels per side. Animation is rejected.
 Orientation is applied and identifying EXIF/GPS/XMP/IPTC metadata is stripped.
 PNG/WebP output is lossless; JPEG is re-encoded at quality 100 with no chroma
-subsampling. JPEG encoding is still lossy, and a processed file over 5 MB is
+subsampling. JPEG encoding is still lossy, and a processed file over 4 MiB is
 rejected with a request to reduce dimensions.
 The original server metadata screening report is retained without raw metadata
 values, so sanitization cannot clear an authorship-review flag. Existing database
 images are also sanitized when served; malformed legacy images return an error
-instead of publishing their original bytes.
+instead of publishing their original bytes. Legacy reads retain their bounded
+5 MiB budget. Vercel refuses responses larger than 4,500,000 bytes; review and
+re-export those pilot images before moving them to Vercel. No records are deleted
+by this limit change. See [deployment setup](TESTNET-DEPLOYMENT.md).
 Purge existing CDN upload caches when deploying this change; previously cached
 original downloads cannot be replaced by changing origin behavior alone.
 
@@ -20,7 +23,7 @@ per-account allowance does not replace a host/provider capacity alert.
 ## Private Supabase storage
 
 For the hosted pilot, create a **private** Supabase Storage bucket, restrict its
-file size to 5 MB and allowed MIME types to image/png, image/jpeg, image/webp, and
+file size to 4 MiB and allowed MIME types to image/png, image/jpeg, image/webp, and
 set these server-only variables:
 
 ```dotenv

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { maxImageBytes } from "./imageUpload";
+import { maxStoredImageBytes } from "./imageLimits";
 
 type StoredUpload = { data: Uint8Array<ArrayBuffer>; storageKey: string | null };
 export class UploadStorageError extends Error {}
@@ -56,13 +56,13 @@ export async function loadUploadBytes(image: { data: Uint8Array; storageKey?: st
   const response = await storageFetch(`${config.origin}/storage/v1/object/authenticated/${encodeURIComponent(config.bucket)}/${validKey(image.storageKey)}`, {
     headers: config.headers, cache: "no-store", redirect: "error", signal: AbortSignal.timeout(15_000),
   });
-  if (!response.ok || Number(response.headers.get("content-length")) > maxImageBytes || !response.body) throw new UploadStorageError("Artwork storage is unavailable.");
+  if (!response.ok || Number(response.headers.get("content-length")) > maxStoredImageBytes || !response.body) throw new UploadStorageError("Artwork storage is unavailable.");
   const reader = response.body.getReader(); const chunks: Uint8Array[] = []; let size = 0;
   try {
     while (true) {
       const { value, done } = await reader.read(); if (done) break;
       size += value.byteLength;
-      if (size > maxImageBytes) { void reader.cancel().catch(() => undefined); throw new UploadStorageError("Artwork storage returned an oversized image."); }
+      if (size > maxStoredImageBytes) { void reader.cancel().catch(() => undefined); throw new UploadStorageError("Artwork storage returned an oversized image."); }
       chunks.push(value);
     }
   } finally { reader.releaseLock(); }

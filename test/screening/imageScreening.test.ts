@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { deflateSync } from "node:zlib";
 import { screenImage } from "../../lib/imageScreening";
+import { maxImageBytes } from "../../lib/imageLimits";
 
 const parameters = "A still life\nSteps: 25, Sampler: Euler a, CFG scale: 7, Seed: 12345";
 const workflow = JSON.stringify({ "1": { class_type: "KSampler" }, "2": { class_type: "CLIPTextEncode", inputs: { text: "private prompt" } } });
@@ -182,7 +183,8 @@ test("compressed and total metadata budgets are enforced", () => {
   assert.equal(overBudget.status, "REVIEW_REQUIRED");
   assert.equal(fullBudget.status, "REVIEW_REQUIRED");
   assert.ok(fullBudget.signals.some((entry) => entry.code === "METADATA_LIMIT"));
-  assert.equal(screenImage(Buffer.alloc(5 * 1024 * 1024 + 1), "image/png").signals[0].code, "IMAGE_LIMIT");
+  assert.equal(screenImage(Buffer.alloc(maxImageBytes + 1), "image/png").signals[0].code, "IMAGE_LIMIT");
+  assert.ok(!screenImage(Buffer.alloc(maxImageBytes), "image/png").signals.some((entry) => entry.code === "IMAGE_LIMIT"));
 });
 
 test("aliased EXIF values are deduplicated and overlapping values share the processing budget", () => {

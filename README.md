@@ -1,6 +1,8 @@
 # Artic
 
-Next.js marketplace with Prisma/SQLite and Solidity contracts.
+Next.js marketplace with Prisma/PostgreSQL, local SQLite development, and Solidity contracts.
+
+For Vercel with managed PostgreSQL, follow the [public Testnet deployment guide](docs/TESTNET-DEPLOYMENT.md). The hosting build validates its environment and regenerates the Prisma client for PostgreSQL. Apply database migrations separately before releasing the app.
 
 ## Marketplace revenue
 
@@ -206,7 +208,7 @@ wallet-session, or authenticated submission evidence and is safe to repeat.
 ## NFT studio, auctions, and collector rewards
 
 NFT creators can select **Folder / series** in the creator form to upload a
-folder or multiple PNG, JPEG, or WebP images: up to 100 images, 5 MB per image,
+folder or multiple PNG, JPEG, or WebP images: up to 100 images, 4 MB per image,
 and 100 MB per selection. Files start in filename order; creators can move or
 remove them before submission. The first image is the cover and each image maps
 to one ERC-721 token, so supply equals the image count. Uploads are sequential,
@@ -485,7 +487,7 @@ Use `npm start` after a successful build to serve the production build.
 Visit `/apply` and use **Sign in** to continue with email or a wallet through
 Privy. A verified Artiq account can publish an NFT collection setup immediately,
 or submit ART BAZZAR for review. ART BAZZAR requires a
-PNG/JPEG/WebP upload (up to 5 MB), a declaration that no generative AI was used,
+PNG/JPEG/WebP upload (up to 4 MB), a declaration that no generative AI was used,
 and at least 30 characters explaining the creation process. NFTs may use uploaded
 images or HTTPS image URLs and may declare human-made, AI-assisted, or AI-generated
 work. Declared AI use is shown on marketplace NFT cards. Creators can track their

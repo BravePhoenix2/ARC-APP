@@ -9,6 +9,7 @@ import { zeroAddress, type Address, type Hash } from "viem";
 import { assetAuctionCommitment, type AssetAuctionDTO } from "../../lib/assetAuctions";
 import { assertAssetBid, assetAuctionNow, pendingAssetAuctionKey, readPendingAssetAuctions, verifiedAssetAuction } from "../../lib/assetAuctionClient";
 import { usdcAmount } from "../../lib/protocol";
+import { maxImageBytes } from "../../lib/imageLimits";
 
 const require = createRequire(import.meta.url);
 const seller = `0x${"1".repeat(40)}` as Address;
@@ -65,6 +66,7 @@ const deps: Record<string, unknown> = {
   "@/hooks/useArtiqAccount": { useArtiqAccount: () => account },
   "@/hooks/usePlatformFees": { usePlatformFees: () => ({ data: feeError ? undefined : { bps: BigInt(250), recipient: market, legacy: false }, isError: feeError, refetch: async () => {} }) },
   "@/lib/arcConfig": require("../../lib/arcConfig"),
+  "@/lib/imageLimits": require("../../lib/imageLimits"),
   "@/lib/artDelivery": require("../../lib/artDelivery"),
   "@/lib/assetAuctionClient": require("../../lib/assetAuctionClient"),
   "@/lib/protocol": { ...require("../../lib/protocol"), protocol: { auctions: market, legacyAuctions: [], isTestnet: true } },
@@ -121,6 +123,14 @@ test("asset grid filters digital and physical assets without fake inventory", as
   assert.match(JSON.stringify(renderer!.toJSON()), /Physical sculpture/);
   await act(async () => renderer!.root.findByProps({ "aria-label": "Search asset auctions" }).props.onChange({ target: { value: "missing asset" } }));
   assert.equal(renderer!.root.findAllByType("article").length, 0);
+});
+
+test("asset images over 4 MiB are rejected before an upload request", async () => {
+  await render();
+  await act(async () => buttonWithText("Create an auction").props.onClick());
+  const fileInput = renderer!.root.findAllByType("input").find((node) => node.props.type === "file")!;
+  await act(async () => { await fileInput.props.onChange({ target: { files: [new File([new Uint8Array(maxImageBytes + 1)], "asset.png", { type: "image/png" })] } }); });
+  assert.equal(calls.length, 0); assert.match(tx.error, /4 MB or smaller/);
 });
 
 test("bidding rechecks current chain state, enforces 5%, and discloses seller proceeds without NFT royalties", async () => {

@@ -6,6 +6,7 @@ import React, { useState } from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import ts from "typescript";
 import type { CollectionImageInput } from "../../lib/collectionImages";
+import { maxImageBytes } from "../../lib/imageLimits";
 
 const require = createRequire(import.meta.url);
 const code = ts.transpileModule(readFileSync(new URL("../../components/CollectionFolderUpload.tsx", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
@@ -13,6 +14,7 @@ const output = { exports: {} as { default: React.ComponentType<React.ComponentPr
 const dependencies: Record<string, unknown> = {
   "next/image": { __esModule: true, default: () => null },
   "@/lib/collectionImages": require("../../lib/collectionImages"),
+  "@/lib/imageLimits": require("../../lib/imageLimits"),
 };
 new Function("require", "module", "exports", code)((name: string) => dependencies[name] ?? require(name), output, output.exports);
 const FolderUpload = output.exports.default as React.ComponentType<Record<string, unknown>>;
@@ -69,4 +71,12 @@ test("oversized collections and duplicate filenames are rejected before sending 
   assert.equal(attempts, 0); assert.equal(images.length, 0);
   await select([image("same.png"), image("same.png")]);
   assert.equal(attempts, 0);
+});
+
+test("folder images use the 4 MiB boundary and reject an oversized file before any request", async () => {
+  await select([new File([new Uint8Array(maxImageBytes + 1)], "oversized.png", { type: "image/png" })]);
+  assert.equal(attempts, 0); assert.equal(images.length, 0);
+  assert.match(String(renderer!.root.findByProps({ role: "alert" }).props.children), /4 MB/);
+  await select([new File([new Uint8Array(maxImageBytes)], "boundary.png", { type: "image/png" })]);
+  assert.equal(attempts, 1); assert.equal(images.length, 1);
 });

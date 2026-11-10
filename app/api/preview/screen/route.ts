@@ -25,7 +25,7 @@ async function handlePOST(request: NextRequest) {
     const itemType = form.get("itemType");
     if (itemType !== "NFT" && itemType !== "WEB2_ART") return NextResponse.json({ error: "Choose NFT or Art." }, { status: 400, headers: privateHeaders });
     const file = form.get("file");
-    if (!(file instanceof File) || file.size === 0 || file.size > maxImageBytes) return NextResponse.json({ error: "Upload an image up to 5 MB." }, { status: 400, headers: privateHeaders });
+    if (!(file instanceof File) || file.size === 0 || file.size > maxImageBytes) return NextResponse.json({ error: "Upload an image up to 4 MB." }, { status: 400, headers: privateHeaders });
     const data = Buffer.from(await file.arrayBuffer());
     const mimeType = imageMime(data);
     if (!mimeType || file.type !== mimeType) return NextResponse.json({ error: "Use a PNG, JPEG, or WebP image." }, { status: 400, headers: privateHeaders });
@@ -34,7 +34,7 @@ async function handlePOST(request: NextRequest) {
     return NextResponse.json({ screening }, { headers: privateHeaders });
   } catch (error) {
     const tooLarge = error instanceof Error && error.message === "BODY_TOO_LARGE";
-    return NextResponse.json({ error: tooLarge ? "Image must be under 5 MB." : "Choose a valid image and try again." }, { status: tooLarge ? 413 : 400, headers: privateHeaders });
+    return NextResponse.json({ error: tooLarge ? "Image must be 4 MB or smaller." : "Choose a valid image and try again." }, { status: tooLarge ? 413 : 400, headers: privateHeaders });
   } finally {
     --inFlight;
   }

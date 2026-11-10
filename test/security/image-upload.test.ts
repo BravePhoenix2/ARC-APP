@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { test } from "node:test";
 import sharp from "sharp";
 import { ImageValidationError, prepareUploadedImage, publicImageBytes } from "../../lib/imageUpload";
 import { savedImageScreening } from "../../lib/imageScreening";
 import { screenArtwork } from "../../lib/artworkScreening";
+import { maxImageBytes } from "../../lib/imageLimits";
 
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWOwr9jyHwAE0AJrq3udBQAAAABJRU5ErkJggg==", "base64");
 function pngChunk(type: string, payload: Buffer) {
@@ -13,6 +15,38 @@ function pngChunk(type: string, payload: Buffer) {
   const checksum = Buffer.alloc(4); checksum.writeUInt32BE((crc ^ 0xffffffff) >>> 0);
   return Buffer.concat([length, body, checksum]);
 }
+
+test("uploads accept exactly 4 MiB and reject one extra byte before decoding", async () => {
+  const boundary = Buffer.alloc(maxImageBytes); png.copy(boundary);
+  const prepared = await prepareUploadedImage(boundary, "image/png");
+  assert.ok(prepared.data.length <= maxImageBytes);
+  await assert.rejects(prepareUploadedImage(Buffer.concat([boundary, Buffer.from([0])]), "image/png"), /up to 4 MB/);
+});
+
+test("an image whose sanitized output grows past 4 MiB is rejected before storage", async () => {
+  const pixels = Buffer.alloc(2000 * 2000 * 3); let seed = 0x12345678;
+  for (let index = 0; index < pixels.length; index++) { seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5; pixels[index] = seed & 255; }
+  const bytes = await sharp(pixels, { raw: { width: 2000, height: 2000, channels: 3 } }).jpeg({ quality: 20 }).toBuffer();
+  assert.ok(bytes.length < maxImageBytes, "the compressed upload is within the input budget");
+  await assert.rejects(prepareUploadedImage(bytes, "image/jpeg"), /processed image exceeds 4 MB/);
+});
+
+test("legacy stored images remain readable below the host response limit and are never mutated", async () => {
+  const previous = process.env.VERCEL;
+  const marker = (bytes: Buffer) => ({ publicImage: { version: 1, sha256: createHash("sha256").update(bytes).digest("hex") } });
+  const legacy = Buffer.alloc(maxImageBytes + 1); png.copy(legacy);
+  const oversized = Buffer.alloc(4_500_001); png.copy(oversized);
+  try {
+    process.env.VERCEL = "1";
+    assert.deepEqual(await publicImageBytes(legacy, "image/png", marker(legacy)), legacy);
+    assert.ok((await publicImageBytes(legacy, "image/png", null)).length <= maxImageBytes, "old unsanitized images can still be decoded and stripped");
+    const originalHash = createHash("sha256").update(oversized).digest("hex");
+    await assert.rejects(publicImageBytes(oversized, "image/png", marker(oversized)), /hosting response limit/);
+    assert.equal(createHash("sha256").update(oversized).digest("hex"), originalHash);
+    delete process.env.VERCEL;
+    assert.deepEqual(await publicImageBytes(oversized, "image/png", marker(oversized)), oversized);
+  } finally { if (previous === undefined) delete process.env.VERCEL; else process.env.VERCEL = previous; }
+});
 
 test("uploaded JPEG metadata is stripped while orientation is applied", async () => {
   const original = await sharp({ create: { width: 2, height: 3, channels: 3, background: "red" } })

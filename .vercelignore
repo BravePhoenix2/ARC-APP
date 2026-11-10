@@ -1,0 +1,17 @@
+.env*
+.aws
+.codex
+.agents
+.git
+.vercel
+.DS_Store
+*.pem
+node_modules
+.next*
+artifacts
+cache
+coverage
+prisma/*.db*
+prisma/backups
+*.log
+*.tsbuildinfo

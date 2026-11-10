@@ -1,5 +1,7 @@
 # Artiq public Testnet launch
 
+> Historical October launch plan. Use [TESTNET-DEPLOYMENT.md](TESTNET-DEPLOYMENT.md) for the current Vercel/PostgreSQL setup and release checks. The older dependency versions, SQLite-only restriction, reviewer requirement for NFT creation, and test counts below are historical.
+
 Confirmed target: **Monday, November 2, 2026 (Africa/Lagos)**. Release the public Arc Testnet pilot with a working Settings page and a complete native-USDC NFT mint path. Test USDC has no monetary value. Mainnet and real-money payments remain a separate release.
 
 ## Current implementation
