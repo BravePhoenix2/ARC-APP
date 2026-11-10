@@ -18,13 +18,17 @@ test("allowlist proofs match Solidity double-hashed domain-separated leaves, inc
   assert.throws(() => mintTree("collection", []));
   const single = mintTree("single", entries.slice(0, 1)); assert.deepEqual(single.proof(wallets[0], "ULTIMATE"), []);
 });
-test("phase settings enforce ordered future windows, approved prices and global wallet cap", () => {
+test("phase settings enforce one-hour windows, the guaranteed price floor and global wallet cap", () => {
   const config = { ultimateStart: new Date(Date.now() + 3600000).toISOString(), fcfsStart: new Date(Date.now() + 7200000).toISOString(), publicStart: new Date(Date.now() + 10800000).toISOString(), ultimateLimit: 1, fcfsLimit: 2, publicLimit: 3, ultimatePrice: "0", fcfsPrice: "1" };
   assert.deepEqual(validateMintConfig(config, 3, 2), config);
   assert.throws(() => validateMintConfig({ ...config, publicLimit: 4 }, 3, 2));
-  assert.throws(() => validateMintConfig({ ...config, fcfsPrice: "3" }, 3, 2));
+  assert.equal(validateMintConfig({ ...config, fcfsPrice: "3" }, 3, 2).fcfsPrice, "3");
+  assert.equal(validateMintConfig({ ...config, ultimatePrice: "1", fcfsPrice: "2" }, 3, 1).fcfsPrice, "2", "the screenshot's FCFS price can exceed public while respecting the guaranteed floor");
+  assert.throws(() => validateMintConfig({ ...config, ultimatePrice: "1.1", fcfsPrice: "1" }, 3, 2), /cannot be lower/);
+  assert.throws(() => validateMintConfig({ ...config, ultimatePrice: "2.1", fcfsPrice: "3" }, 3, 2), /cannot be lower/);
   assert.throws(() => validateMintConfig({ ...config, fcfsStart: config.ultimateStart }, 3, 2));
   assert.throws(() => validateMintConfig({ ...config, ultimateStart: "invalid" }, 3, 2));
+  assert.throws(() => validateMintConfig({ ...config, fcfsStart: new Date(Date.parse(config.ultimateStart) + 600_000).toISOString() }, 3, 2), /one hour/);
 });
 
 

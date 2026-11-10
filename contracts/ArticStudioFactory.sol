@@ -15,6 +15,7 @@ contract ArticStudioFactory is ArticPlatformFees {
     function supportsMintPhases() external pure returns (bool) { return true; }
     function supportsImageSeries() external pure returns (bool) { return true; }
     function supportsMintSurcharge() external pure returns (bool) { return true; }
+    function supportsMintManagement() external pure returns (bool) { return true; }
     struct CollectionInfo {
         address collection;
         address creator;
@@ -71,6 +72,26 @@ contract ArticStudioFactory is ArticPlatformFees {
     ) external returns (address collection) {
         collection = editionDeployer.deploy(name_, symbol_, metadataURI_, mintPrice_, mintStartTime_, maxSupply_, maxPerWallet_, royaltyBps_, msg.sender, address(this));
         ArticEdition(collection).configurePhases(config);
+        _register(collection, 2, false, name_, symbol_);
+    }
+
+    function create721WithManagedPhases(
+        string calldata name_, string calldata symbol_, string calldata metadataURI_, uint256 mintPrice_,
+        uint256 mintStartTime_, uint256 maxSupply_, uint256 maxPerWallet_, uint96 royaltyBps_, bool soulbound_,
+        ArticMintPhases.PhaseConfig calldata config, uint256 guaranteedAllocation
+    ) external returns (address collection) {
+        collection = collectionDeployer.deploy(name_, symbol_, metadataURI_, mintPrice_, mintStartTime_, maxSupply_, maxPerWallet_, royaltyBps_, soulbound_, msg.sender, address(this));
+        ArticStudioCollection(collection).configureManagedPhases(config, guaranteedAllocation);
+        _register(collection, 1, soulbound_, name_, symbol_);
+    }
+
+    function createEditionWithManagedPhases(
+        string calldata name_, string calldata symbol_, string calldata metadataURI_, uint256 mintPrice_,
+        uint256 mintStartTime_, uint256 maxSupply_, uint256 maxPerWallet_, uint96 royaltyBps_,
+        ArticMintPhases.PhaseConfig calldata config, uint256 guaranteedAllocation
+    ) external returns (address collection) {
+        collection = editionDeployer.deploy(name_, symbol_, metadataURI_, mintPrice_, mintStartTime_, maxSupply_, maxPerWallet_, royaltyBps_, msg.sender, address(this));
+        ArticEdition(collection).configureManagedPhases(config, guaranteedAllocation);
         _register(collection, 2, false, name_, symbol_);
     }
 

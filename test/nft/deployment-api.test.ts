@@ -105,8 +105,10 @@ before(async () => {
   const originalReceipt = deploymentClient.getTransactionReceipt;
   const originalRead = deploymentClient.readContract;
   const originalChain = deploymentClient.getChainId;
+  const originalBlock = deploymentClient.getBlock;
   Object.assign(deploymentClient, {
     getChainId: async () => rpcChainId,
+    getBlock: async () => ({ number: BigInt(1_000), timestamp: BigInt(Math.floor(Date.now() / 1000)) }),
     getTransactionReceipt: async ({ hash: txHash }: { hash: Hash }) => { reads++; const result = receipts.get(txHash); if (!result) throw new Error("Receipt not found"); return result; },
     readContract: async ({ address, functionName, args }: { address: Address; functionName: string; args?: unknown[] }) => {
       reads++;
@@ -116,7 +118,7 @@ before(async () => {
       return result;
     },
   });
-  restore = () => Object.assign(deploymentClient, { getTransactionReceipt: originalReceipt, readContract: originalRead, getChainId: originalChain });
+  restore = () => Object.assign(deploymentClient, { getTransactionReceipt: originalReceipt, readContract: originalRead, getChainId: originalChain, getBlock: originalBlock });
   [deployment, artListing, detail, metadata, mintTime] = await Promise.all([
     import("../../app/api/items/[id]/deployment/route"), import("../../app/api/items/[id]/art-listing/route"),
     import("../../app/api/items/[id]/route"), import("../../app/api/items/[id]/metadata/route"),
@@ -571,7 +573,7 @@ test("creators edit Ultimate and FCFS prices independently without changing the 
   const access = await import("../../app/api/items/[id]/mint-access/route");
   const { item, plan, config, path, context, ownerRequest } = await mintPriceFixture();
   let expected = { ...config };
-  for (const [tier, key, price] of [["ULTIMATE", "ultimatePrice", "0.25"], ["FCFS", "fcfsPrice", "1.75"], ["ULTIMATE", "ultimatePrice", "0"], ["FCFS", "fcfsPrice", "2.5"]] as const) {
+  for (const [tier, key, price] of [["ULTIMATE", "ultimatePrice", "0.25"], ["FCFS", "fcfsPrice", "1.75"], ["ULTIMATE", "ultimatePrice", "0"], ["FCFS", "fcfsPrice", "3"]] as const) {
     const response = await access.POST(ownerRequest({ action: "price", tier, price, config: { ...config, publicLimit: 99 }, mintPriceUsdc: 999 }), context);
     assert.equal(response.status, 200, JSON.stringify(await response.json()));
     expected = { ...expected, [key]: price };
@@ -598,14 +600,14 @@ test("phase price edits reject anonymous callers, other creators and foreign ori
   assert.deepEqual((await db.mintAccessPlan.findUniqueOrThrow({ where: { itemId: item.id } })).config, config);
 });
 
-test("phase price edits reject invalid tiers, malformed amounts and prices above the public price", async () => {
+test("phase price edits reject invalid tiers, malformed amounts and prices below the guaranteed floor", async () => {
   const access = await import("../../app/api/items/[id]/mint-access/route");
   const { item, config, context, ownerRequest } = await mintPriceFixture();
   for (const payload of [
     { tier: "PUBLIC", price: "1" }, { tier: "ultimate", price: "1" }, { price: "1" },
     { tier: "ULTIMATE", price: 1 }, { tier: "ULTIMATE", price: "" }, { tier: "ULTIMATE", price: "-0.1" },
     { tier: "ULTIMATE", price: "NaN" }, { tier: "ULTIMATE", price: "1e-3" }, { tier: "FCFS", price: "0.1234567" },
-    { tier: "ULTIMATE", price: "2.500001" }, { tier: "FCFS", price: "2.500001" }, { tier: "FCFS" },
+    { tier: "ULTIMATE", price: "2.500001" }, { tier: "FCFS", price: "0.499999" }, { tier: "FCFS" },
   ]) {
     const response = await access.POST(ownerRequest({ action: "price", ...payload }), context);
     assert.equal(response.status, 400, JSON.stringify({ payload, response: await response.json() }));
@@ -663,6 +665,155 @@ test("locking rejects oversubscribed Ultimate guarantees and allows a fully back
   assert.equal((await db.mintAccessPlan.findUniqueOrThrow({ where: { itemId: item.id } })).frozenAt, null);
   assert.equal((await access.POST(request(path, { action: "assign", wallets: [other], tier: "FCFS" }), context)).status, 200);
   assert.equal((await access.POST(request(path, { action: "freeze" }), context)).status, 200);
+});
+
+async function managedMintFixture() {
+  const access = await import("../../app/api/items/[id]/mint-access/route");
+  const { mintTree, onchainMintConfig } = await import("../../lib/mintAccess");
+  const config = { ultimateStart: new Date(Date.now() + 3_600_000).toISOString(), fcfsStart: new Date(Date.now() + 7_200_000).toISOString(), publicStart: new Date(Date.now() + 10_800_000).toISOString(), ultimateLimit: 1, fcfsLimit: 1, publicLimit: 2, ultimatePrice: "0.5", fcfsPrice: "3" };
+  const item = await nft({ maxSupply: 10, mintedCount: 0, maxPerWallet: 2, mintStartTime: new Date(config.ultimateStart), contractAddress: contract, deploymentFactory: factory });
+  const entries = [{ walletAddress: owner, tier: "ULTIMATE", requestedTier: "ULTIMATE" }, { walletAddress: other, tier: "FCFS", requestedTier: "FCFS" }];
+  const root = mintTree(item.id, entries).root;
+  const plan = await db.mintAccessPlan.create({ data: { itemId: item.id, config, root, frozenAt: new Date(), entries: { create: entries } } });
+  const state = { supportsMintManagement: true, owner, registry: factory, collectionCreator: owner, maxSupply: BigInt(10), totalMinted: BigInt(0), mintStartTime: BigInt(Math.floor(Date.parse(config.ultimateStart) / 1000)), mintClosed: false, guaranteedAllocation: BigInt(1), mintPhases: Object.values(onchainMintConfig(item.id, root, config)) };
+  settings.set(contract.toLowerCase(), state);
+  const path = `/api/items/${item.id}/mint-access`;
+  const context = { params: Promise.resolve({ id: item.id }) };
+  return { access, item, plan, config, entries, root, state, path, context };
+}
+
+const managementEvents = parseAbi([
+  "event AllowlistRootUpdated(bytes32 indexed previousRoot,bytes32 indexed root,uint256 guaranteedAllocation)",
+  "event MaxSupplyReduced(uint256 previousSupply,uint256 maxSupply)",
+  "event MintingClosed()",
+]);
+
+test("deployed whitelist edits stay private and preserve live proofs until an owner receipt activates the exact root", async () => {
+  const { access, item, plan, config, root, state, path, context } = await managedMintFixture();
+  const addedWallet = "0x7777777777777777777777777777777777777777";
+  assert.equal((await access.POST(request(path, { action: "assign", wallets: [addedWallet], tier: "ULTIMATE" }), context)).status, 200);
+  let saved = await db.mintAccessPlan.findUniqueOrThrow({ where: { id: plan.id }, include: { entries: true } });
+  assert.equal(saved.root, root);
+  assert.equal(saved.entries.length, 2, "staging never alters the live roster");
+  const publicResponse = await (await access.GET(request(path, undefined, "anonymous"), context)).json();
+  assert.deepEqual(publicResponse.plan.config, config);
+  assert.equal(publicResponse.pendingUpdate, undefined);
+  assert.equal(JSON.stringify(publicResponse).includes(addedWallet), false);
+  const manage = await (await access.GET(request(path + "?manage=1"), context)).json();
+  const pending = manage.pendingUpdate;
+  assert.equal(pending.guaranteedAllocation, 2);
+  assert.equal(pending.entries.length, 3);
+  assert.equal(manage.plan.guaranteedAllocation, 1);
+  const txHash = hash();
+  receipts.set(txHash, { status: "success", from: owner, to: contract, blockNumber: BigInt(999), logs: [{ address: contract, topics: encodeEventTopics({ abi: managementEvents, eventName: "AllowlistRootUpdated", args: { previousRoot: root, root: pending.root } }), data: encodeAbiParameters([{ type: "uint256" }], [BigInt(2)]) }] });
+  assert.equal((await access.POST(request(path, { action: "activate-allowlist", txHash }), context)).status, 400, "a receipt alone cannot activate a root absent from current chain state");
+  state.mintPhases[0] = pending.root;
+  state.guaranteedAllocation = BigInt(2);
+  assert.equal((await access.POST(request(path, { action: "activate-allowlist", txHash }), context)).status, 200);
+  assert.equal((await access.POST(request(path, { action: "activate-allowlist", txHash }), context)).status, 200, "retrying the confirmed activation is idempotent");
+  saved = await db.mintAccessPlan.findUniqueOrThrow({ where: { id: plan.id }, include: { entries: true } });
+  assert.equal(saved.root, pending.root);
+  assert.equal(saved.entries.length, 3);
+  assert.equal((await (await access.GET(request(path + "?manage=1"), context)).json()).pendingUpdate, null);
+  const live = await (await access.GET(request(path, undefined, "other"), context)).json();
+  const { mintLeaf, hashPair } = await import("../../lib/mintAccess");
+  assert.equal(live.proof.reduce(hashPair, mintLeaf(item.id, other, "FCFS")), pending.root);
+});
+
+test("deployed whitelist staging requires creator ownership, a managed contract, the original factory and an unopened guaranteed phase", async () => {
+  const { access, plan, state, path, context } = await managedMintFixture();
+  const payload = { action: "assign", wallets: [owner], tier: "FCFS" };
+  const before = reads;
+  assert.equal((await access.POST(request(path, payload, "anonymous"), context)).status, 401);
+  assert.equal((await access.POST(request(path, payload, "other"), context)).status, 400);
+  assert.equal((await access.POST(request(path, payload, "owner", "https://attacker.example"), context)).status, 403);
+  assert.equal(reads, before);
+  state.supportsMintManagement = false;
+  assert.equal((await access.POST(request(path, payload), context)).status, 400);
+  state.supportsMintManagement = true;
+  state.owner = other;
+  assert.equal((await access.POST(request(path, payload), context)).status, 403);
+  state.owner = owner;
+  state.registry = market;
+  assert.equal((await access.POST(request(path, payload), context)).status, 400);
+  state.registry = factory;
+  state.mintPhases[2] = BigInt(Math.floor(Date.now() / 1000));
+  assert.equal((await access.POST(request(path, payload), context)).status, 400);
+  assert.deepEqual((await db.mintAccessPlan.findUniqueOrThrow({ where: { id: plan.id } })).config, plan.config);
+});
+
+test("whitelist activation rejects reverted, foreign-wallet, foreign-contract, foreign-chain and fake-emitter receipts", async () => {
+  const { access, root, state, path, context } = await managedMintFixture();
+  assert.equal((await access.POST(request(path, { action: "assign", wallets: [other], tier: "ULTIMATE" }), context)).status, 200);
+  const pending = (await (await access.GET(request(path + "?manage=1"), context)).json()).pendingUpdate;
+  state.mintPhases[0] = pending.root;
+  state.guaranteedAllocation = BigInt(2);
+  const txHash = hash();
+  const receipt = { status: "success", from: owner, to: contract, blockNumber: BigInt(999), logs: [{ address: contract, topics: encodeEventTopics({ abi: managementEvents, eventName: "AllowlistRootUpdated", args: { previousRoot: root, root: pending.root } }), data: encodeAbiParameters([{ type: "uint256" }], [BigInt(2)]) }] };
+  const payload = { action: "activate-allowlist", txHash };
+  for (const change of [{ status: "reverted" }, { from: other }, { to: market }, { logs: [] }, { logs: receipt.logs.map((log) => ({ ...log, address: other })) }]) {
+    receipts.set(txHash, { ...receipt, ...change });
+    assert.equal((await access.POST(request(path, payload), context)).status, 400);
+  }
+  receipts.set(txHash, receipt);
+  rpcChainId = 1;
+  try { assert.equal((await access.POST(request(path, payload), context)).status, 400); }
+  finally { rpcChainId = 5042002; }
+  assert.equal((await access.POST(request(path, { action: "discard-allowlist" }), context)).status, 400, "an already-published root cannot be discarded before activation");
+  assert.equal((await access.POST(request(path, payload), context)).status, 200);
+});
+
+test("supply reductions before deployment preserve series metadata and cannot underfund guaranteed wallets", async () => {
+  const access = await import("../../app/api/items/[id]/mint-access/route");
+  const item = await nft({ maxSupply: 3, imageCount: 3, maxPerWallet: 3 });
+  await db.collectionImage.createMany({ data: [1, 2, 3].map((position) => ({ itemId: item.id, position, filename: `image-${position}.png`, imageUrl: `/image-${position}.png` })) });
+  const path = `/api/items/${item.id}/mint-access`; const context = { params: Promise.resolve({ id: item.id }) };
+  assert.equal((await access.POST(request(path, { action: "reduce-supply", maxSupply: 2 }, "other"), context)).status, 400);
+  assert.equal((await access.POST(request(path, { action: "reduce-supply", maxSupply: 2 }), context)).status, 200);
+  const saved = await db.item.findUniqueOrThrow({ where: { id: item.id }, include: { collectionImages: { orderBy: { position: "asc" } } } });
+  assert.equal(saved.maxSupply, 2); assert.equal(saved.maxPerWallet, 2); assert.equal(saved.imageCount, 3);
+  assert.deepEqual(saved.collectionImages.map((image) => image.position), [1, 2, 3]);
+  const config = { ultimateStart: new Date(Date.now() + 3_600_000).toISOString(), fcfsStart: new Date(Date.now() + 7_200_000).toISOString(), publicStart: new Date(Date.now() + 10_800_000).toISOString(), ultimateLimit: 1, fcfsLimit: 1, publicLimit: 1, ultimatePrice: "0", fcfsPrice: "1" };
+  assert.equal((await access.POST(request(path, { action: "configure", config }), context)).status, 200);
+  assert.equal((await access.POST(request(path, { action: "assign", wallets: [owner, other], tier: "ULTIMATE" }), context)).status, 200);
+  const blocked = await access.POST(request(path, { action: "reduce-supply", maxSupply: 1 }), context);
+  assert.equal(blocked.status, 400); assert.match((await blocked.json()).error, /require 2 tokens/);
+  assert.equal((await db.item.findUniqueOrThrow({ where: { id: item.id } })).maxSupply, 2);
+});
+
+test("an undeployed locked roster can reduce supply without stranding its phase limits", async () => {
+  const access = await import("../../app/api/items/[id]/mint-access/route");
+  const { mintTree } = await import("../../lib/mintAccess");
+  const item = await nft({ maxSupply: 10, maxPerWallet: 10 });
+  const config = { ultimateStart: new Date(Date.now() + 3_600_000).toISOString(), fcfsStart: new Date(Date.now() + 7_200_000).toISOString(), publicStart: new Date(Date.now() + 10_800_000).toISOString(), ultimateLimit: 2, fcfsLimit: 10, publicLimit: 10, ultimatePrice: "0", fcfsPrice: "1" };
+  const entries = [{ walletAddress: owner, tier: "ULTIMATE" }];
+  const root = mintTree(item.id, entries).root;
+  const plan = await db.mintAccessPlan.create({ data: { itemId: item.id, config, root, frozenAt: new Date(), entries: { create: entries } } });
+  const path = `/api/items/${item.id}/mint-access`; const context = { params: Promise.resolve({ id: item.id }) };
+  assert.equal((await access.POST(request(path, { action: "reduce-supply", maxSupply: 3 }), context)).status, 200);
+  const saved = await db.mintAccessPlan.findUniqueOrThrow({ where: { id: plan.id } });
+  assert.equal(saved.root, root); assert.ok(saved.frozenAt);
+  assert.deepEqual(saved.config, { ...config, fcfsLimit: 3, publicLimit: 3 });
+  assert.equal((await db.item.findUniqueOrThrow({ where: { id: item.id } })).maxPerWallet, 3);
+});
+
+test("confirmed creator supply reduction and closure sync only verified chain values and remain retryable", async () => {
+  const { access, item, state, path, context } = await managedMintFixture();
+  state.totalMinted = BigInt(3); state.maxSupply = BigInt(5);
+  const txHash = hash();
+  receipts.set(txHash, { status: "success", from: owner, to: contract, blockNumber: BigInt(999), logs: [{ address: contract, topics: encodeEventTopics({ abi: managementEvents, eventName: "MaxSupplyReduced" }), data: encodeAbiParameters([{ type: "uint256" }, { type: "uint256" }], [BigInt(10), BigInt(5)]) }] });
+  const payload = { action: "sync-management", txHash, maxSupply: 999, mintedCount: 0, status: "MINTED_OUT" };
+  assert.equal((await access.POST(request(path, payload, "other"), context)).status, 400);
+  assert.equal((await access.POST(request(path, payload), context)).status, 200);
+  assert.equal((await access.POST(request(path, payload), context)).status, 200);
+  let saved = await db.item.findUniqueOrThrow({ where: { id: item.id } });
+  assert.equal(saved.maxSupply, 5); assert.equal(saved.mintedCount, 3); assert.equal(saved.status, "UPCOMING");
+  state.mintClosed = true;
+  const closeHash = hash();
+  receipts.set(closeHash, { status: "success", from: owner, to: contract, blockNumber: BigInt(999), logs: [{ address: contract, topics: encodeEventTopics({ abi: managementEvents, eventName: "MintingClosed" }), data: "0x" }] });
+  assert.equal((await access.POST(request(path, { action: "sync-management", txHash: closeHash }), context)).status, 200);
+  saved = await db.item.findUniqueOrThrow({ where: { id: item.id } });
+  assert.equal(saved.status, "CLOSED"); assert.equal(saved.mintedCount, 3);
 });
 
 test("daily discovery returns published work only and never exposes identity or delivery fields", async () => {

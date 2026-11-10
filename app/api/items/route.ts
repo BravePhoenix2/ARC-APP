@@ -27,7 +27,7 @@ async function handleGET(request: NextRequest) {
   if (nftKind && (!isNftKind(nftKind) || itemType === "WEB2_ART")) {
     return NextResponse.json({ error: "Choose a valid NFT type for NFT items." }, { status: 400 });
   }
-  if (status && !["UPCOMING", "LIVE", "MINTED_OUT", "LISTED"].includes(status)) return NextResponse.json({ error: "Invalid NFT status." }, { status: 400 });
+  if (status && !["UPCOMING", "LIVE", "MINTED_OUT", "CLOSED", "LISTED"].includes(status)) return NextResponse.json({ error: "Invalid NFT status." }, { status: 400 });
   if (category && !["PAINTING", "RUG", "COSMETIC", "OTHER"].includes(category)) return NextResponse.json({ error: "Invalid art category." }, { status: 400 });
 
   const where: Prisma.ItemWhereInput = {

@@ -2,13 +2,32 @@ import { encodeAbiParameters, keccak256, concatHex, isAddress, toHex, type Hex }
 import { usdcAmount } from "@/lib/protocol";
 export type MintPhaseConfig = { ultimateStart: string; fcfsStart: string; publicStart: string; ultimateLimit: number; fcfsLimit: number; publicLimit: number; ultimatePrice: string; fcfsPrice: string };
 export type MintTier = "PENDING" | "ULTIMATE" | "FCFS";
+export type MintAllowlistWallet = { walletAddress: string; requestedTier: string; tier: string };
+export type PendingMintAllowlist = { root: Hex; guaranteedAllocation: number; entries: MintAllowlistWallet[] };
+export const MINT_PHASE_INTERVAL_MS = 60 * 60 * 1000;
+
+/** Return only public schedule fields; private staged rosters also live in this JSON column. */
+export function publicMintConfig(value: unknown): MintPhaseConfig {
+  const c = value as MintPhaseConfig;
+  return { ultimateStart: c.ultimateStart, fcfsStart: c.fcfsStart, publicStart: c.publicStart, ultimateLimit: c.ultimateLimit, fcfsLimit: c.fcfsLimit, publicLimit: c.publicLimit, ultimatePrice: c.ultimatePrice, fcfsPrice: c.fcfsPrice };
+}
+
+export function pendingMintAllowlist(value: unknown): PendingMintAllowlist | null {
+  const pending = (value as { pendingAllowlist?: PendingMintAllowlist } | null)?.pendingAllowlist;
+  return pending && typeof pending.root === "string" && /^0x[a-fA-F0-9]{64}$/.test(pending.root) && Number.isSafeInteger(pending.guaranteedAllocation) && Array.isArray(pending.entries) ? pending : null;
+}
+
 export function validateMintConfig(value: unknown, cap: number, publicPrice: number): MintPhaseConfig {
   if (!value || typeof value !== "object") throw new Error("Provide mint phase settings.");
   const c = value as MintPhaseConfig;
   const times = [c.ultimateStart, c.fcfsStart, c.publicStart].map((v) => typeof v === "string" ? Date.parse(v) : NaN);
-  if (times.some((v) => !Number.isFinite(v)) || times[0] <= Date.now() || times[0] >= times[1] || times[1] >= times[2]) throw new Error("Choose future dates in order: Ultimate, FCFS, then public.");
+  if (times.some((v) => !Number.isFinite(v)) || times[0] <= Date.now()) throw new Error("Choose a future guaranteed mint opening time.");
+  const seconds = times.map((time) => Math.floor(time / 1000));
+  if (seconds[1] - seconds[0] !== MINT_PHASE_INTERVAL_MS / 1000 || seconds[2] - seconds[1] !== MINT_PHASE_INTERVAL_MS / 1000) throw new Error("Guaranteed minting lasts one hour, followed by one hour of FCFS, then public minting.");
   for (const limit of [c.ultimateLimit, c.fcfsLimit, c.publicLimit]) if (!Number.isInteger(limit) || limit < 1 || limit > cap) throw new Error(`Each phase limit must be between 1 and the collection wallet cap (${cap}).`);
-  for (const price of [c.ultimatePrice, c.fcfsPrice]) if (typeof price !== "string" || usdcAmount(price, true) > usdcAmount(String(publicPrice), true)) throw new Error("Allowlist prices cannot exceed the collection's public price.");
+  if (typeof c.ultimatePrice !== "string" || typeof c.fcfsPrice !== "string") throw new Error("Provide guaranteed and FCFS mint prices.");
+  const guaranteed = usdcAmount(c.ultimatePrice, true);
+  if (usdcAmount(c.fcfsPrice, true) < guaranteed || usdcAmount(String(publicPrice), true) < guaranteed) throw new Error("FCFS and public prices cannot be lower than the guaranteed price.");
   return { ultimateStart: new Date(times[0]).toISOString(), fcfsStart: new Date(times[1]).toISOString(), publicStart: new Date(times[2]).toISOString(), ultimateLimit: c.ultimateLimit, fcfsLimit: c.fcfsLimit, publicLimit: c.publicLimit, ultimatePrice: c.ultimatePrice, fcfsPrice: c.fcfsPrice };
 }
 export const collectionKey = (id: string) => keccak256(toHex(id));

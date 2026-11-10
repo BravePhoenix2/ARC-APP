@@ -17,7 +17,7 @@ import { feePresets, percentToBps, readFeeTerms } from "@/lib/monetization";
 import { deploymentConfiguration, deploymentKeys, readDeploymentDraft, type StudioDeployment } from "@/lib/studioDeployment";
 
 const button = "gallery-button inline-flex items-center justify-center gap-2 px-5 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40";
-const storageKey = "artiq:studio-testnet-deployment:mint-surcharge-v2";
+const storageKey = "artiq:studio-testnet-deployment:mint-management-v3";
 const labels = { factory: "NFT studio factory", artMarket: "Art checkout", auctions: "Auction and rewards house" };
 const initialDraft = (): StudioDeployment => ({});
 
@@ -89,6 +89,8 @@ export default function ProtocolSetupPage() {
           ]);
           if (recipient.toLowerCase() !== fees.feeRecipient.toLowerCase() || Number(bps) !== (key === "factory" ? fees.mintFeeBps : fees.marketplaceFeeBps)) throw new Error(`The ${labels[key]} fee terms do not match this deployment. Check the saved draft.`);
           if (key === "factory") {
+            const supportsManagement = await tx.client!.readContract({ address, abi: factoryAbi, functionName: "supportsMintManagement" }).catch(() => false);
+            if (supportsManagement !== true) throw new Error("This NFT studio factory does not support the updated mint controls. Deploy the updated factory; existing collections keep their original contracts.");
             const supportsSurcharge = await tx.client!.readContract({ address, abi: factoryAbi, functionName: "supportsMintSurcharge" }).catch(() => false);
             if (supportsSurcharge !== true) throw new Error("This NFT studio factory does not support buyer-paid mint surcharges. Deploy the updated factory and preserve the old address for its existing collections.");
             const surchargeBps = await tx.client!.readContract({ address, abi: factoryAbi, functionName: "mintSurchargeBps" });
@@ -129,13 +131,13 @@ export default function ProtocolSetupPage() {
     } catch (cause) { setError(transactionError(cause)); }
     finally { setPending(false); guard.current = false; }
   }
-  const actionLabel = !tx.isConnected ? account.authenticated ? "Connect wallet to deploy" : "Sign in to deploy" : tx.isWrongNetwork ? "Switch to Arc Testnet" : deployed.pending ? "Resume pending deployment" : started ? "Continue deployment" : "Deploy contracts with asset auctions";
+  const actionLabel = !tx.isConnected ? account.authenticated ? "Connect wallet to deploy" : "Sign in to deploy" : tx.isWrongNetwork ? "Switch to Arc Testnet" : deployed.pending ? "Resume pending deployment" : started ? "Continue deployment" : "Deploy contracts with mint controls";
   return <main className="gallery-page min-h-screen"><Atmosphere /><MarketNav />
     <div className="relative mx-auto max-w-4xl px-4 py-12 sm:px-8">
       <Link href="/settings" className="text-xs font-semibold text-[var(--muted-text)]">← Settings</Link>
       <p className="mt-8 text-[10px] font-semibold uppercase tracking-[.18em] text-[#b55fbe]">Project owner · Arc Testnet</p>
       <h1 className="mt-4 text-4xl">Set up marketplace revenue.</h1>
-      <p className="mt-5 max-w-2xl text-sm leading-7 text-[var(--muted-text)]">Choose your commission and fee wallet, then deploy the studio, art checkout, and auction contracts. The updated auction house supports timed digital and physical asset listings as well as NFTs. Paid mints have a creator proceeds fee and a separate surcharge paid by the minter. Art and auction fees are deducted from seller proceeds.</p>
+      <p className="mt-5 max-w-2xl text-sm leading-7 text-[var(--muted-text)]">Choose your commission and fee wallet, then deploy the studio, art checkout, and auction contracts. The updated studio supports one-hour Guaranteed and FCFS windows, whitelist updates before minting, supply reductions and creator-closed public mints. The auction house supports timed digital and physical asset listings as well as NFTs. Paid mints have a creator proceeds fee and a separate surcharge paid by the minter. Art and auction fees are deducted from seller proceeds.</p>
       <p className="mt-3 max-w-2xl text-sm leading-7 text-[var(--muted-text)]">The 5 test USDC collection creation fee goes directly to your existing platform wallet. It does not require a new contract deployment here.</p>
       <section className="gallery-card mt-8 p-6 sm:p-8">
         <div className="flex items-center gap-3"><ShieldCheck size={23} className="text-[#b55fbe]" /><h2 className="text-xl">{configured ? "Current project addresses" : "Testnet setup required"}</h2></div>

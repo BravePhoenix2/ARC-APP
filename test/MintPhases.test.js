@@ -12,7 +12,7 @@ describe("Phased mint access", function () {
     const factory = await ethers.deployContract("ArticStudioFactory", [creator.address, 250, 200]);
     const start = await time.latest() + 100;
     const key = ethers.id("collection-one"); const a = leaf(key, ultimate.address, 1); const b = leaf(key, fcfs.address, 2);
-    const config = { root: pair(a, b), collectionKey: key, ultimateStart: start, fcfsStart: start + 100, publicStart: start + 200, ultimateLimit: 1, fcfsLimit: 1, publicLimit: 2, ultimatePrice: 1, fcfsPrice: 2 };
+    const config = { root: pair(a, b), collectionKey: key, ultimateStart: start, fcfsStart: start + 3600, publicStart: start + 7200, ultimateLimit: 1, fcfsLimit: 1, publicLimit: 2, ultimatePrice: 1, fcfsPrice: 2 };
     const args = ["Phases", "PH", "ipfs://metadata", 3, start, 10, 3, 500];
     const transaction = edition ? await factory.createEditionWithPhases(...args, config) : await factory.create721WithPhases(...args, false, config);
     const receipt = await transaction.wait();
@@ -28,14 +28,14 @@ describe("Phased mint access", function () {
     await expect(nft.connect(ultimate).mintAllowlisted(1, 1, [b], { value: 2 })).to.be.revertedWithCustomError(nft, "IncorrectPayment");
     await nft.connect(ultimate).mintAllowlisted(1, 1, [b], { value: 1 });
     await expect(nft.connect(ultimate).mintAllowlisted(1, 1, [b], { value: 1 })).to.be.revertedWithCustomError(nft, "PhaseLimitExceeded");
-    await time.increaseTo(start + 100);
+    await time.increaseTo(start + 3600);
     await nft.connect(fcfs).mintAllowlisted(1, 2, [a], { value: 2 });
-    await nft.connect(ultimate).mintAllowlisted(1, 1, [b], { value: 2 });
+    await expect(nft.connect(ultimate).mintAllowlisted(1, 1, [b], { value: 2 })).to.be.revertedWithCustomError(nft, "NotAllowlisted");
     await expect(nft.connect(fcfs).mintAllowlisted(1, 1, [a], { value: 2 })).to.be.revertedWithCustomError(nft, "NotAllowlisted");
-    await time.increaseTo(start + 200);
+    await time.increaseTo(start + 7200);
     await expect(nft.connect(ultimate).mintAllowlisted(1, 1, [b], { value: 1 })).to.be.revertedWithCustomError(nft, "PhaseNotOpen");
-    await expect(nft.connect(ultimate).mint(2, { value: 6 })).to.be.revertedWithCustomError(nft, "ExceedsWalletLimit");
-    await nft.connect(ultimate).mint(1, { value: 3 });
+    await expect(nft.connect(ultimate).mint(3, { value: 9 })).to.be.revertedWithCustomError(nft, "PhaseLimitExceeded");
+    await nft.connect(ultimate).mint(2, { value: 6 });
     await nft.connect(publicWallet).mint(2, { value: 6 });
     await expect(nft.connect(publicWallet).mint(1, { value: 3 })).to.be.revertedWithCustomError(nft, "PhaseLimitExceeded");
     expect(await factory.hasMinted(ultimate.address)).to.equal(true);
@@ -56,7 +56,7 @@ describe("Guaranteed Ultimate allocations", function () {
     const factory = await ethers.deployContract("ArticStudioFactory", [treasury.address, 250, 200]);
     const start = await time.latest() + 100; const key = ethers.id("guaranteed");
     const a = leaf(key, first.address, 1); const b = leaf(key, second.address, 1);
-    const config = { root: pair(a, b), collectionKey: key, ultimateStart: start, fcfsStart: start + 100, publicStart: start + 200, ultimateLimit: 2, fcfsLimit: 1, publicLimit: 1, ultimatePrice: 0, fcfsPrice: 1 };
+    const config = { root: pair(a, b), collectionKey: key, ultimateStart: start, fcfsStart: start + 3600, publicStart: start + 7200, ultimateLimit: 2, fcfsLimit: 1, publicLimit: 1, ultimatePrice: 0, fcfsPrice: 1 };
     const receipt = await (await factory.create721WithPhases("Guaranteed", "GTD", "ipfs://gtd", 2, start, 4, 2, 0, false, config)).wait();
     const address = receipt.logs.map(l => { try { return factory.interface.parseLog(l); } catch { return null; } }).find(l => l?.name === "CollectionCreated").args.collection;
     const nft = await ethers.getContractAt("ArticStudioCollection", address);

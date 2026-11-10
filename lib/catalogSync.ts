@@ -13,13 +13,13 @@ const mint1155Abi = parseAbi(["event Minted(address indexed to,uint256 quantity,
 export class CatalogSyncError extends Error {}
 export class CatalogSyncBusyError extends CatalogSyncError {}
 
-type Snapshot = { blockNumber: bigint; mintedCount: number; status: "UPCOMING" | "LIVE" | "MINTED_OUT" } | { blockNumber: bigint; sold: boolean; cancelled: boolean };
+type Snapshot = { blockNumber: bigint; mintedCount: number; maxSupply: number; status: "UPCOMING" | "LIVE" | "MINTED_OUT" | "CLOSED" } | { blockNumber: bigint; sold: boolean; cancelled: boolean };
 type Cached = { expires: number; snapshot: Snapshot };
 const CACHE_MS = 30_000;
 const MAX_CACHE = 500;
 const globals = globalThis as unknown as { artiqCatalogSync?: { cache: Map<string, Cached>; inflight: Map<string, Promise<Snapshot>> } };
 const state = globals.artiqCatalogSync ?? (globals.artiqCatalogSync = { cache: new Map(), inflight: new Map() });
-const keyFor = (item: Item) => `${item.id}:${item.contractAddress || ""}:${item.deploymentFactory || ""}:${item.artMarketAddress || ""}:${item.artListingId || ""}`;
+const keyFor = (item: Item) => `${item.id}:${item.contractAddress || ""}:${item.deploymentFactory || ""}:${item.maxSupply ?? ""}:${item.status || ""}:${item.artMarketAddress || ""}:${item.artListingId || ""}`;
 
 function collectionFor(item: Item): { address: Address; factory: Address } {
   const factory = item.deploymentFactory || protocol.factory;
@@ -41,9 +41,11 @@ async function readSnapshot(item: Item, minimumBlockNumber?: bigint): Promise<Sn
       catalogSyncClient.readContract({ address, abi: collectionAbi, functionName: "maxSupply", blockNumber }),
       catalogSyncClient.readContract({ address, abi: collectionAbi, functionName: "mintStartTime", blockNumber }),
     ]);
-    if (registeredCreator === zeroAddress || registry.toLowerCase() !== factory.toLowerCase() || maxSupply !== BigInt(item.maxSupply || 0) || maxSupply < BigInt(1) || totalMinted > maxSupply || totalMinted < BigInt(0) || maxSupply > BigInt(1_000_000)) throw new CatalogSyncError("The collection does not match its verified catalog deployment.");
-    const status = totalMinted >= maxSupply ? "MINTED_OUT" : block.timestamp < starts ? "UPCOMING" : "LIVE";
-    return { blockNumber, mintedCount: Number(totalMinted), status };
+    const managed = await catalogSyncClient.readContract({ address, abi: collectionAbi, functionName: "supportsMintManagement", blockNumber }).catch(() => false);
+    if (registeredCreator === zeroAddress || registry.toLowerCase() !== factory.toLowerCase() || maxSupply > BigInt(item.maxSupply || 0) || (maxSupply !== BigInt(item.maxSupply || 0) && managed !== true) || maxSupply < BigInt(1) || totalMinted > maxSupply || totalMinted < BigInt(0) || maxSupply > BigInt(1_000_000)) throw new CatalogSyncError("The collection does not match its verified catalog deployment.");
+    const closed = managed === true && await catalogSyncClient.readContract({ address, abi: collectionAbi, functionName: "mintClosed", blockNumber });
+    const status = closed ? "CLOSED" : totalMinted >= maxSupply ? "MINTED_OUT" : block.timestamp < starts ? "UPCOMING" : "LIVE";
+    return { blockNumber, mintedCount: Number(totalMinted), maxSupply: Number(maxSupply), status };
   }
   const market = artMarketForItem(item);
   if (!market || !item.artListingId || !/^\d+$/.test(item.artListingId) || !item.artListingSeller || item.priceUsdc === null) throw new CatalogSyncError("This artwork does not have a verified checkout listing.");
@@ -80,8 +82,11 @@ export async function reconcileCatalogItem(item: Item, minimumBlockNumber?: bigi
   const snapshot = await snapshotFor(item, minimumBlockNumber);
   if ("mintedCount" in snapshot) {
     await prisma.item.updateMany({
-      where: { id: item.id, contractAddress: item.contractAddress, deploymentFactory: item.deploymentFactory, maxSupply: item.maxSupply, OR: [{ mintedCount: null }, { mintedCount: { lte: snapshot.mintedCount } }], ...(snapshot.status === "UPCOMING" ? { AND: [{ OR: [{ status: null }, { status: { notIn: ["LIVE", "MINTED_OUT"] } }] }] } : {}) },
-      data: { mintedCount: snapshot.mintedCount, status: snapshot.status },
+      where: { id: item.id, contractAddress: item.contractAddress, deploymentFactory: item.deploymentFactory, maxSupply: item.maxSupply, OR: [{ mintedCount: null }, { mintedCount: { lte: snapshot.mintedCount } }], AND: [
+        ...(snapshot.status !== "CLOSED" ? [{ OR: [{ status: null }, { status: { not: "CLOSED" as const } }] }] : []),
+        ...(snapshot.status === "UPCOMING" ? [{ OR: [{ status: null }, { status: { notIn: ["LIVE", "MINTED_OUT", "CLOSED"] as ("LIVE" | "MINTED_OUT" | "CLOSED")[] } }] }] : []),
+      ] },
+      data: { mintedCount: snapshot.mintedCount, maxSupply: snapshot.maxSupply, status: snapshot.status },
     });
   } else if (snapshot.sold || snapshot.cancelled) {
     // Purchase state is independent of delivery/order saving. A stale pre-sale

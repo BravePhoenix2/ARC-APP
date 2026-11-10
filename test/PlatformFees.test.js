@@ -111,22 +111,23 @@ describe("Platform revenue", function () {
   });
 
   for (const edition of [false, true]) it(`charges the actual allowlist price and public price for phased ${edition ? "ERC-1155" : "ERC-721"} mints`, async function () {
-    const { factory, creator, buyer } = await loadFixture(deployMonetizedPlatform);
+    const { factory, creator, buyer, other } = await loadFixture(deployMonetizedPlatform);
     const start = (await time.latest()) + 100;
     const key = ethers.id(`revenue-phases-${edition}`);
-    const config = { root: leaf(key, buyer.address, 1), collectionKey: key, ultimateStart: start, fcfsStart: start + 100, publicStart: start + 200, ultimateLimit: 2, fcfsLimit: 2, publicLimit: 2, ultimatePrice: USDC(1), fcfsPrice: USDC(2) };
+    const guaranteedLeaf = leaf(key, buyer.address, 1), fcfsLeaf = leaf(key, other.address, 2);
+    const config = { root: ethers.keccak256(ethers.concat([guaranteedLeaf, fcfsLeaf].sort())), collectionKey: key, ultimateStart: start, fcfsStart: start + 3600, publicStart: start + 7200, ultimateLimit: 2, fcfsLimit: 2, publicLimit: 2, ultimatePrice: USDC(1), fcfsPrice: USDC(2) };
     const args = ["Phased revenue", "PHREV", "ipfs://phased", USDC(3), start, 20, 6, 500];
     if (edition) await factory.connect(creator).createEditionWithPhases(...args, config);
     else await factory.connect(creator).create721WithPhases(...args, false, config);
     const [address] = await factory.getCollectionsByCreator(creator.address);
     const collection = await ethers.getContractAt(edition ? "ArticEdition" : "ArticStudioCollection", address);
     await time.increaseTo(start);
-    await expect(collection.connect(buyer).mintAllowlisted(1, 1, [], { value: USDC(1) })).to.be.revertedWithCustomError(collection, "IncorrectPayment");
-    await collection.connect(buyer).mintAllowlisted(1, 1, [], { value: mintPayment(USDC(1)) });
+    await expect(collection.connect(buyer).mintAllowlisted(1, 1, [fcfsLeaf], { value: USDC(1) })).to.be.revertedWithCustomError(collection, "IncorrectPayment");
+    await collection.connect(buyer).mintAllowlisted(1, 1, [fcfsLeaf], { value: mintPayment(USDC(1)) });
     expect(await factory.pendingPlatformFees()).to.equal(mintRevenue(USDC(1)));
-    await time.increaseTo(start + 100);
-    await collection.connect(buyer).mintAllowlisted(1, 1, [], { value: mintPayment(USDC(2)) });
-    await time.increaseTo(start + 200);
+    await time.increaseTo(start + 3600);
+    await collection.connect(other).mintAllowlisted(1, 2, [guaranteedLeaf], { value: mintPayment(USDC(2)) });
+    await time.increaseTo(start + 7200);
     await collection.connect(buyer).mint(2, { value: mintPayment(USDC(6)) });
     const total = USDC(9);
     expect(await factory.pendingPlatformFees()).to.equal(mintRevenue(total));

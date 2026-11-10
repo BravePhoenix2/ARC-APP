@@ -16,13 +16,11 @@ contract ArticEdition is ERC1155, ERC2981, Ownable, ReentrancyGuard, ArticMintPh
     string public metadataURI;
     uint256 public immutable mintPrice;
     uint256 public immutable mintStartTime;
-    uint256 public immutable maxSupply;
     uint256 public immutable maxPerWallet;
     address public immutable registry;
     address public immutable feeRecipient;
     uint256 public immutable platformFeeBps;
     uint256 public immutable mintSurchargeBps;
-    uint256 public totalMinted;
     mapping(address => uint256) public mintedByWallet;
 
     event Minted(address indexed to, uint256 quantity, uint256 totalPaid);
@@ -62,9 +60,17 @@ contract ArticEdition is ERC1155, ERC2981, Ownable, ReentrancyGuard, ArticMintPh
 
     function supportsMintSurcharge() external pure returns (bool) { return true; }
 
+    function _mintOpeningTime() internal view override returns (uint256) { return mintStartTime; }
+
     function configurePhases(PhaseConfig calldata config) external {
         if (msg.sender != registry || totalMinted != 0) revert InvalidPhases();
-        _configurePhases(config, maxPerWallet, mintStartTime, mintPrice);
+        _configurePhases(config, maxPerWallet, mintStartTime, mintPrice, maxSupply);
+    }
+
+    function configureManagedPhases(PhaseConfig calldata config, uint256 allocation) external {
+        if (msg.sender != registry || totalMinted != 0) revert InvalidPhases();
+        if (config.ultimateLimit == 0 || allocation % config.ultimateLimit != 0) revert InvalidPhases();
+        _configurePhases(config, maxPerWallet, mintStartTime, mintPrice, allocation);
     }
 
     function mintAllowlisted(uint256 quantity, uint8 tier, bytes32[] calldata proof) external payable nonReentrant {
@@ -77,6 +83,7 @@ contract ArticEdition is ERC1155, ERC2981, Ownable, ReentrancyGuard, ArticMintPh
     }
 
     function _mintTokens(uint256 quantity, uint256 price) private {
+        if (mintClosed) revert MintingIsClosed();
         if (quantity == 0 || quantity > 100) revert InvalidQuantity();
         if (block.timestamp < mintStartTime) revert MintingNotStarted();
         if (totalMinted + quantity > maxSupply) revert ExceedsMaxSupply();

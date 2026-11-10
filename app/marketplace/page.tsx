@@ -28,14 +28,14 @@ type MarketplaceItem = {
   description: string | null;
   imageUrl: string | null;
   mintPriceUsdc: number | null;
-  status: "UPCOMING" | "LIVE" | "MINTED_OUT" | "LISTED" | null;
+  status: "UPCOMING" | "LIVE" | "MINTED_OUT" | "CLOSED" | "LISTED" | null;
   category: "PAINTING" | "RUG" | "COSMETIC" | "OTHER" | null;
   priceUsdc: number | null;
   sold: boolean;
   creator: { walletAddress: string | null; username: string | null };
 };
 
-const STATUS_FILTERS = ["Upcoming", "Live", "Listed", "Sold"] as const;
+const STATUS_FILTERS = ["Upcoming", "Live", "Listed", "Sold", "Closed"] as const;
 const SORT_OPTIONS = ["Price: low to high", "Price: high to low", "Newest", "Mint starting soon"] as const;
 const RARITY_FILTERS = ["Common", "Rare", "Epic", "Legendary"] as const;
 const ART_CATEGORIES = ["Painting", "Artistic rug", "Artistic cosmetic", "Other"] as const;
@@ -44,6 +44,7 @@ const NFT_STATUS_STYLE: Record<NonNullable<MarketplaceItem["status"]>, { bg: str
   UPCOMING: { bg: "#F49BC5", text: "#362A67" },
   LIVE: { bg: "#2FE6A6", text: "#0B3B2E" },
   MINTED_OUT: { bg: "#362A67", text: "#FFFFFF" },
+  CLOSED: { bg: "#6B6578", text: "#FFFFFF" },
   LISTED: { bg: "#7C74C4", text: "#FFFFFF" },
 };
 

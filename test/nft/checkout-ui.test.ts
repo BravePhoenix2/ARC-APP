@@ -8,6 +8,7 @@ import ts from "typescript";
 import { artMarketAbi, COLLECTION_CREATION_FEE, protocol, usdcAmount } from "../../lib/protocol";
 import { type PlatformFeeTerms } from "../../lib/platformFeeRead";
 import { emptyArtDelivery } from "../../lib/artDelivery";
+import CreatorMintControls from "../../components/CreatorMintControls";
 
 const require = createRequire(import.meta.url);
 const wallet = `0x${"1".repeat(40)}`;
@@ -29,9 +30,9 @@ const tx = { isConnected: false, pending: false, isWrongNetwork: false, address:
   try { const result = await action(async (args) => { lastWrite = args; return hash; }); await after(result); }
   catch (error) { tx.error = (error as Error).message; }
 } };
-const item = { artMarketAddress: undefined as string | undefined, id: "approved", itemType: "NFT", title: "Approved item", creationMethod: "HUMAN", nftKind: "COLLECTIBLE", contractAddress: wallet as string | null, mintPriceUsdc: 25, priceUsdc: 25, sold: false, artListingId: "42" as string | null, artListingSeller: market, creator: { username: "Creator" } };
-const state = { phase: 3, phaseCount: BigInt(0), phasePrice: BigInt(25), phaseLimit: BigInt(2), price: BigInt(25), start: BigInt(0), timestamp: BigInt(1), count: BigInt(0), supply: BigInt(10), max: BigInt(2), minted: BigInt(0), owner: market, proceeds: BigInt(0), mintSurchargeBps: BigInt(200) as bigint | undefined };
-type MintAccessFixture = { plan: { root: string; frozenAt: string; config?: import("../../lib/mintAccess").MintPhaseConfig } | null; entry: { tier: string }; proof: never[] };
+const item = { artMarketAddress: undefined as string | undefined, id: "approved", itemType: "NFT", title: "Approved item", creationMethod: "HUMAN", nftKind: "COLLECTIBLE", contractAddress: wallet as string | null, mintPriceUsdc: 25, priceUsdc: 25, maxSupply: 10, maxPerWallet: 2, sold: false, artListingId: "42" as string | null, artListingSeller: market, creator: { username: "Creator" } };
+const state = { phase: 3, phaseCount: BigInt(0), phasePrice: BigInt(25), phaseLimit: BigInt(2), price: BigInt(25), start: BigInt(0), timestamp: BigInt(1), count: BigInt(0), supply: BigInt(10), max: BigInt(2), minted: BigInt(0), owner: market, proceeds: BigInt(0), mintSurchargeBps: BigInt(200) as bigint | undefined, managed: false, closed: false, reserved: BigInt(0), guaranteedMinted: BigInt(0) };
+type MintAccessFixture = { plan: { root: string; frozenAt: string; guaranteedAllocation?: number; config?: import("../../lib/mintAccess").MintPhaseConfig } | null; entry: { tier: string }; proof: never[]; entries?: Array<{walletAddress: string; tier: string}> };
 let mintAccess: MintAccessFixture = { plan: null, entry: { tier: "PENDING" }, proof: [] };
 let feeTerms: PlatformFeeTerms | undefined = { legacy: false, bps: BigInt(250), recipient: market };
 let feeError = false;
@@ -39,6 +40,9 @@ let feeContract: string | null = null;
 let isOwner = false;
 let factoryMintSurcharge: bigint | null | undefined = BigInt(200);
 let factoryMintSurchargeError = false;
+let factoryManagement = true;
+let accessSaveFailure = false;
+let accessActions: Array<Record<string, unknown>>;
 let creationFeeRequests = 0;
 const creationPayment = { paid: true, isError: false, isLoading: false, busy: false, error: "", failureReason: null,
   data: { recipient: market, amount: COLLECTION_CREATION_FEE.toString() },
@@ -65,7 +69,8 @@ const deps: Record<string, unknown> = {
   "@/components/ShareItemButton": { default: noop, __esModule: true },
   "@/components/CreatorLink": { default: noop, __esModule: true },
   "@/components/MintAccessPanel": { default: noop, __esModule: true },
-  "@/hooks/useMintAccess": { useMintAccess: () => ({ data: mintAccess }) },
+  "@/components/CreatorMintControls": { default: CreatorMintControls, __esModule: true },
+  "@/hooks/useMintAccess": { useMintAccess: () => ({ data: mintAccess, refetch: async () => {}, saveAsync: async (input: Record<string, unknown>) => { accessActions.push(input); if (accessSaveFailure) throw new Error("The confirmed mint update could not be saved. Retry verification."); } }) },
   "@/lib/mintAccess": require("../../lib/mintAccess"),
   "@/components/CollectionImageGallery": { default: noop, __esModule: true },
   "@/hooks/useProtocolTransaction": { useProtocolTransaction: () => tx },
@@ -74,7 +79,7 @@ const deps: Record<string, unknown> = {
   "@/lib/protocol": { ...require("../../lib/protocol"), protocol: { ...protocol, factory: market, artMarket: market, isTestnet: true }, artMarketForItem: (item: { artMarketAddress?: string | null }) => item.artMarketAddress ? require("../../lib/protocol").artMarketForItem(item) : market, artMarketAbi },
   "@/lib/nftTypes": require("../../lib/nftTypes"),
   "@/lib/artDelivery": require("../../lib/artDelivery"),
-  "@tanstack/react-query": { useQuery: ({ queryKey, queryFn }: { queryKey: string[]; queryFn: () => Promise<unknown> }) => { queryFunctions.set(queryKey[0], queryFn); return { isLoading: false, isError: queryKey[0] === "factory-mint-surcharge" && factoryMintSurchargeError, refetch: async () => {}, data: queryKey[0] === "item-detail" ? { item, isOwner, metadataUrl: "https://articmarket.xyz/api/items/approved/metadata" } : queryKey[0] === "collection-state" ? state : queryKey[0] === "factory-mint-surcharge" ? factoryMintSurcharge : queryKey[0] === "art-order" ? { order: null } : { listing: [market, "art-hash", BigInt(25), `0x${"0".repeat(40)}`, false], proceeds: BigInt(0) } }; } },
+  "@tanstack/react-query": { useQuery: ({ queryKey, queryFn }: { queryKey: string[]; queryFn: () => Promise<unknown> }) => { queryFunctions.set(queryKey[0], queryFn); return { isLoading: false, isError: queryKey[0] === "factory-mint-surcharge" && factoryMintSurchargeError, refetch: async () => {}, data: queryKey[0] === "item-detail" ? { item, isOwner, metadataUrl: "https://articmarket.xyz/api/items/approved/metadata" } : queryKey[0] === "collection-state" ? state : queryKey[0] === "factory-mint-surcharge" ? factoryMintSurcharge : queryKey[0] === "factory-mint-management" ? factoryManagement : queryKey[0] === "art-order" ? { order: null } : { listing: [market, "art-hash", BigInt(25), `0x${"0".repeat(40)}`, false], proceeds: BigInt(0) } }; } },
 };
 function load(file: string): React.ComponentType<{ id: string }> {
   const source = readFileSync(new URL(`../../components/${file}.tsx`, import.meta.url), "utf8");
@@ -91,12 +96,13 @@ beforeEach(() => {
   queryFunctions.clear();
   creationPayment.paid = true; creationPayment.isError = false;
   factoryMintSurchargeError = false; creationFeeRequests = 0;
+  factoryManagement = true; accessActions = []; accessSaveFailure = false;
   Object.defineProperty(globalThis, "localStorage", { configurable: true, value: { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => storage.set(key, value), removeItem: (key: string) => storage.delete(key) } });
   logins = connections = payments = 0; saved = undefined; lastWrite = undefined; saveFailure = false;
   Object.assign(account, { authenticated: false, identity: "guest", walletAddress: undefined });
   Object.assign(tx, { isConnected: false, error: "", client: null });
   feeTerms = { legacy: false, bps: BigInt(250), recipient: market }; feeError = false; isOwner = false; factoryMintSurcharge = BigInt(200); item.artMarketAddress = undefined; item.contractAddress = wallet; item.artListingId = "42";
-  Object.assign(state, { price: BigInt(25), mintSurchargeBps: BigInt(200) });
+  Object.assign(state, { price: BigInt(25), mintSurchargeBps: BigInt(200), managed: false, closed: false, reserved: BigInt(0), guaranteedMinted: BigInt(0), start: BigInt(0), timestamp: BigInt(1), count: BigInt(0), supply: BigInt(10), owner: market });
   item.itemType = "NFT"; item.nftKind = "COLLECTIBLE"; mintAccess = { plan: null, entry: { tier: "PENDING" }, proof: [] }; Object.assign(state, { phase: 3, phaseCount: BigInt(0), phasePrice: BigInt(25), phaseLimit: BigInt(2) });
   globalThis.fetch = async (_url, options) => { saved = JSON.parse(options?.body as string); return saveFailure ? Response.json({ error: "Retry saving; do not pay again." }, { status: 503 }) : Response.json({ order: { id: "order" } }); };
 });
@@ -265,7 +271,7 @@ for (const kind of ["COLLECTIBLE", "EDITION", "SOULBOUND", "MEMBERSHIP"]) {
     Object.assign(account, { authenticated: true, identity: "creator", walletAddress: wallet }); tx.isConnected = true;
     tx.client = { readContract: async () => true, getTransactionReceipt: async () => ({ from: wallet, to: market, status: "success" }) };
     if (phased) mintAccess.plan = { root: hash, frozenAt: new Date().toISOString(), config: {
-      ultimateStart: "2027-01-01T10:00:00Z", fcfsStart: "2027-01-02T10:00:00Z", publicStart: "2027-01-03T10:00:00Z",
+      ultimateStart: "2027-01-01T10:00:00Z", fcfsStart: "2027-01-01T11:00:00Z", publicStart: "2027-01-01T12:00:00Z",
       ultimateLimit: 1, fcfsLimit: 1, publicLimit: 1, ultimatePrice: "1", fcfsPrice: "2",
     } };
     await act(async () => { renderer = create(React.createElement(CollectionDetail, { id: item.id })); });
@@ -277,7 +283,7 @@ for (const kind of ["COLLECTIBLE", "EDITION", "SOULBOUND", "MEMBERSHIP"]) {
     assert.equal(deploy.props.disabled, false);
     await act(async () => { deploy.props.onClick(); await new Promise((resolve) => setTimeout(resolve, 0)); });
     assert.equal(payments, 1);
-    assert.equal(lastWrite?.functionName, `${kind === "EDITION" ? "createEdition" : "create721"}${phased ? "WithPhases" : ""}`);
+    assert.equal(lastWrite?.functionName, `${kind === "EDITION" ? "createEdition" : "create721"}${phased ? "WithManagedPhases" : ""}`);
     assert.equal(lastWrite?.value, undefined);
     assert.equal((lastWrite?.args as unknown[])[3], usdcAmount("25"), "the collection fee is separate from the collector's mint price");
     if (kind !== "EDITION") assert.equal((lastWrite?.args as unknown[])[8], kind === "SOULBOUND");

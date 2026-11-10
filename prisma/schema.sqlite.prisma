@@ -27,6 +27,7 @@ enum ItemStatus {
   UPCOMING
   LIVE
   MINTED_OUT
+  CLOSED
   LISTED
 }
 

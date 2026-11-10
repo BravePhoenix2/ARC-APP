@@ -12,7 +12,7 @@ const factory = `0x${"2".repeat(40)}` as const;
 const auction = `0x${"3".repeat(40)}` as const;
 const factoryHash = `0x${"a".repeat(64)}` as const;
 const auctionHash = `0x${"b".repeat(64)}` as const;
-const storageKey = "artiq:studio-testnet-deployment:mint-surcharge-v2";
+const storageKey = "artiq:studio-testnet-deployment:mint-management-v3";
 const artHash = `0x${"c".repeat(64)}` as const;
 const fees = { feeRecipient: market, mintFeeBps: 250, mintSurchargeBps: 200, marketplaceFeeBps: 250 };
 const originalRecipient = process.env.NEXT_PUBLIC_PLATFORM_FEE_RECIPIENT;
@@ -35,6 +35,7 @@ const tx = { address: market, isConnected: true, isWrongNetwork: false, chainId:
   readContract: async ({ address, functionName }: { address: string; functionName: string }) => {
     if (functionName === "supportsMintSurcharge") { if (supportReadFailure) throw new Error("function unavailable"); return supportsMintSurcharge; }
     if (functionName === "supportsAssetAuctions") return supportsAssets;
+    if (functionName === "supportsMintManagement") return true;
     const bytecode = address === factory ? "0x01" : address === market ? "0x02" : "0x03";
     const args = writes.find((write) => write.bytecode === bytecode)?.args as unknown[] | undefined;
     if (functionName === "feeRecipient") return args ? (address === factory ? args[0] : args.at(-2)) : market;

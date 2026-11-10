@@ -21,7 +21,7 @@ export function browseItems<T extends BrowseItem>(items: T[], filters: BrowseFil
     if ((filters.min || filters.max) && amount == null) return false;
     if (filters.min && amount! < Number(filters.min) || filters.max && amount! > Number(filters.max)) return false;
     if (filters.statuses?.length) {
-      const label = item.itemType === "WEB2_ART" ? item.sold ? "Sold" : "Available" : ({ UPCOMING: "Upcoming", LIVE: "Live", LISTED: "Listed", MINTED_OUT: "Sold" } as Record<string, string>)[item.status || ""];
+      const label = item.itemType === "WEB2_ART" ? item.sold ? "Sold" : "Available" : ({ UPCOMING: "Upcoming", LIVE: "Live", LISTED: "Listed", MINTED_OUT: "Sold", CLOSED: "Closed" } as Record<string, string>)[item.status || ""];
       if (!filters.statuses.includes(label)) return false;
     }
     if (filters.facets?.length) {

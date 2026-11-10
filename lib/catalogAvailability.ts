@@ -14,5 +14,5 @@ export function catalogStatusWhere(status: string, now = new Date()): Prisma.Ite
   const opened = { status: "UPCOMING", contractAddress: { not: null }, OR: [{ mintStartTime: null }, { mintStartTime: { lte: now } }] } satisfies Prisma.ItemWhereInput;
   if (status === "LIVE") return { OR: [{ status: "LIVE" }, opened] };
   if (status === "UPCOMING") return { status: "UPCOMING", OR: [{ contractAddress: null }, { mintStartTime: { gt: now } }] };
-  return { status: status as "MINTED_OUT" | "LISTED" };
+  return { status: status as "MINTED_OUT" | "CLOSED" | "LISTED" };
 }
