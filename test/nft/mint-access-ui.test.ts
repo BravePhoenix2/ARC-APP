@@ -11,8 +11,8 @@ import type { MintPhaseConfig } from "../../lib/mintAccess";
 
 type PanelProps = React.ComponentProps<typeof MintAccessPanelComponent>;
 type PriceChange = { action: "price"; tier: "ULTIMATE" | "FCFS"; price: string };
-type Change = PriceChange | { action: "disable" | "freeze" | "discard-allowlist" } | { action: "configure"; config: MintPhaseConfig } | { action: "assign"; tier: string; wallets: string[] };
-type Options = { isOwner?: boolean; deployed?: boolean; frozen?: boolean; supportsManagement?: boolean; managementBusy?: boolean; publicPrice?: number };
+type Change = PriceChange | { action: "disable" } | { action: "freeze" } | { action: "unfreeze" } | { action: "discard-allowlist" } | { action: "configure"; config: MintPhaseConfig } | { action: "assign"; tier: string; wallets: string[] };
+type Options = { isOwner?: boolean; deployed?: boolean; frozen?: boolean; supportsManagement?: boolean; managementBusy?: boolean; deploymentPending?: boolean; publicPrice?: number };
 const require = createRequire(import.meta.url);
 const publicPrice = 3;
 let renderer: ReactTestRenderer | undefined;
@@ -36,7 +36,7 @@ const dependencies: Record<string, unknown> = {
 new Function("require", "module", "exports", code)((name: string) => dependencies[name] ?? require(name), output, output.exports);
 const MintAccessPanel = output.exports.default;
 
-function Harness({ isOwner = true, deployed = false, frozen = false, supportsManagement = false, managementBusy = false, publicPrice: collectionPrice = publicPrice }: Options) {
+function Harness({ isOwner = true, deployed = false, frozen = false, supportsManagement = false, managementBusy = false, deploymentPending = false, publicPrice: collectionPrice = publicPrice }: Options) {
   const [data, setData] = useState<MintAccessData>(() => ({
     ...persisted,
     plan: persisted.plan && { ...persisted.plan, frozenAt: frozen ? "2026-10-23T12:00:00.000Z" : null },
@@ -55,6 +55,7 @@ function Harness({ isOwner = true, deployed = false, frozen = false, supportsMan
         if (saveFailure) { setSaveError("Could not save price. Try again."); return; }
         setSaveError(undefined);
         if (input.action === "disable") persisted = { plan: null };
+        else if (input.action === "unfreeze") persisted = { ...data, plan: { ...plan, frozenAt: null, root: null } };
         else if (input.action === "configure") persisted = { ...data, plan: { ...plan, config: input.config } };
         else if (input.action === "discard-allowlist") persisted = { ...data, pendingUpdate: null };
         else if (input.action === "assign") {
@@ -80,7 +81,7 @@ function Harness({ isOwner = true, deployed = false, frozen = false, supportsMan
       else complete();
     },
   } as unknown as PanelProps["access"];
-  return React.createElement(MintAccessPanel, { access, isOwner, deployed, supportsManagement, managementBusy, walletCap: 4, publicPrice: collectionPrice, onChange: () => { refreshes++; }, onPublishAllowlist: async (pending) => {
+  return React.createElement(MintAccessPanel, { access, isOwner, deployed, supportsManagement, managementBusy, deploymentPending, walletCap: 4, publicPrice: collectionPrice, onChange: () => { refreshes++; }, onPublishAllowlist: async (pending) => {
     publishedUpdates.push(pending);
     if (publishFailure) throw new Error("The confirmed whitelist transaction could not be saved. Retry verification.");
     setData((value) => ({ ...value, entries: value.pendingUpdate?.entries, pendingUpdate: null }));
@@ -366,4 +367,44 @@ test("legacy collections do not offer unsupported whitelist transactions", async
   assert.equal(renderer!.root.findAllByType("button").some((node) => node.children.includes("Publish whitelist update")), false);
   assert.match(visibleText(), /This collection’s whitelist is fixed/);
   assert.doesNotMatch(visibleText(), /Only FCFS wallets can mint during the next hour/);
+});
+
+test("unlocking an undeployed setup requires confirmation before restoring schedule and wallet editing", async () => {
+  await render({ frozen: true });
+  const original = { ...persisted.plan!.config };
+  assert.equal(editButton("Guaranteed"), undefined);
+  await act(async () => buttonWithText("Unlock setup").props.onClick());
+  assert.deepEqual(changes, [], "opening the warning cannot change the locked plan");
+  assert.equal(editButton("Guaranteed"), undefined);
+  assert.match(visibleText(), /submitted.*transaction|transaction.*submitted/i, "the warning explains why a submitted deployment must be recovered first");
+  await act(async () => buttonWithText("Unlock schedule and whitelist").props.onClick());
+  assert.deepEqual(changes, [{ action: "unfreeze" }]);
+  assert.equal(persisted.plan!.frozenAt, null);
+  assert.equal(persisted.plan!.root, null);
+  assert.deepEqual(persisted.plan!.config, original, "unlocking preserves the saved draft until the creator edits it");
+  assert.ok(editButton("Guaranteed"));
+  assert.ok(buttonWithText("Edit phase settings"));
+  assert.equal(refreshes, 1);
+});
+
+test("a pending deployment disables both stages of unlocking a saved setup", async () => {
+  await render({ frozen: true, deploymentPending: true });
+  assert.equal(buttonWithText("Unlock setup").props.disabled, true);
+  assert.deepEqual(changes, []);
+  await act(async () => renderer!.update(React.createElement(Harness, { frozen: true, deploymentPending: false })));
+  await act(async () => buttonWithText("Unlock setup").props.onClick());
+  assert.equal(buttonWithText("Unlock schedule and whitelist").props.disabled, false);
+  await act(async () => renderer!.update(React.createElement(Harness, { frozen: true, deploymentPending: true })));
+  assert.equal(buttonWithText("Unlock schedule and whitelist").props.disabled, true);
+  assert.deepEqual(changes, [], "a pending deployment cannot unlock the settings beneath its transaction");
+});
+
+for (const [label, options] of [
+  ["deployed collections", { frozen: true, deployed: true }],
+  ["collectors", { frozen: true, isOwner: false }],
+] as const) test(`unlock setup is unavailable for ${label}`, async () => {
+  await render(options);
+  assert.equal(renderer!.root.findAllByType("button").some((node) => node.children.includes("Unlock setup")), false);
+  assert.equal(renderer!.root.findAllByType("button").some((node) => node.children.includes("Unlock schedule and whitelist")), false);
+  assert.deepEqual(changes, []);
 });

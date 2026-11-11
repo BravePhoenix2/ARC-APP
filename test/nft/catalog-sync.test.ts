@@ -34,6 +34,8 @@ let totalMinted = BigInt(2);
 let maxSupply = BigInt(2);
 let starts = BigInt(0);
 let registry = factory;
+let supportsManagement = false;
+let mintClosed = false;
 let reads = 0;
 let contractReads: Array<{ address: Address; functionName: string; blockNumber?: bigint }> = [];
 let listing: readonly [Address, `0x${string}`, bigint, Address, boolean];
@@ -75,7 +77,7 @@ before(async () => {
     readContract: async ({ address, functionName, blockNumber: atBlock }: { address: Address; functionName: string; blockNumber?: bigint }) => {
       reads++;
       contractReads.push({ address, functionName, blockNumber: atBlock });
-      const values: Record<string, unknown> = { collectionCreator: owner, registry, totalMinted, maxSupply, mintStartTime: starts, listings: listing };
+      const values: Record<string, unknown> = { collectionCreator: owner, registry, totalMinted, maxSupply, mintStartTime: starts, listings: listing, supportsMintManagement: supportsManagement, mintClosed };
       if (!(functionName in values)) throw new Error("Unexpected contract read");
       return values[functionName];
     },
@@ -90,6 +92,7 @@ beforeEach(async () => {
   await db.item.deleteMany();
   receipts.clear();
   chainId = 5042002; blockNumber = BigInt(100); totalMinted = BigInt(2); maxSupply = BigInt(2); starts = BigInt(0); registry = factory; reads = 0; contractReads = [];
+  supportsManagement = false; mintClosed = false;
 });
 after(async () => { restore?.(); await db?.$disconnect(); rmSync(directory, { recursive: true, force: true }); });
 
@@ -146,6 +149,39 @@ test("old collections use their pinned factory and a single block snapshot after
   await sync.reconcileCatalogItem(item);
   assert.equal(contractReads.find((read) => read.functionName === "collectionCreator")?.address, other);
   assert.ok(contractReads.every((read) => read.blockNumber === blockNumber));
+});
+
+test("managed collection reconciliation records reduced supply without losing minted tokens", async () => {
+  const item = await nft({ maxSupply: 10, mintedCount: 1, status: "LIVE" });
+  supportsManagement = true;
+  maxSupply = BigInt(5); totalMinted = BigInt(2);
+  await sync.reconcileCatalogItem(item);
+  const stored = await db.item.findUniqueOrThrow({ where: { id: item.id } });
+  assert.equal(stored.maxSupply, 5);
+  assert.equal(stored.mintedCount, 2);
+  assert.equal(stored.status, "LIVE");
+  maxSupply = BigInt(6); blockNumber++;
+  await assert.rejects(sync.reconcileCatalogItem(stored, blockNumber), sync.CatalogSyncError, "a later snapshot must not increase a reduced cap");
+});
+
+test("legacy collections cannot change catalog supply through management reconciliation", async () => {
+  const item = await nft({ maxSupply: 10, mintedCount: 1 });
+  maxSupply = BigInt(5); totalMinted = BigInt(2);
+  await assert.rejects(sync.reconcileCatalogItem(item), sync.CatalogSyncError);
+  assert.equal((await db.item.findUniqueOrThrow({ where: { id: item.id } })).maxSupply, 10);
+});
+
+test("creator closure is distinct from sold out and stale snapshots cannot reopen a closed mint", async () => {
+  const item = await nft({ maxSupply: 10, mintedCount: 2, status: "LIVE" });
+  supportsManagement = true; mintClosed = true; maxSupply = BigInt(10);
+  assert.equal((await sync.reconcileCatalogItem(item)).status, "CLOSED");
+  const stored = await db.item.findUniqueOrThrow({ where: { id: item.id } });
+  assert.equal(stored.mintedCount, 2);
+  mintClosed = false; blockNumber++;
+  assert.equal((await sync.reconcileCatalogItem(stored, blockNumber)).status, "CLOSED");
+  const response = await catalog.GET(new NextRequest(`${origin}/api/items?itemType=NFT&status=CLOSED`));
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).items.map((entry: { id: string }) => entry.id), [item.id]);
 });
 
 test("a confirmed art purchase marks availability sold without requiring a delivery order", async () => {

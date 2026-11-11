@@ -8,7 +8,6 @@ import ts from "typescript";
 import { artMarketAbi, COLLECTION_CREATION_FEE, protocol, usdcAmount } from "../../lib/protocol";
 import { type PlatformFeeTerms } from "../../lib/platformFeeRead";
 import { emptyArtDelivery } from "../../lib/artDelivery";
-import CreatorMintControls from "../../components/CreatorMintControls";
 
 const require = createRequire(import.meta.url);
 const wallet = `0x${"1".repeat(40)}`;
@@ -69,7 +68,6 @@ const deps: Record<string, unknown> = {
   "@/components/ShareItemButton": { default: noop, __esModule: true },
   "@/components/CreatorLink": { default: noop, __esModule: true },
   "@/components/MintAccessPanel": { default: noop, __esModule: true },
-  "@/components/CreatorMintControls": { default: CreatorMintControls, __esModule: true },
   "@/hooks/useMintAccess": { useMintAccess: () => ({ data: mintAccess, refetch: async () => {}, saveAsync: async (input: Record<string, unknown>) => { accessActions.push(input); if (accessSaveFailure) throw new Error("The confirmed mint update could not be saved. Retry verification."); } }) },
   "@/lib/mintAccess": require("../../lib/mintAccess"),
   "@/components/CollectionImageGallery": { default: noop, __esModule: true },
@@ -88,6 +86,8 @@ function load(file: string): React.ComponentType<{ id: string }> {
   new Function("require", "module", "exports", code)((name: string) => deps[name] ?? require(name), output, output.exports);
   return output.exports.default;
 }
+const CreatorMintControls = load("CreatorMintControls");
+deps["@/components/CreatorMintControls"] = { default: CreatorMintControls, __esModule: true };
 deps["@/components/CollectionCreationPayment"] = { default: load("CollectionCreationPayment"), __esModule: true };
 const CollectionDetail = load("CollectionDetail");
 const ArtCheckout = load("ArtCheckout");
@@ -171,6 +171,39 @@ test("allowlisted and public mints add the actual deployed buyer rate to their b
   await act(async () => renderer!.root.findByType("form").props.onSubmit({ preventDefault() {} }));
   const publicWrite = lastWrite as Record<string, unknown> | undefined;
   assert.equal(publicWrite?.functionName, "mint"); assert.equal(publicWrite?.value, usdcAmount("25.4375"));
+});
+
+test("managed FCFS minting accepts only FCFS wallets while older contracts retain their original rules", async () => {
+  Object.assign(account, { authenticated: true, identity: "collector", walletAddress: wallet }); tx.isConnected = true;
+  mintAccess = { plan: { root: hash, frozenAt: new Date().toISOString() }, entry: { tier: "ULTIMATE" }, proof: [] };
+  Object.assign(state, { managed: true, phase: 2, phasePrice: usdcAmount("2") });
+  await act(async () => { renderer = create(React.createElement(CollectionDetail, { id: item.id })); });
+  await act(async () => renderer!.root.findByType("form").props.onSubmit({ preventDefault() {} }));
+  assert.equal(lastWrite, undefined, "Guaranteed wallets must not consume the FCFS-only window");
+  assert.match(tx.error, /does not have access/);
+  mintAccess.entry.tier = "FCFS";
+  await act(async () => renderer!.update(React.createElement(CollectionDetail, { id: item.id })));
+  await act(async () => renderer!.root.findByType("form").props.onSubmit({ preventDefault() {} }));
+  const fcfsWrite = lastWrite as Record<string, unknown> | undefined;
+  assert.equal(fcfsWrite?.functionName, "mintAllowlisted");
+  assert.deepEqual(fcfsWrite?.args, [BigInt(1), 2, []]);
+  lastWrite = undefined; state.managed = false; mintAccess.entry.tier = "ULTIMATE";
+  await act(async () => renderer!.update(React.createElement(CollectionDetail, { id: item.id })));
+  await act(async () => renderer!.root.findByType("form").props.onSubmit({ preventDefault() {} }));
+  const legacyWrite = lastWrite as Record<string, unknown> | undefined;
+  assert.deepEqual(legacyWrite?.args, [BigInt(1), 1, []], "immutable older contracts retain their inclusive FCFS rules");
+});
+
+test("a creator-closed collection disables minting and rejects a stale form submission", async () => {
+  Object.assign(account, { authenticated: true, identity: "collector", walletAddress: wallet }); tx.isConnected = true;
+  Object.assign(state, { managed: true, closed: true });
+  await act(async () => { renderer = create(React.createElement(CollectionDetail, { id: item.id })); });
+  const button = renderer!.root.findAllByType("button").find((node) => node.props.children === "Mint with test USDC")!;
+  assert.equal(button.props.disabled, true);
+  assert.match(JSON.stringify(renderer!.toJSON()), /Minting closed by the creator/);
+  await act(async () => renderer!.root.findByType("form").props.onSubmit({ preventDefault() {} }));
+  assert.equal(lastWrite, undefined);
+  assert.match(tx.error, /permanently closed/);
 });
 
 
@@ -265,12 +298,34 @@ test("an RPC failure blocks payment and creation even when a prior surcharge res
   assert.equal(lastWrite, undefined); assert.match(tx.error, /mint payment check/);
 });
 
+test("an older factory pauses phased creation before requesting the collection creation fee", async () => {
+  item.contractAddress = null; isOwner = true; factoryManagement = false; creationPayment.paid = false;
+  Object.assign(account, { authenticated: true, identity: "creator", walletAddress: wallet }); tx.isConnected = true;
+  tx.client = { readContract: async () => true, getTransactionReceipt: async () => ({ from: wallet, to: market, status: "success" }) };
+  mintAccess.plan = { root: hash, frozenAt: new Date().toISOString(), guaranteedAllocation: 1, config: {
+    ultimateStart: "2027-01-01T10:00:00Z", fcfsStart: "2027-01-01T11:00:00Z", publicStart: "2027-01-01T12:00:00Z",
+    ultimateLimit: 1, fcfsLimit: 1, publicLimit: 1, ultimatePrice: "1", fcfsPrice: "2",
+  } };
+  await act(async () => { renderer = create(React.createElement(CollectionDetail, { id: item.id })); });
+  const pay = renderer!.root.findAllByType("button").find((node) => node.props.children === "Pay 5 test USDC creation fee")!;
+  const deploy = () => renderer!.root.findAllByType("button").find((node) => node.props.children === "Create collection")!;
+  assert.equal(pay.props.disabled, true, "a creator must not pay for phases the configured factory cannot deploy");
+  assert.equal(deploy().props.disabled, true);
+  assert.equal(creationFeeRequests, 0);
+  assert.match(JSON.stringify(renderer!.toJSON()), /Creation is paused until the platform enables them/);
+  creationPayment.paid = true;
+  await act(async () => renderer!.update(React.createElement(CollectionDetail, { id: item.id })));
+  await act(async () => { deploy().props.onClick(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  assert.equal(lastWrite, undefined, "even an existing fee credit cannot bypass the management capability check");
+  assert.match(tx.error, /updated mint controls/);
+});
+
 for (const kind of ["COLLECTIBLE", "EDITION", "SOULBOUND", "MEMBERSHIP"]) {
   for (const phased of [false, true]) test(`${kind} creation ${phased ? "with whitelist phases" : "with public minting"} uses verified direct-payment credit and sends no additional fee`, async () => {
     item.contractAddress = null; item.nftKind = kind; isOwner = true;
     Object.assign(account, { authenticated: true, identity: "creator", walletAddress: wallet }); tx.isConnected = true;
     tx.client = { readContract: async () => true, getTransactionReceipt: async () => ({ from: wallet, to: market, status: "success" }) };
-    if (phased) mintAccess.plan = { root: hash, frozenAt: new Date().toISOString(), config: {
+    if (phased) mintAccess.plan = { root: hash, frozenAt: new Date().toISOString(), guaranteedAllocation: 3, config: {
       ultimateStart: "2027-01-01T10:00:00Z", fcfsStart: "2027-01-01T11:00:00Z", publicStart: "2027-01-01T12:00:00Z",
       ultimateLimit: 1, fcfsLimit: 1, publicLimit: 1, ultimatePrice: "1", fcfsPrice: "2",
     } };
@@ -286,6 +341,7 @@ for (const kind of ["COLLECTIBLE", "EDITION", "SOULBOUND", "MEMBERSHIP"]) {
     assert.equal(lastWrite?.functionName, `${kind === "EDITION" ? "createEdition" : "create721"}${phased ? "WithManagedPhases" : ""}`);
     assert.equal(lastWrite?.value, undefined);
     assert.equal((lastWrite?.args as unknown[])[3], usdcAmount("25"), "the collection fee is separate from the collector's mint price");
+    if (phased) assert.equal((lastWrite?.args as unknown[]).at(-1), BigInt(3), "the managed deployment reserves the exact verified Guaranteed allocation");
     if (kind !== "EDITION") assert.equal((lastWrite?.args as unknown[])[8], kind === "SOULBOUND");
   });
 }
@@ -331,6 +387,73 @@ test("a confirmed collection deployment survives reload and retries registration
   item.contractAddress = wallet;
   await act(async () => renderer!.update(React.createElement(CollectionDetail, { id: item.id })));
   assert.equal(storage.size, 0, "registration is forgotten only after the item shows its saved contract");
+});
+
+test("a confirmed supply reduction survives reload and retries saving without another wallet transaction", async () => {
+  isOwner = true;
+  Object.assign(account, { authenticated: true, identity: "creator", walletAddress: wallet }); tx.isConnected = true;
+  Object.assign(state, { managed: true, owner: wallet, count: BigInt(2) });
+  tx.client = { getTransactionReceipt: async () => ({ from: wallet, to: wallet, status: "success" }) };
+  accessSaveFailure = true;
+  await act(async () => { renderer = create(React.createElement(CollectionDetail, { id: item.id })); });
+  await act(async () => { await renderer!.root.findByType(CreatorMintControls).props.onReduce(8); });
+  assert.equal(lastWrite?.functionName, "reduceMaxSupply");
+  assert.deepEqual(lastWrite?.args, [BigInt(8)]);
+  assert.equal(payments, 1);
+  assert.deepEqual(accessActions, [{ action: "sync-management", txHash: hash }]);
+  assert.equal(storage.size, 1, "a confirmed update remains recoverable until the API saves it");
+  await act(async () => { renderer!.unmount(); renderer = create(React.createElement(CollectionDetail, { id: item.id })); });
+  assert.equal(renderer!.root.findByType(CreatorMintControls).props.busy, true, "an unresolved update blocks another supply transaction");
+  assert.equal(renderer!.root.findByProps({ "aria-label": "Mint update transaction hash" }).props.value, hash);
+  accessSaveFailure = false;
+  await act(async () => {
+    renderer!.root.findAllByType("button").find((node) => node.props.children === "Verify and save mint update")!.props.onClick();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  assert.equal(payments, 1, "recovery verifies the original receipt without another wallet signature");
+  assert.deepEqual(accessActions, [{ action: "sync-management", txHash: hash }, { action: "sync-management", txHash: hash }]);
+  assert.equal(storage.size, 0);
+});
+
+test("creator controls preserve outstanding Guaranteed supply and the announced whitelist windows", async () => {
+  isOwner = true;
+  Object.assign(account, { authenticated: true, identity: "creator", walletAddress: wallet }); tx.isConnected = true;
+  Object.assign(state, { managed: true, owner: wallet, phase: 1, count: BigInt(2), reserved: BigInt(6), guaranteedMinted: BigInt(2) });
+  mintAccess.plan = { root: hash, frozenAt: new Date().toISOString() };
+  await act(async () => { renderer = create(React.createElement(CollectionDetail, { id: item.id })); });
+  const supplyInput = () => renderer!.root.findByProps({ "aria-label": "New total supply" });
+  assert.equal(supplyInput().props.min, 6, "two minted tokens plus four outstanding Guaranteed tokens remain backed");
+  assert.equal(supplyInput().props.max, 9, "the creator can only reduce the existing supply");
+  assert.equal(renderer!.root.findAllByType("button").some((node) => node.props.children === "Close minting"), false);
+  assert.match(JSON.stringify(renderer!.toJSON()), /Guaranteed and FCFS wallets keep their full mint windows/);
+  state.phase = 2;
+  await act(async () => renderer!.update(React.createElement(CollectionDetail, { id: item.id })));
+  assert.equal(supplyInput().props.min, 2, "unclaimed Guaranteed tokens are released when FCFS opens");
+  assert.equal(renderer!.root.findAllByType("button").some((node) => node.props.children === "Close minting"), false);
+});
+
+test("closing public minting requires explicit confirmation and preserves a retryable failed save", async () => {
+  isOwner = true;
+  Object.assign(account, { authenticated: true, identity: "creator", walletAddress: wallet }); tx.isConnected = true;
+  Object.assign(state, { managed: true, owner: wallet, phase: 3 });
+  tx.client = { getTransactionReceipt: async () => ({ from: wallet, to: wallet, status: "success" }) };
+  accessSaveFailure = true;
+  await act(async () => { renderer = create(React.createElement(CollectionDetail, { id: item.id })); });
+  const findButton = (label: string) => renderer!.root.findAllByType("button").find((node) => node.props.children === label)!;
+  await act(async () => findButton("Close minting").props.onClick());
+  assert.equal(payments, 0, "opening the confirmation must not request a signature");
+  await act(async () => findButton("Keep minting open").props.onClick());
+  assert.equal(payments, 0, "cancelling keeps public minting open");
+  await act(async () => findButton("Close minting").props.onClick());
+  await act(async () => {
+    findButton("Close minting permanently").props.onClick();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  assert.equal(payments, 1);
+  assert.equal(lastWrite?.functionName, "closeMinting");
+  assert.deepEqual(accessActions, [{ action: "sync-management", txHash: hash }]);
+  assert.equal(renderer!.root.findByProps({ "aria-label": "Mint update transaction hash" }).props.value, hash);
+  assert.equal(storage.size, 1, "a confirmed close is retained until its catalog state is saved");
 });
 
 test("art checkout activation preserves its hash on API failure and recovers after reload", async () => {

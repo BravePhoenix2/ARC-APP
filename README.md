@@ -241,33 +241,50 @@ settings before attaching the new collection. Fee and deployment confirmations
 can be recovered independently without making a second fee payment.
 Original-art checkout listings still require approved artwork.
 
-Creators can configure **Ultimate → FCFS → Public** access in **Mint access** on
-a saved, undeployed collection. Set ordered opening dates, tier prices, and
-phase wallet limits. The main **Public mint price** from the creator form is used
-for Public minting. Ultimate and FCFS have separate prices: after setting up the
-phases, use **Edit price** on either tier to save its price independently without
-changing the other tier, schedule, or Public price. Edit prices before Ultimate
-opens and before the allowlist is locked. Collectors request a tier using a linked, signed-in wallet;
-the creator approves requests or imports wallet addresses from text/CSV. Pending
-requests do not grant mint access. The roster is private to the creator; a
-collector sees only their own assignment and proof.
+Creators can configure **Guaranteed → FCFS → Public** access in **Mint access**
+on a saved, undeployed collection. Choose one future opening time: Guaranteed
+wallets get the first hour, FCFS wallets get the next hour, and Public opens two
+hours after the start. During Guaranteed, only wallets on the Guaranteed list
+can mint; during FCFS, only wallets on the FCFS list can mint. Public is open to
+everyone until supply runs out or the creator permanently closes minting. The
+overall wallet cap still applies across all phases.
 
-Each selected Ultimate wallet is guaranteed its full Ultimate allocation during
-the Ultimate window. Locking rejects a roster whose Ultimate wallet count times
-the Ultimate allocation exceeds collection supply. Public minting is blocked and
-FCFS wallets cannot mint during this window, so those allocations remain available.
-Unclaimed Ultimate tokens are released when FCFS opens. Both Ultimate and FCFS
-wallets can then mint subject to remaining supply; everyone can mint during public
-access. Phase limits and the original collection wallet cap both apply, including
-across windows. Allowlist prices cannot exceed the collection's
-public price. Each collection supports up to 2,000 registered/imported wallets.
+Both FCFS and Public prices must be at least the Guaranteed price. FCFS may
+exceed Public: Guaranteed 1 / FCFS 2 / Public 1 USDC is valid. Public uses the
+main price from the creator form. Prices, opening time and phase limits are
+locked before collection deployment. Pending whitelist requests do not grant
+access. Creators can enter wallet addresses directly and assign either tier;
+each collection supports up to 2,000 registered/imported wallets. Wallet lists
+stay private; a collector sees only their own assignment and proof.
 
-Before deployment, review the roster and click **Lock allowlist for deployment**.
-This permanently closes registration and freezes the schedule, tier prices,
-limits, and Merkle root. The factory atomically installs those settings when
-creating the collection. Contracts verify wallet/tier proofs and reject public
-mint calls during allowlist windows. ERC-721, soulbound, membership, and ERC-1155
-collections use the same rules. Public-only collections keep the existing flow.
+Click **Lock allowlist for deployment**, then create the collection. Before you
+submit a creation transaction, **Unlock setup** lets you correct an old schedule
+or choose a new start time, then lock it again. Recover any submitted creation
+transaction before unlocking. With the
+updated mint controls, creators can add or reassign whitelist wallets after
+creation until Guaranteed starts. Save the new roster, then **Publish whitelist
+update** from the collection owner wallet. The active roster changes only after
+the server verifies the confirmed on-chain root. If saving fails after wallet
+confirmation, use **Recover whitelist update** with the saved transaction hash;
+this does not submit another wallet transaction. Once Guaranteed starts, the
+wallet lists are final, protecting the promised allocations.
+
+**Creator mint controls** lets the creator reduce total supply before deployment
+or while minting. A reduction cannot remove minted NFTs, change their metadata,
+or consume outstanding Guaranteed allocations before FCFS opens. Reductions are
+permanent. During Public, **Close minting** permanently stops further mints while
+leaving existing NFTs and proceeds withdrawals available. A closed collection is
+shown as **Closed**, separately from **Minted out**. Confirmed supply/close
+transactions can also be recovered without submitting them again.
+
+These controls support ERC-721 collectibles, soulbound and membership NFTs, and
+ERC-1155 editions. Existing deployed contracts retain their original immutable
+rules; they cannot gain editable whitelists or supply by changing the app. New
+phased collections require the updated factory. Apply `npm run db:migrate` for
+PostgreSQL's additive Closed status, regenerate the client with
+`npm run db:generate`, pin original factories before replacing addresses, and
+deploy the updated contracts from `/settings/protocol`. No existing collection,
+NFT, proceeds or protocol address is automatically replaced.
 
 The 5 test USDC direct creation payment works with the currently configured
 studio factory. Keep the existing protocol addresses when enabling this fee.

@@ -45,6 +45,7 @@ export async function managedCollectionState(item: Item, wallet: string) {
     if (typeof owner !== "string" || owner.toLowerCase() !== wallet.toLowerCase()) throw new MintManagementError("Connect the collection owner wallet to manage this mint.", 403);
     if (typeof registry !== "string" || registry.toLowerCase() !== factory.toLowerCase() || registered === zeroAddress) throw new MintManagementError("This collection does not match its original verified factory.");
     if (typeof maxSupply !== "bigint" || typeof totalMinted !== "bigint" || typeof start !== "bigint" || typeof closed !== "boolean" || maxSupply < BigInt(1) || maxSupply > BigInt(item.maxSupply || 0) || totalMinted < BigInt(item.mintedCount || 0) || totalMinted > maxSupply) throw new MintManagementError("The collection state does not match its verified catalog record.");
+    if (item.status === "CLOSED" && !closed) throw new MintManagementError("The chain state has not caught up with this closed mint. Retry shortly.", 503);
     return { address: address as Address, blockNumber: block.number, timestamp: block.timestamp, maxSupply, totalMinted, start, closed };
   } catch (error) {
     if (error instanceof MintManagementError) throw error;
@@ -77,12 +78,14 @@ async function managementReceipt(state: Awaited<ReturnType<typeof managedCollect
   }
 }
 
-export async function verifyAllowlistUpdate(item: Item, wallet: string, hash: Hash, previousRoot: string, pending: PendingMintAllowlist) {
+export async function verifyAllowlistUpdate(item: Item, wallet: string, hash: Hash, previousRoots: string[], pending: PendingMintAllowlist[]) {
   const state = await managedAllowlistState(item, wallet);
   const logs = await managementReceipt(state, hash, wallet);
   const changes = parseEventLogs({ abi: managementAbi, eventName: "AllowlistRootUpdated", logs, strict: true });
-  if (!changes.some(({ args }) => args.previousRoot.toLowerCase() === previousRoot.toLowerCase() && args.root.toLowerCase() === pending.root.toLowerCase() && args.guaranteedAllocation === BigInt(pending.guaranteedAllocation)) || state.root.toLowerCase() !== pending.root.toLowerCase() || state.allocation !== BigInt(pending.guaranteedAllocation)) throw new MintManagementError("The confirmed whitelist does not match the pending wallet list. Keep the transaction hash and retry the matching update.");
-  return state;
+  const bases = new Set(previousRoots.map((root) => root.toLowerCase()));
+  const snapshot = pending.find((draft) => draft.root.toLowerCase() === state.root.toLowerCase() && state.allocation === BigInt(draft.guaranteedAllocation) && changes.some(({ args }) => bases.has(args.previousRoot.toLowerCase()) && args.root.toLowerCase() === draft.root.toLowerCase() && args.guaranteedAllocation === BigInt(draft.guaranteedAllocation)));
+  if (!snapshot) throw new MintManagementError("The confirmed whitelist does not match a saved wallet list. Keep the transaction hash and retry the matching update.");
+  return { ...state, snapshot };
 }
 
 export async function verifyMintManagement(item: Item, wallet: string, hash: Hash) {

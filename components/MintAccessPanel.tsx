@@ -16,10 +16,11 @@ type Props = {
   access: ReturnType<typeof useMintAccess>; isOwner: boolean; deployed: boolean;
   walletCap: number; publicPrice: number; onChange: () => void;
   supportsManagement?: boolean; managementBusy?: boolean;
+  deploymentPending?: boolean;
   onPublishAllowlist?: (pending: { root: Hex; guaranteedAllocation: number }) => Promise<void>;
 };
 
-export default function MintAccessPanel({ access, isOwner, deployed, walletCap, publicPrice, onChange, supportsManagement = false, managementBusy = false, onPublishAllowlist }: Props) {
+export default function MintAccessPanel({ access, isOwner, deployed, walletCap, publicPrice, onChange, supportsManagement = false, managementBusy = false, deploymentPending = false, onPublishAllowlist }: Props) {
   const account = useArtiqAccount();
   const [showSetup, setShowSetup] = useState(false);
   const [wallets, setWallets] = useState("");
@@ -31,6 +32,7 @@ export default function MintAccessPanel({ access, isOwner, deployed, walletCap, 
   const [fcfsPrice, setFcfsPrice] = useState<string | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const [publishing, setPublishing] = useState(false);
+  const [confirmUnlock, setConfirmUnlock] = useState(false);
   const plan = access.data?.plan;
   const locked = !!plan?.frozenAt || deployed;
   const started = !!plan && Date.parse(plan.config.ultimateStart) <= Date.now();
@@ -107,7 +109,14 @@ export default function MintAccessPanel({ access, isOwner, deployed, walletCap, 
       <p className="text-xs leading-6 text-[var(--muted-text)]">Lock the schedule and prices before creating your collection. On collections with whitelist management, you can still add or reassign wallets after creation until Guaranteed minting starts.</p>{(editingPrice || showSetup) && <p className="mb-2 text-xs text-[var(--muted-text)]">Save or cancel your changes before locking the allowlist.</p>}<button type="button" className={button} disabled={busy || editingPrice !== null || showSetup} onClick={() => access.save({ action: "freeze" }, { onSuccess: onChange })}>Lock allowlist for deployment</button><button type="button" className="ml-3 text-xs underline" disabled={busy} onClick={() => access.save({ action: "disable" }, { onSuccess: () => { setEditingPrice(null); setShowSetup(false); onChange(); } })}>Return to public-only mint</button>
     </>}
     {!isOwner && plan && <><p className="text-xs">{access.data?.entry ? `Your tier: ${access.data.entry.tier === "PENDING" ? "Awaiting creator approval" : tierLabel(access.data.entry.tier)}` : locked ? "You are not on the whitelist. You can mint during public access." : "Request access with your connected wallet. The creator assigns the final tier."}</p>{!locked && !started && <div className="flex flex-wrap gap-2">{["ULTIMATE", "FCFS"].map((requested) => <button key={requested} type="button" className={button} disabled={busy} onClick={() => { if (!account.authenticated) account.login(); else if (!account.walletAddress) account.connectWallet(); else access.save({ action: "register", tier: requested }); }}>Request {tierLabel(requested)}</button>)}</div>}</>}
-    {isOwner && locked && <p className="text-xs leading-6 text-[var(--muted-text)]">{started ? "Minting has started, so whitelist wallets are final. Guaranteed reservations last until FCFS opens." : deployed && supportsManagement ? "Wallet changes are available until Guaranteed minting starts. The schedule and prices remain fixed." : deployed ? "This collection’s whitelist is fixed. Wallet updates are available on newly created collections with whitelist management." : "The schedule and whitelist are locked for creation. Wallet updates become available after creation on supported collections."}</p>}
+    {isOwner && locked && !deployed && <div className="space-y-3 rounded-xl border border-[var(--border-soft)] p-4">
+      {!confirmUnlock ? <button type="button" className="text-xs font-semibold underline disabled:opacity-40" disabled={busy || deploymentPending} onClick={() => setConfirmUnlock(true)}>Unlock setup</button> : <>
+        <p className="text-xs leading-6 text-[var(--muted-text)]">Unlock only if you have not submitted a collection creation transaction. Recover a submitted transaction first. Unlocking lets you change the schedule, prices and wallet list, then lock them again before creation.</p>
+        <button type="button" className={button} disabled={busy || deploymentPending} onClick={() => access.save({ action: "unfreeze" }, { onSuccess: () => { setConfirmUnlock(false); onChange(); } })}>Unlock schedule and whitelist</button><button type="button" className="ml-3 text-xs underline" disabled={busy} onClick={() => setConfirmUnlock(false)}>Keep setup locked</button>
+      </>}
+      {deploymentPending && <p className="text-xs leading-6 text-[var(--muted-text)]">Verify your saved creation transaction before changing this setup.</p>}
+    </div>}
+    {isOwner && locked && <p className="text-xs leading-6 text-[var(--muted-text)]">{!deployed ? "The schedule and whitelist are locked for creation. Unlock setup if you need to choose a new start time before submitting a creation transaction." : started ? "Minting has started, so whitelist wallets are final. Guaranteed reservations last until FCFS opens." : supportsManagement ? "Wallet changes are available until Guaranteed minting starts. The schedule and prices remain fixed." : "This collection’s whitelist is fixed. Wallet updates are available on newly created collections with whitelist management."}</p>}
     {(localError || access.saveError) && <p role="alert" className="text-xs text-rose-500">{localError || access.saveError}</p>}
   </section>;
 }

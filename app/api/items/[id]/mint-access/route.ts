@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { sameOrigin } from "@/lib/walletAuth";
 import { getCreatorSession } from "@/lib/creatorSession";
 import { limitedJson } from "@/lib/requestBody";
-import { collectionKey, guaranteedUltimateAllocation, mintTree, pendingMintAllowlist, publicMintConfig, tierNumber, validateMintConfig, type MintAllowlistWallet, type MintPhaseConfig } from "@/lib/mintAccess";
+import { collectionKey, guaranteedUltimateAllocation, MAX_MINT_ALLOWLIST_VERSIONS, mintTree, pendingMintAllowlist, publicMintConfig, stagedMintAllowlists, tierNumber, validateMintConfig, type MintAllowlistWallet, type MintPhaseConfig, type PendingMintAllowlist } from "@/lib/mintAccess";
 import { publicItemWhere } from "@/lib/publicCatalog";
 import { managedAllowlistState, MintManagementError, verifyAllowlistUpdate, verifyMintManagement } from "@/lib/mintManagement";
 export const dynamic = "force-dynamic";
@@ -46,6 +46,7 @@ async function handlePOST(request: NextRequest, { params: routeParams }: { param
     const deployedAction = initial.contractAddress && ["assign", "activate-allowlist", "discard-allowlist", "sync-management"].includes(String(input.action));
     let chainState: Awaited<ReturnType<typeof managedAllowlistState>> | undefined;
     let managementState: Awaited<ReturnType<typeof verifyMintManagement>> | undefined;
+    let activatedSnapshot: PendingMintAllowlist | undefined;
     if (deployedAction) {
       if (initial.creatorId !== session.userId) throw new Error("Only the creator can manage mint access.");
       if (!session.walletAddress) throw new MintManagementError("Connect the collection owner wallet to manage this mint.", 403);
@@ -55,12 +56,14 @@ async function handlePOST(request: NextRequest, { params: routeParams }: { param
       } else {
         if (!initialPlan?.root || !initialPlan.frozenAt) throw new Error("This collection does not have a deployed whitelist.");
         if (input.action === "activate-allowlist") {
-          const pending = pendingMintAllowlist(initialPlan.config);
+          const versions = stagedMintAllowlists(initialPlan.config);
           const confirmedHash = (initialPlan.config as { lastAllowlistUpdateTxHash?: string }).lastAllowlistUpdateTxHash;
-          if (!pending && typeof input.txHash === "string" && confirmedHash === input.txHash.toLowerCase()) return json({ saved: true });
-          if (!pending) throw new Error("There is no pending whitelist update.");
+          if (typeof input.txHash === "string" && confirmedHash === input.txHash.toLowerCase()) return json({ saved: true });
+          if (!versions.length) throw new Error("There is no saved whitelist update.");
           if (typeof input.txHash !== "string" || !/^0x[a-fA-F0-9]{64}$/.test(input.txHash)) throw new Error("Provide a valid whitelist update transaction hash.");
-          chainState = await verifyAllowlistUpdate(initial, session.walletAddress, input.txHash as Hash, initialPlan.root, pending);
+          const verified = await verifyAllowlistUpdate(initial, session.walletAddress, input.txHash as Hash, [initialPlan.root, ...versions.map((draft) => draft.root)], versions);
+          chainState = verified;
+          activatedSnapshot = verified.snapshot;
         } else {
           chainState = await managedAllowlistState(initial, session.walletAddress);
           if (chainState.root.toLowerCase() !== initialPlan.root.toLowerCase() || chainState.collectionKey !== collectionKey(initial.id)) throw new Error("A whitelist update is already on-chain. Verify its transaction before editing the wallet list again.");
@@ -85,22 +88,39 @@ async function handlePOST(request: NextRequest, { params: routeParams }: { param
         }
         if (!plan) throw new Error("This collection does not have a deployed whitelist.");
         const config = publicMintConfig(plan.config);
+        const versions = stagedMintAllowlists(plan.config);
+        const lastAllowlistUpdateTxHash = (plan.config as { lastAllowlistUpdateTxHash?: string }).lastAllowlistUpdateTxHash;
         if (input.action === "activate-allowlist") {
+          const snapshot = activatedSnapshot && versions.find((draft) => draft.root.toLowerCase() === activatedSnapshot.root.toLowerCase());
+          if (!snapshot || chainState?.root.toLowerCase() !== snapshot.root.toLowerCase()) throw new Error("The saved whitelist changed. Refresh and verify its matching transaction.");
           const pending = pendingMintAllowlist(plan.config);
-          if (!pending || pending.root !== pendingMintAllowlist(initialPlan?.config)?.root || chainState?.root.toLowerCase() !== pending.root.toLowerCase()) throw new Error("The pending whitelist changed. Refresh and verify its matching transaction.");
+          const latestDraft = pending && pending.root.toLowerCase() !== snapshot.root.toLowerCase() ? pending : null;
           await tx.mintAllowlistEntry.deleteMany({ where: { planId: plan.id } });
-          await tx.mintAllowlistEntry.createMany({ data: pending.entries.map((entry) => ({ ...entry, planId: plan.id })) });
-          await tx.mintAccessPlan.update({ where: { id: plan.id }, data: { root: pending.root, config: { ...config, lastAllowlistUpdateTxHash: String(input.txHash).toLowerCase() } } });
+          await tx.mintAllowlistEntry.createMany({ data: snapshot.entries.map((entry) => ({ ...entry, planId: plan.id })) });
+          await tx.mintAccessPlan.update({ where: { id: plan.id }, data: { root: snapshot.root, config: { ...config, ...(latestDraft ? { pendingAllowlist: latestDraft } : {}), pendingAllowlistHistory: versions.filter((draft) => draft.root.toLowerCase() !== latestDraft?.root.toLowerCase()), lastAllowlistUpdateTxHash: String(input.txHash).toLowerCase() } } });
           return;
         }
         if (input.action === "discard-allowlist") {
-          await tx.mintAccessPlan.update({ where: { id: plan.id }, data: { config } });
+          await tx.mintAccessPlan.update({ where: { id: plan.id }, data: { config: { ...config, pendingAllowlistHistory: versions, ...(lastAllowlistUpdateTxHash ? { lastAllowlistUpdateTxHash } : {}) } } });
           return;
         }
         const entries = assignedWallets(input, pendingMintAllowlist(plan.config)?.entries ?? plan.entries);
         const guaranteedAllocation = guaranteedUltimateAllocation(entries, config, Number(chainState!.maxSupply));
         const pendingAllowlist = { root: mintTree(item.id, entries).root, guaranteedAllocation, entries };
-        await tx.mintAccessPlan.update({ where: { id: plan.id }, data: { config: { ...config, pendingAllowlist } } });
+        const history = versions.filter((draft) => draft.root.toLowerCase() !== pendingAllowlist.root.toLowerCase());
+        if (history.length >= MAX_MINT_ALLOWLIST_VERSIONS) throw new Error(`This collection already retains ${MAX_MINT_ALLOWLIST_VERSIONS} whitelist versions for transaction recovery. No saved version can be removed while its transaction may still confirm. Recover an existing version instead of creating another draft.`);
+        await tx.mintAccessPlan.update({ where: { id: plan.id }, data: { config: { ...config, pendingAllowlist, pendingAllowlistHistory: history, ...(lastAllowlistUpdateTxHash ? { lastAllowlistUpdateTxHash } : {}) } } });
+        return;
+      }
+      if (input.action === "unfreeze") {
+        if (item.creatorId !== session.userId) throw new Error("Only the creator can unlock mint settings.");
+        if (item.contractAddress) throw new Error("A deployed collection's schedule and prices cannot be unlocked.");
+        if (!plan) throw new Error("Save mint phase settings before unlocking them.");
+        if (!plan.frozenAt) throw new Error("These mint settings are already editable.");
+        const updatedAt = new Date(Math.max(Date.now(), item.updatedAt.getTime() + 1));
+        const changed = await tx.item.updateMany({ where: { id: item.id, creatorId: session.userId, contractAddress: null, updatedAt: item.updatedAt }, data: { updatedAt } });
+        if (changed.count !== 1) throw new Error("Collection settings changed while unlocking. Refresh before trying again.");
+        await tx.mintAccessPlan.update({ where: { id: plan.id }, data: { root: null, frozenAt: null } });
         return;
       }
       if (input.action === "reduce-supply") {

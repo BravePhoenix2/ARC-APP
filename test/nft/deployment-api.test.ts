@@ -742,6 +742,72 @@ test("deployed whitelist staging requires creator ownership, a managed contract,
   assert.deepEqual((await db.mintAccessPlan.findUniqueOrThrow({ where: { id: plan.id } })).config, plan.config);
 });
 
+test("an older published whitelist draft remains recoverable while a newer private draft is staged", async () => {
+  const { access, plan, root, state, path, context } = await managedMintFixture();
+  const firstWallet = "0x7777777777777777777777777777777777777777";
+  const nextWallet = "0x8888888888888888888888888888888888888888";
+  assert.equal((await access.POST(request(path, { action: "assign", wallets: [firstWallet], tier: "ULTIMATE" }), context)).status, 200);
+  const first = (await (await access.GET(request(path + "?manage=1"), context)).json()).pendingUpdate;
+  assert.equal((await access.POST(request(path, { action: "assign", wallets: [nextWallet], tier: "FCFS" }), context)).status, 200);
+  const latest = (await (await access.GET(request(path + "?manage=1"), context)).json()).pendingUpdate;
+  const txHash = hash();
+  receipts.set(txHash, { status: "success", from: owner, to: contract, blockNumber: BigInt(999), logs: [{ address: contract, topics: encodeEventTopics({ abi: managementEvents, eventName: "AllowlistRootUpdated", args: { previousRoot: root, root: first.root } }), data: encodeAbiParameters([{ type: "uint256" }], [BigInt(first.guaranteedAllocation)]) }] });
+  state.mintPhases[0] = first.root; state.guaranteedAllocation = BigInt(first.guaranteedAllocation);
+  assert.equal((await access.POST(request(path, { action: "activate-allowlist", txHash }), context)).status, 200);
+  const saved = await db.mintAccessPlan.findUniqueOrThrow({ where: { id: plan.id }, include: { entries: true } });
+  assert.equal(saved.root, first.root);
+  assert.equal(saved.entries.some((entry) => entry.walletAddress === firstWallet), true);
+  assert.equal(saved.entries.some((entry) => entry.walletAddress === nextWallet), false);
+  assert.deepEqual((await (await access.GET(request(path + "?manage=1"), context)).json()).pendingUpdate, latest);
+  assert.equal((await access.POST(request(path, { action: "activate-allowlist", txHash }), context)).status, 200, "recovery stays idempotent while the next draft is pending");
+  const publicBody = await (await access.GET(request(path, undefined, "anonymous"), context)).json();
+  assert.equal(JSON.stringify(publicBody).includes(nextWallet), false);
+  assert.equal(JSON.stringify(publicBody).includes("pendingAllowlistHistory"), false);
+});
+
+test("consecutive on-chain whitelist updates can recover directly to the current saved root", async () => {
+  const { access, plan, state, path, context } = await managedMintFixture();
+  assert.equal((await access.POST(request(path, { action: "assign", wallets: ["0x7777777777777777777777777777777777777777"], tier: "ULTIMATE" }), context)).status, 200);
+  const first = (await (await access.GET(request(path + "?manage=1"), context)).json()).pendingUpdate;
+  assert.equal((await access.POST(request(path, { action: "assign", wallets: ["0x8888888888888888888888888888888888888888"], tier: "FCFS" }), context)).status, 200);
+  const latest = (await (await access.GET(request(path + "?manage=1"), context)).json()).pendingUpdate;
+  state.mintPhases[0] = latest.root; state.guaranteedAllocation = BigInt(latest.guaranteedAllocation);
+  const txHash = hash();
+  receipts.set(txHash, { status: "success", from: owner, to: contract, blockNumber: BigInt(999), logs: [{ address: contract, topics: encodeEventTopics({ abi: managementEvents, eventName: "AllowlistRootUpdated", args: { previousRoot: first.root, root: latest.root } }), data: encodeAbiParameters([{ type: "uint256" }], [BigInt(latest.guaranteedAllocation)]) }] });
+  assert.equal((await access.POST(request(path, { action: "activate-allowlist", txHash }), context)).status, 200);
+  const saved = await db.mintAccessPlan.findUniqueOrThrow({ where: { id: plan.id }, include: { entries: true } });
+  assert.equal(saved.root, latest.root); assert.equal(saved.entries.length, 4);
+  assert.equal((await (await access.GET(request(path + "?manage=1"), context)).json()).pendingUpdate, null);
+});
+
+test("discarding a whitelist draft keeps its already-submitted transaction recoverable", async () => {
+  const { access, plan, root, state, path, context } = await managedMintFixture();
+  assert.equal((await access.POST(request(path, { action: "assign", wallets: [other], tier: "ULTIMATE" }), context)).status, 200);
+  const pending = (await (await access.GET(request(path + "?manage=1"), context)).json()).pendingUpdate;
+  assert.equal((await access.POST(request(path, { action: "discard-allowlist" }), context)).status, 200);
+  assert.equal((await (await access.GET(request(path + "?manage=1"), context)).json()).pendingUpdate, null);
+  state.mintPhases[0] = pending.root; state.guaranteedAllocation = BigInt(pending.guaranteedAllocation);
+  const txHash = hash();
+  receipts.set(txHash, { status: "success", from: owner, to: contract, blockNumber: BigInt(999), logs: [{ address: contract, topics: encodeEventTopics({ abi: managementEvents, eventName: "AllowlistRootUpdated", args: { previousRoot: root, root: pending.root } }), data: encodeAbiParameters([{ type: "uint256" }], [BigInt(pending.guaranteedAllocation)]) }] });
+  assert.equal((await access.POST(request(path, { action: "activate-allowlist", txHash }), context)).status, 200);
+  assert.equal((await db.mintAccessPlan.findUniqueOrThrow({ where: { id: plan.id } })).root, pending.root);
+});
+
+test("the retained whitelist version bound rejects a new draft without deleting recoverable snapshots", async () => {
+  const { access, item, plan, config, path, context } = await managedMintFixture();
+  const { MAX_MINT_ALLOWLIST_VERSIONS, mintTree } = await import("../../lib/mintAccess");
+  const versions = Array.from({ length: MAX_MINT_ALLOWLIST_VERSIONS }, (_, index) => {
+    const entries = [{ walletAddress: `0x${(index + 100).toString(16).padStart(40, "0")}`, tier: "ULTIMATE", requestedTier: "ULTIMATE" }];
+    return { root: mintTree(item.id, entries).root, guaranteedAllocation: 1, entries };
+  });
+  await db.mintAccessPlan.update({ where: { id: plan.id }, data: { config: { ...config, pendingAllowlistHistory: versions } } });
+  const response = await access.POST(request(path, { action: "assign", wallets: [owner], tier: "FCFS" }), context);
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).error, /retains 32 whitelist versions/);
+  const saved = await db.mintAccessPlan.findUniqueOrThrow({ where: { id: plan.id } });
+  assert.deepEqual(saved.config, { ...config, pendingAllowlistHistory: versions });
+});
+
 test("whitelist activation rejects reverted, foreign-wallet, foreign-contract, foreign-chain and fake-emitter receipts", async () => {
   const { access, root, state, path, context } = await managedMintFixture();
   assert.equal((await access.POST(request(path, { action: "assign", wallets: [other], tier: "ULTIMATE" }), context)).status, 200);
@@ -797,6 +863,34 @@ test("an undeployed locked roster can reduce supply without stranding its phase 
   assert.equal((await db.item.findUniqueOrThrow({ where: { id: item.id } })).maxPerWallet, 3);
 });
 
+test("only the creator can unlock an undeployed legacy schedule and replace it with one-hour mint windows", async () => {
+  const access = await import("../../app/api/items/[id]/mint-access/route");
+  const { mintTree } = await import("../../lib/mintAccess");
+  const legacy = { ultimateStart: new Date(Date.now() - 3_600_000).toISOString(), fcfsStart: new Date(Date.now() - 3_000_000).toISOString(), publicStart: new Date(Date.now() - 2_400_000).toISOString(), ultimateLimit: 1, fcfsLimit: 1, publicLimit: 2, ultimatePrice: "0", fcfsPrice: "1" };
+  const item = await nft({ mintStartTime: new Date(legacy.ultimateStart) });
+  const entries = [{ walletAddress: owner, tier: "ULTIMATE" }];
+  const root = mintTree(item.id, entries).root;
+  const plan = await db.mintAccessPlan.create({ data: { itemId: item.id, config: legacy, root, frozenAt: new Date(), entries: { create: entries } } });
+  const path = `/api/items/${item.id}/mint-access`; const context = { params: Promise.resolve({ id: item.id }) };
+  assert.equal((await access.POST(request(path, { action: "unfreeze" }, "anonymous"), context)).status, 401);
+  assert.equal((await access.POST(request(path, { action: "unfreeze" }, "other"), context)).status, 400);
+  assert.equal((await access.POST(request(path, { action: "unfreeze" }, "owner", "https://attacker.example"), context)).status, 403);
+  assert.equal((await access.POST(request(path, { action: "unfreeze" }), context)).status, 200, "an expired undeployed schedule can still be repaired");
+  const unlocked = await db.mintAccessPlan.findUniqueOrThrow({ where: { id: plan.id }, include: { entries: true } });
+  assert.equal(unlocked.root, null); assert.equal(unlocked.frozenAt, null); assert.equal(unlocked.entries.length, 1);
+  assert.ok((await db.item.findUniqueOrThrow({ where: { id: item.id } })).updatedAt > item.updatedAt, "unlock invalidates any deployment verification started with the old settings");
+  const config = { ...legacy, ultimateStart: new Date(Date.now() + 3_600_000).toISOString(), fcfsStart: new Date(Date.now() + 7_200_000).toISOString(), publicStart: new Date(Date.now() + 10_800_000).toISOString() };
+  assert.equal((await access.POST(request(path, { action: "configure", config }), context)).status, 200);
+  assert.equal((await access.POST(request(path, { action: "freeze" }), context)).status, 200);
+  const locked = await db.mintAccessPlan.findUniqueOrThrow({ where: { id: plan.id } });
+  assert.deepEqual(locked.config, config); assert.equal(locked.root, root); assert.ok(locked.frozenAt);
+  await db.item.update({ where: { id: item.id }, data: { contractAddress: contract } });
+  assert.equal((await access.POST(request(path, { action: "unfreeze" }), context)).status, 400, "deployed settings remain immutable");
+  assert.ok((await db.mintAccessPlan.findUniqueOrThrow({ where: { id: plan.id } })).frozenAt);
+  const noPlan = await nft();
+  assert.equal((await access.POST(request(`/api/items/${noPlan.id}/mint-access`, { action: "unfreeze" }), { params: Promise.resolve({ id: noPlan.id }) })).status, 400);
+});
+
 test("confirmed creator supply reduction and closure sync only verified chain values and remain retryable", async () => {
   const { access, item, state, path, context } = await managedMintFixture();
   state.totalMinted = BigInt(3); state.maxSupply = BigInt(5);
@@ -814,6 +908,19 @@ test("confirmed creator supply reduction and closure sync only verified chain va
   assert.equal((await access.POST(request(path, { action: "sync-management", txHash: closeHash }), context)).status, 200);
   saved = await db.item.findUniqueOrThrow({ where: { id: item.id } });
   assert.equal(saved.status, "CLOSED"); assert.equal(saved.mintedCount, 3);
+});
+
+test("a stale management snapshot cannot reopen a creator-closed mint using an earlier reduction receipt", async () => {
+  const { access, item, state, path, context } = await managedMintFixture();
+  await db.item.update({ where: { id: item.id }, data: { maxSupply: 5, mintedCount: 3, status: "CLOSED" } });
+  state.maxSupply = BigInt(5); state.totalMinted = BigInt(3); state.mintClosed = false;
+  const txHash = hash();
+  receipts.set(txHash, { status: "success", from: owner, to: contract, blockNumber: BigInt(999), logs: [{ address: contract, topics: encodeEventTopics({ abi: managementEvents, eventName: "MaxSupplyReduced" }), data: encodeAbiParameters([{ type: "uint256" }, { type: "uint256" }], [BigInt(10), BigInt(5)]) }] });
+  const response = await access.POST(request(path, { action: "sync-management", txHash }), context);
+  assert.equal(response.status, 503, "a provider snapshot predating closure must be retried");
+  const saved = await db.item.findUniqueOrThrow({ where: { id: item.id } });
+  assert.equal(saved.status, "CLOSED");
+  assert.equal(saved.maxSupply, 5); assert.equal(saved.mintedCount, 3);
 });
 
 test("daily discovery returns published work only and never exposes identity or delivery fields", async () => {

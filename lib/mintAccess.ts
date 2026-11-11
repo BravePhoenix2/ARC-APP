@@ -5,6 +5,7 @@ export type MintTier = "PENDING" | "ULTIMATE" | "FCFS";
 export type MintAllowlistWallet = { walletAddress: string; requestedTier: string; tier: string };
 export type PendingMintAllowlist = { root: Hex; guaranteedAllocation: number; entries: MintAllowlistWallet[] };
 export const MINT_PHASE_INTERVAL_MS = 60 * 60 * 1000;
+export const MAX_MINT_ALLOWLIST_VERSIONS = 32;
 
 /** Return only public schedule fields; private staged rosters also live in this JSON column. */
 export function publicMintConfig(value: unknown): MintPhaseConfig {
@@ -15,6 +16,17 @@ export function publicMintConfig(value: unknown): MintPhaseConfig {
 export function pendingMintAllowlist(value: unknown): PendingMintAllowlist | null {
   const pending = (value as { pendingAllowlist?: PendingMintAllowlist } | null)?.pendingAllowlist;
   return pending && typeof pending.root === "string" && /^0x[a-fA-F0-9]{64}$/.test(pending.root) && Number.isSafeInteger(pending.guaranteedAllocation) && Array.isArray(pending.entries) ? pending : null;
+}
+
+/** Retain old drafts: a creator may already have submitted one in another tab. */
+export function stagedMintAllowlists(value: unknown): PendingMintAllowlist[] {
+  const history = (value as { pendingAllowlistHistory?: unknown } | null)?.pendingAllowlistHistory;
+  const versions = new Map<string, PendingMintAllowlist>();
+  for (const draft of [...(Array.isArray(history) ? history : []), pendingMintAllowlist(value)]) {
+    const parsed = pendingMintAllowlist({ pendingAllowlist: draft });
+    if (parsed) versions.set(parsed.root.toLowerCase(), parsed);
+  }
+  return Array.from(versions.values());
 }
 
 export function validateMintConfig(value: unknown, cap: number, publicPrice: number): MintPhaseConfig {
