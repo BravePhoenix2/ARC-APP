@@ -9,9 +9,9 @@ export function useCatalogPage<T>(itemType: "NFT" | "WEB2_ART") {
   const cursors = navigation.type === itemType ? navigation.cursors : [null];
   const cursor = cursors[cursors.length - 1];
   const query = useQuery({
-    queryKey: ["catalog-page", itemType, cursor],
+    queryKey: ["catalog-page", "cards", itemType, cursor],
     queryFn: async ({ signal }): Promise<{ items: T[]; nextCursor: string | null }> => {
-      const params = new URLSearchParams({ itemType });
+      const params = new URLSearchParams({ itemType, view: "cards" });
       if (cursor) params.set("cursor", cursor);
       const response = await fetch(`/api/items?${params}`, { signal });
       if (!response.ok) throw new Error("Items could not be loaded. Please try again.");

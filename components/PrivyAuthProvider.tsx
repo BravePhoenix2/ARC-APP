@@ -196,14 +196,19 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
         // Let that response finish before a fresh sign-in writes its cookie.
         await abortable(pendingRevocation.current?.catch(() => undefined) ?? Promise.resolve(), controller.signal);
         if (!isCurrent()) return false;
-        const accessToken = await abortable(tokenGetter.current(), controller.signal);
-        if (!isCurrent()) return false;
-        if (!accessToken) {
-          invalidSession = true;
-          throw new Error("Your sign-in has expired. Sign out and sign in again.");
-        }
-        const identityToken = identityProof ??
-          (await abortable(getIdentityToken().catch(() => null), controller.signal) ?? observedIdentityTokenRef.current);
+        // The SDK reads are independent. Start both together so refreshing
+        // one token cannot delay obtaining the other before verification.
+        const [accessToken, identityToken] = await Promise.all([
+          abortable(tokenGetter.current(), controller.signal).then((token) => {
+            if (!token) {
+              invalidSession = true;
+              throw new Error("Your sign-in has expired. Sign out and sign in again.");
+            }
+            return token;
+          }),
+          identityProof ? Promise.resolve(identityProof) :
+            abortable(getIdentityToken().catch(() => null), controller.signal).then((token) => token ?? observedIdentityTokenRef.current),
+        ]);
         if (!isCurrent()) return false;
         lastSubmittedIdentityToken.current = identityToken;
         // A missing identity token is supported by the server's authenticated
@@ -272,6 +277,8 @@ export default function PrivyAuthProvider({ children }: { children: ReactNode })
         return false;
       } finally {
         window.clearTimeout(deadline);
+        // Release a sibling SDK read if the other token failed first.
+        controller.abort();
         if (version === generation.current && mounted.current) {
           pending.current = null;
           setIsSyncing(false);

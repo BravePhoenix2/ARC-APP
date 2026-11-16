@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/lib/generated/prisma/client";
 import { catalogPagination, catalogCursor } from "@/lib/catalogPagination";
-import { publicCatalogSelect, publicItemWhere } from "@/lib/publicCatalog";
+import { publicCatalogCardSelect, publicItemWhere } from "@/lib/publicCatalog";
 import { isNftKind } from "@/lib/nftTypes";
 import { catalogAvailability, catalogStatusWhere } from "@/lib/catalogAvailability";
 
@@ -19,7 +19,10 @@ async function handleGET(request: NextRequest) {
   const category = params.get("category");
   const creatorWallet = params.get("creator");
   const nftKind = params.get("nftKind");
+  const view = params.get("view");
   const now = new Date();
+
+  if (view && view !== "cards") return NextResponse.json({ error: "view must be cards when specified." }, { status: 400 });
 
   if (itemType && itemType !== "NFT" && itemType !== "WEB2_ART") {
     return NextResponse.json({ error: "itemType must be NFT or WEB2_ART" }, { status: 400 });
@@ -47,7 +50,10 @@ async function handleGET(request: NextRequest) {
       { createdAt: { lt: after.createdAt } },
       { createdAt: after.createdAt, id: { lt: after.id } },
     ] }] } : where,
-    select: { ...publicCatalogSelect, nftKind: true, maxSupply: true, mintedCount: true, contractAddress: true, creationMethod: true, creatorId: true, symbol: true, maxPerWallet: true, royaltyBps: true, metadataUri: true, attributes: true },
+    select: view === "cards" ? publicCatalogCardSelect : {
+      ...publicCatalogCardSelect,
+      creatorId: true, symbol: true, maxPerWallet: true, royaltyBps: true, metadataUri: true, attributes: true,
+    },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: limit + 1,
   });

@@ -174,6 +174,36 @@ async function fireTimer(timer: { callback: () => void; active: boolean }) {
 }
 function retryTimer() { return timers.find((timer) => timer.active && timer.delay >= 2_000 && timer.delay < 5_000); }
 
+test("access and identity token reads run concurrently before server verification", async () => {
+  const access = deferred<string>();
+  const identity = deferred<string>();
+  let identityReads = 0;
+  accessToken = () => access.promise;
+  identityToken = () => { identityReads++; return identity.promise; };
+  responses.push(success());
+  await render();
+  assert.equal(identityReads, 1, "identity retrieval starts while the access token is pending");
+  assert.equal(postCount, 0);
+  await act(async () => { identity.resolve("concurrent-identity"); });
+  assert.equal(postCount, 0, "server verification waits for the access token");
+  await act(async () => { access.resolve("concurrent-access"); });
+  assert.equal(postCount, 1);
+  assert.equal(postedBodies[0].accessToken, "concurrent-access");
+  assert.equal(postedBodies[0].identityToken, "concurrent-identity");
+  assert.equal(session.authenticated, true);
+});
+
+test("a missing access token fails immediately even if the identity token read stalls", async () => {
+  accessToken = async () => null;
+  identityToken = () => new Promise(() => {});
+  await render();
+  assert.equal(postCount, 0);
+  assert.equal(session.isSyncing, false);
+  assert.equal(session.authenticated, false);
+  assert.match(session.error!, /sign-in has expired/);
+  assert.equal(timers.some((timer) => timer.active), false);
+});
+
 test("a stalled SDK token read times out, releases loading and ignores late credentials", async () => {
   const token = deferred<string>();
   accessToken = () => token.promise;

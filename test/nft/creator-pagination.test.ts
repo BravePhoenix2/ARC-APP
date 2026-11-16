@@ -122,6 +122,36 @@ test("creator input rejects unbounded limits, malformed cursors and oversized se
   assert.equal((await page("", "a".repeat(201))).status, 404);
 });
 
+test("catalog cards omit deployment metadata while retaining the same works and launch data", async () => {
+  const catalog = await import("../../app/api/items/route");
+  await db.item.update({ where: { id: "creator_work_000" }, data: {
+    nftKind: "COLLECTIBLE", creationMethod: "AI_ASSISTED", symbol: "NIA", maxSupply: 100, mintedCount: 2,
+    maxPerWallet: 3, royaltyBps: 500, metadataUri: "https://example.invalid/metadata.json",
+    attributes: Array.from({ length: 20 }, (_, index) => ({ trait_type: `Trait ${index}`, value: "A".repeat(120) })),
+  } });
+  const url = `http://localhost:3000/api/items?itemType=NFT&creator=${wallet}&limit=100`;
+  const fullResponse = await catalog.GET(new NextRequest(url));
+  const cardsResponse = await catalog.GET(new NextRequest(`${url}&view=cards`));
+  assert.equal(fullResponse.status, 200);
+  assert.equal(cardsResponse.status, 200);
+  const full = await fullResponse.json();
+  const cards = await cardsResponse.json();
+  assert.equal(cards.nextCursor, full.nextCursor);
+  assert.deepEqual(cards.items.map((item: { id: string }) => item.id), full.items.map((item: { id: string }) => item.id));
+  const fullItem = full.items.find((item: { id: string }) => item.id === "creator_work_000");
+  const cardItem = cards.items.find((item: { id: string }) => item.id === "creator_work_000");
+  assert.equal(fullItem.attributes.length, 20, "existing API consumers keep collection metadata");
+  assert.equal(fullItem.symbol, "NIA");
+  assert.equal(cardItem.attributes, undefined);
+  assert.equal(cardItem.metadataUri, undefined);
+  assert.equal(cardItem.symbol, undefined);
+  for (const field of ["nftKind", "creationMethod", "maxSupply", "mintedCount", "contractAddress", "status", "mintStartTime", "creator"]) {
+    assert.deepEqual(cardItem[field], fullItem[field], `${field} remains available to cards`);
+  }
+  assert.ok(JSON.stringify(cards).length < JSON.stringify(full).length - 3_000, "card responses avoid transferring unused trait data");
+  assert.equal((await catalog.GET(new NextRequest(`${url}&view=unsupported`))).status, 400);
+});
+
 test("historical NFT imports stay out of public discovery, watchlists, images and mint-access reads", async () => {
   const [catalog, discovery, trending, watchlist, toggle, image, access] = await Promise.all([
     import("../../app/api/items/route"), import("../../app/api/discovery/route"), import("../../app/api/trending/route"),

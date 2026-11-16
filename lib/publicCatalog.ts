@@ -12,3 +12,9 @@ export const publicCatalogSelect = {
   createdAt: true, mintStartTime: true, rarities: true, contractAddress: true,
   creator: { select: { id: true, username: true, walletAddress: true } },
 } as const;
+
+/** Cards need launch/supply data, but not the collection's deployment metadata. */
+export const publicCatalogCardSelect = {
+  ...publicCatalogSelect,
+  nftKind: true, maxSupply: true, mintedCount: true, creationMethod: true,
+} as const;
