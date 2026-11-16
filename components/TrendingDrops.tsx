@@ -31,7 +31,7 @@ export default function TrendingDrops() {
   return <div className="mt-10 grid grid-cols-2 gap-4 border-t border-[var(--border-soft)] pt-10 sm:gap-6 lg:mt-14 lg:grid-cols-4 lg:pt-14">
     {query.data.items.map((item) => <Link key={item.id} href={`/nfts/${encodeURIComponent(item.id)}`} prefetch={false} className="gallery-card overflow-hidden bg-[var(--card-bg)]">
       <div className="gallery-card-media relative aspect-square bg-[var(--chip-bg)]">
-        {item.imageUrl ? <Image src={item.imageUrl} alt={item.title} fill unoptimized sizes="(min-width: 1024px) 25vw, 50vw" className="object-cover" /> : <div className="flex h-full items-center justify-center text-sm text-[var(--muted-text)]">NFT collection</div>}
+        {item.imageUrl ? <Image src={item.imageUrl} alt={item.title} fill unoptimized={!item.imageUrl.startsWith("/api/uploads/")} sizes="(min-width: 1024px) 25vw, 50vw" className="object-cover" /> : <div className="flex h-full items-center justify-center text-sm text-[var(--muted-text)]">NFT collection</div>}
         {item.status && <span className="absolute left-3 top-3 rounded bg-white/90 px-2 py-0.5 font-mono text-[10px] font-semibold tracking-[0.05em] text-[#362A67]">{item.status.replaceAll("_", " ")}</span>}
       </div>
       <div className="p-4"><p className="text-sm font-semibold text-[var(--page-text)]">{item.title}</p></div>

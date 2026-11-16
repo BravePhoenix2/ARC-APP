@@ -1,9 +1,15 @@
 import "./globals.css";
 import type { Metadata, Viewport } from "next";
-import { Raleway } from "next/font/google";
+import localFont from "next/font/local";
 import Providers from "./providers";
 
-const raleway = Raleway({ subsets: ["latin"], display: "swap", variable: "--font-raleway" });
+const raleway = localFont({
+  src: "./fonts/raleway-latin.woff2",
+  weight: "100 900",
+  style: "normal",
+  display: "swap",
+  variable: "--font-raleway",
+});
 
 export const metadata: Metadata = {
   title: "Artic",

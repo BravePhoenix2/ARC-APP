@@ -72,7 +72,7 @@ function ItemCard({ item }: { item: MarketplaceItem }) {
     <div className="relative"><div className="absolute right-3 top-3 z-20"><WatchlistButton itemId={item.id} compact /></div><Link prefetch={false} href={isNft ? `/nfts/${item.id}` : `/art/${item.id}`} className="gallery-card block cursor-pointer overflow-hidden focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#b55fbe]">
       <div className="gallery-card-media relative aspect-square bg-[var(--chip-bg)]">
         {item.imageUrl ? (
-          <Image src={item.imageUrl} alt={item.title} fill unoptimized sizes="(min-width: 1280px) 22vw, (min-width: 640px) 30vw, 45vw" className="object-cover" />
+          <Image src={item.imageUrl} alt={item.title} fill unoptimized={!item.imageUrl.startsWith("/api/uploads/")} sizes="(min-width: 1280px) 22vw, (min-width: 640px) 30vw, 45vw" className="object-cover" />
         ) : (
           <div className="art-placeholder absolute inset-0">
             <span className="art-placeholder-shape" aria-hidden="true" />
